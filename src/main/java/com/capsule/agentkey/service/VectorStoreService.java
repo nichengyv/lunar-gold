@@ -1,18 +1,41 @@
 package com.capsule.agentkey.service;
 
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * 基于 PostgreSQL + pgvector 的向量存储实现（替代原"内存 Map + JSON 快照"方案）。
+ *
+ * 为什么放弃内存存储：
+ * 1. 应用重启即丢向量（快照只是补救措施），数据库元数据显示"可用"但检索为空
+ * 2. 无法水平扩展：多实例部署时各实例内存中的向量互不一致
+ * 3. 向量与业务表同库后，删除文档时元数据与向量在同一事务中删除，杜绝脏数据
+ *
+ * 检索原理：
+ * - embedding <=> ? 是 pgvector 的余弦距离运算符（0=方向完全相同，2=完全相反）
+ * - 用 1 - 距离 转换成相似度 score（1=完全相同，-1=完全相反），与原内存版
+ *   cosineSimilarity 的取值语义一致，调用方无感知
+ * - 建表 SQL：CREATE TABLE vector_record (..., embedding vector(1024), ...)，
+ *   并建 HNSW 索引 CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)
+ */
 @Service
 @Slf4j
 public class VectorStoreService {
 
-    //存入内存的数据本体
+    // JdbcTemplate 由 Spring 根据 datasource 自动装配，用于执行带 pgvector 专有运算符的原生 SQL
+    private final JdbcTemplate jdbc;
+
+    public VectorStoreService(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    //存入内存的数据本体（对外数据结构保持不变，调用方无需修改）
     public record VectorRecord(
             Long chunkId,//切片编号
             Long documentId,//所属文档id
@@ -28,7 +51,6 @@ public class VectorStoreService {
     }
 
     //检索之后对外返回结果
-    //record类型让编译器为类里变量自动生成包含这些字段，构造器，getter，setter，equal，hashcode，tostring方法的类
     public record SearchResult(
             Long chunkId,
             Long documentId,
@@ -36,94 +58,98 @@ public class VectorStoreService {
             float score//余弦相似度计算结果
     ) {}
 
-    //内存存储容器    k-用户id  v-该用户全部切片向量集合（因为是内存存储，所以当服务器重启，就会全部清空）
-    private final Map<Long, List<VectorRecord>> userVectors = new ConcurrentHashMap<>();
-
-    @PostConstruct
-    public void init() {
-        log.info("✅ 内存向量存储引擎已启动（生产环境建议迁移至 pgvector）");
-    }
-
-    //把新向量记录r，归类存放进对应用户列表
+    //把新向量记录r，批量写入 vector_record 表
     public void addVectors(List<VectorRecord> records) {
-        for (VectorRecord r : records) {//遍历recrds，对于每条r，获取其userid
-            //k代表key字段，也就是这里的r.userid。根据这里的方法，取去map查找，若k不存在，则返回后面的代码
-            // ——也就是创建新list。若存在，则什么都不做，直接把当前的VectorRecord，add进现有的user的map
-            userVectors.computeIfAbsent(r.userId(), k -> new ArrayList<>()).add(r);
-        }
+        if (records == null || records.isEmpty()) return;
+
+        // ?::vector 是 PostgreSQL 的类型强转语法：把参数从文本转成 vector 类型。
+        // float[] 先序列化成 pgvector 的文本格式 "[0.1,0.2,...]"，入库时由 PG 解析
+        String sql = """
+                INSERT INTO vector_record (user_id, document_id, chunk_id, content, source_type, embedding)
+                VALUES (?, ?, ?, ?, ?, ?::vector)
+                """;
+        jdbc.batchUpdate(sql, records, records.size(), (ps, r) -> {
+            ps.setLong(1, r.userId());
+            ps.setLong(2, r.documentId());
+            ps.setObject(3, r.chunkId());//chunkId 允许为 null
+            ps.setString(4, r.content());
+            ps.setString(5, r.sourceType());
+            ps.setString(6, toVectorLiteral(r.vector()));
+        });
+        log.info("✅ {} 条向量已写入 PostgreSQL", records.size());
     }
 
     public void deleteByDocumentId(Long userId, Long documentId) {
         deleteByDocumentId(userId, documentId, "knowledge");
     }
 
+    //删除指定文档的全部向量。向量与业务表同库后，调用方可把此删除与文档元数据删除放在同一事务中
     public void deleteByDocumentId(Long userId, Long documentId, String sourceType) {
-        List<VectorRecord> list = userVectors.get(userId);
-        if (list != null) {
-            list.removeIf(r -> r.documentId().equals(documentId) && r.sourceType().equals(sourceType));
-        }
+        jdbc.update("DELETE FROM vector_record WHERE user_id = ? AND document_id = ? AND source_type = ?",
+                userId, documentId, sourceType);
     }
 
     public void deleteByUserId(Long userId) {
-        userVectors.remove(userId);
+        jdbc.update("DELETE FROM vector_record WHERE user_id = ?", userId);
     }
 
     public List<SearchResult> search(Long userId, float[] queryVec, int topK) {
         return search(userId, queryVec, topK, null, null);
     }
 
+    //余弦相似度检索：由 pgvector 的 HNSW 索引加速，替代原内存版的 O(N) 暴力扫描
     public List<SearchResult> search(Long userId, float[] queryVec, int topK,
                                      Long documentId, String sourceType) {
-        //getOrDefault（参数，兜底默认值），根据参数在map里查找对应数据，没有就返回后面的默认值
-        List<VectorRecord> candidates = userVectors.getOrDefault(userId, Collections.emptyList());
-        if (candidates.isEmpty() || queryVec == null || queryVec.length == 0) {
-            return Collections.emptyList();
-        }
+        if (queryVec == null || queryVec.length == 0) return Collections.emptyList();
 
-        //流式处理
-        return candidates.stream()
-                //filter，保留括号内为判断真的参数   变量->条件
-                //若documentId不为空，则检索该文档，null则检索该用户全部文档
-                //若sourcetype不为空，则限定数据类型，null则不限定
-                .filter(r -> (documentId == null || r.documentId().equals(documentId))
-                        && (sourceType == null || r.sourceType().equals(sourceType)))
-                //map（原对象->新对象）
-                .map(r -> {
-                    //cosineSimilarity拿查询向量quervec和当前向量做计算，计算余弦相似度，算出分数存入score
-                    float score = cosineSimilarity(queryVec, r.vector());
-                    //这里新建Search并返回，所以从这里开始数据的类型换了
-                    return new SearchResult(r.chunkId(), r.documentId(), r.content(), score);
-                })
-                .filter(r -> r.score() > 0.5f)//相似度阈值过滤：分数小于等于0.5直接丢弃
-                .sorted((a, b) -> Float.compare(b.score(), a.score()))//排序：从高到低，相似度降序
-                .limit(topK)//截取前topk条
-                .collect(Collectors.toList());//收集封装成list返回
+        //动态拼接过滤条件：documentId / sourceType 为 null 时不限定（对应原内存版的 filter 逻辑）
+        StringBuilder sql = new StringBuilder("""
+                SELECT chunk_id, document_id, content,
+                       1 - (embedding <=> CAST(? AS vector)) AS score
+                FROM vector_record
+                WHERE user_id = ?
+                """);
+        List<Object> params = new ArrayList<>();
+        params.add(toVectorLiteral(queryVec));//查询向量同样以文本形式传入并强转
+        params.add(userId);
+        if (documentId != null) {
+            sql.append(" AND document_id = ?");
+            params.add(documentId);
+        }
+        if (sourceType != null) {
+            sql.append(" AND source_type = ?");
+            params.add(sourceType);
+        }
+        //按相似度从高到低取前 topK 条（score 是 SELECT 别名，PG 支持按别名排序）
+        sql.append(" ORDER BY score DESC LIMIT ?");
+        params.add(topK);
+
+        return jdbc.query(sql.toString(), (rs, i) -> new SearchResult(
+                        rs.getObject("chunk_id", Long.class),
+                        rs.getLong("document_id"),
+                        rs.getString("content"),
+                        rs.getFloat("score")),
+                params.toArray())
+                .stream()
+                //相似度阈值过滤：分数小于等于0.3直接丢弃（语义检索阈值不宜过高，否则相关但表述不同的内容会被误杀）
+                .filter(r -> r.score() > 0.3f)
+                .collect(Collectors.toList());
     }
 
     public int countByDocumentId(Long userId, Long documentId) {
-        List<VectorRecord> list = userVectors.get(userId);
-        if (list == null) return 0;
-        return (int) list.stream()
-                .filter(r -> r.documentId().equals(documentId))
-                .count();
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM vector_record WHERE user_id = ? AND document_id = ?",
+                Integer.class, userId, documentId);
+        return count != null ? count : 0;
     }
 
-    //计算相似度score
-    //参数a是提问向量，参数b是文档切片向量r.vector
-    private float cosineSimilarity(float[] a, float[] b) {
-        if (a.length != b.length) return 0f;//校验两向量维度是否不一样，若不一样，则返回相似度：0（必须是同一个Embedding模型生成的，维度才会相等）
-        //dot：点积，分子   normA：向量a各项平方累加   normB：同a
-        //循环遍历向量每一位，对应位置相乘累加，求出点积
-        //normA，B：各自分量平方求和
-        float dot = 0f, normA = 0f, normB = 0f;
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
+    //把 float[] 序列化成 pgvector 的文本格式 "[0.1,0.2,...]"（入库与查询都用这个格式）
+    private String toVectorLiteral(float[] vector) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < vector.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(vector[i]);
         }
-        //若向量全是0，无有效数据，返回相似度0，防止除0报错
-        if (normA == 0 || normB == 0) return 0f;
-        //余弦公式  点积/两向量模长乘积  返回值范围-1~1，业务上只关系0~1，靠近1则语义相似
-        return dot / (float) (Math.sqrt(normA) * Math.sqrt(normB));
+        return sb.append(']').toString();
     }
 }

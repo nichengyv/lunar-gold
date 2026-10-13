@@ -2,12 +2,12 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
-    # 【本地开发】useSSL=false，避免证书问题；生产环境改为 true
-    url: ${DB_URL:jdbc:mysql://localhost:3306/agentkey?useSSL=false&serverTimezone=UTC&characterEncoding=UTF-8&allowPublicKeyRetrieval=true}
-    username: ${DB_USERNAME:root}
-    # 【本地开发】默认密码 123456；生产环境通过环境变量注入
-    password: ${DB_PASSWORD:123456}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 【统一 PostgreSQL】业务表 + 向量表（pgvector）同库；容器端口 5433（避开本机原有 PG 的 5432）
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/agentkey_vector}
+    username: ${DB_USERNAME:postgres}
+    # 【本地开发】密码为创建 pgvector 容器时 POSTGRES_PASSWORD 设置的值，dev 配置里填写
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -20,9 +20,11 @@ spring:
     show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
   flyway:
-    enabled: true
+    # 注意：db/migration 下的存量脚本是 MySQL 方言写的，PG 环境暂不执行 Flyway，
+    # 表结构由 dev 环境的 ddl-auto=update 自动生成；后续可将脚本改写为 PG 方言再启用
+    enabled: false
     locations: classpath:db/migration
     baseline-on-migrate: true
   redis:
@@ -40,6 +42,15 @@ spring:
 deepseek:
   api:
     url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+
+# Embedding 服务配置（RAG 向量化）
+# 注意：DeepSeek 不提供 Embedding 端点，这里默认使用硅基流动 SiliconFlow（兼容 OpenAI 格式，国内可直连）
+# embedding.api.key 为全局兜底密钥；优先使用用户在「API Keys」页配置的 provider=SILICONFLOW 的密钥
+embedding:
+  api:
+    url: ${EMBEDDING_API_URL:https://api.siliconflow.cn/v1/embeddings}
+    key: ${EMBEDDING_API_KEY:}
+  model: ${EMBEDDING_MODEL:BAAI/bge-m3}
 
 app:
   jwt:

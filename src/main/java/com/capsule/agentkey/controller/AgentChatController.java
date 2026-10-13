@@ -99,6 +99,16 @@ public class AgentChatController {
             }
         }
 
+        // 先加载历史（此时还不包含当前这条用户消息），再保存当前消息
+        // 否则历史里已含当前消息，buildMessages 又会追加一次 userPrompt → 大模型看到重复两遍的用户消息
+        List<ChatMessage> history;
+        try {
+            history = chatService.getHistory(chatSessionId, userId);
+        } catch (Exception e) {
+            log.error("加载历史消息失败", e);
+            history = null;
+        }
+
         try {
             String msgContent = (prompt != null && !prompt.isEmpty()) ? prompt : "[文件提问]";
             //保存用户消息到数据库
@@ -113,7 +123,6 @@ public class AgentChatController {
 
         try {
             String realApiKey = apiKeyService.getDecryptedKey(userId, "DEEPSEEK");
-            List<ChatMessage> history = chatService.getHistory(chatSessionId, userId);
 
             OutputStream out = response.getOutputStream();
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);

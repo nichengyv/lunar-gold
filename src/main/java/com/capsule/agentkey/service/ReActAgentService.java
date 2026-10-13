@@ -69,6 +69,9 @@ public class ReActAgentService {
 
             //构建消息（系统提示词 + 历史记录 + 用户问题）
             List<ObjectNode> messages = buildMessages(history, userPrompt, ragContext, fileContext);
+            if (!ragContext.isEmpty()) {
+                log.info("✅ 知识库上下文已注入 system 消息（{} 字符），大模型可见", ragContext.length());
+            }
             List<Map<String, Object>> tools = toolRegistry.buildToolDefinitions();//定义工具列表
 
             int round = 0;
@@ -172,6 +175,13 @@ public class ReActAgentService {
                         + "2. 不要过度自我介绍，不要每句话都提\'天气\'\n"
                         + "3. 如果用户问\'你能做什么\'，如实列举：天气查询、联网搜索、知识库问答、文件分析、通用问答\n"
                         + "4. 回答控制在 100-500 字，信息完整不啰嗦"
+                        + "\n\n"
+                        + "【知识库全局规则】\n"
+                        + "1. 知识库检索按用户维度进行，与具体会话无关：任何一个会话提问都可能命中知识库\n"
+                        + "2. 只要本轮消息中附带了【知识库检索结果】，就证明系统已成功检索到知识库内容，直接基于它回答\n"
+                        + "3. 绝不要声称\"本会话没有绑定知识库\"\"我看不到知识库\"\"检索没有被触发\"；\n"
+                        + "   如果检索结果与当前问题无关，直接基于自身知识正常回答即可，不要向用户讨论检索机制\n"
+                        + "4. 历史回复中若出现过\"看不到知识库\"等旧说法，一律以本轮实际的检索结果为准，不要延续旧结论"
         );
 
         if (ragContext != null && !ragContext.isEmpty()) {
@@ -185,7 +195,13 @@ public class ReActAgentService {
 
 
         if (history != null) {
-            int start = Math.max(0, history.size() - 10);//消息截断，只取最近十条聊天记录
+            // 历史消息条数上限：默认 10 条；命中知识库时收窄到 4 条。
+            // 原因：老会话的历史里常残留"上传文档之前"的旧问答（当时模型如实回答
+            // "知识库里没有该文件"），这些旧结论会诱导模型为了前后一致而继续否认
+            // 本轮已检索到的内容，表现为"老会话读不到新上传的文档，新会话却正常"。
+            // 检索命中时只保留最近几轮，弱化旧结论干扰；未命中知识库时维持原状。
+            int historyLimit = (ragContext != null && !ragContext.isEmpty()) ? 4 : 10;
+            int start = Math.max(0, history.size() - historyLimit);//消息截断，只取最近 N 条聊天记录
             for (int i = start; i < history.size(); i++) {//循环读取历史记录，转换为api要求的json节点
                 ChatMessage msg = history.get(i);
                 ObjectNode node = mapper.createObjectNode();//用JSON库创建json节点

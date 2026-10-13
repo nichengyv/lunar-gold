@@ -19,7 +19,10 @@ class App {
         this.sessions = [];
         this.isRegisterMode = false;
         this.activeToolWrappers = new Map();
-        this.useRag = localStorage.getItem('useRag') === 'true';
+        // RAG 知识库检索开关：默认开启（只有用户明确关过一次，localStorage 存了 'false' 才关闭）
+        // 之前用 === 'true' 判断导致默认关闭：换浏览器/清缓存后 RAG 静默失效，
+        // 表现为"部分会话能读到知识库、部分读不到"。统一默认开启，保证所有会话行为一致。
+        this.useRag = localStorage.getItem('useRag') !== 'false';
 
         // 改为存对象 {id, fileName}，方便恢复 UI 和去重
         this.pendingAttachments = [];

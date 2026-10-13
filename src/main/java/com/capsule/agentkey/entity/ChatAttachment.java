@@ -37,7 +37,8 @@ public class ChatAttachment {
     @Column(nullable = false, length = 500)
     private String storagePath;
 
-    @Column(columnDefinition = "LONGTEXT")
+    // TEXT 在 MySQL/PostgreSQL 中均为合法类型（LONGTEXT 是 MySQL 专有，统一 PG 后不可用）
+    @Column(columnDefinition = "TEXT")
     private String contentText;
 
     @Column(length = 500)
