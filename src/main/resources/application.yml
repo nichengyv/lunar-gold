@@ -21,9 +21,12 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        # 实体 @Table(name="user") 中的 user 是 PG/ANSI 保留字，
+        # 开启后 Hibernate 生成 SQL 时自动加引号，与迁移脚本中的 "user" 保持一致
+        auto_quote_keyword: true
   flyway:
-    # 注意：db/migration 下的存量脚本是 MySQL 方言写的，PG 环境暂不执行 Flyway，
-    # 表结构由 dev 环境的 ddl-auto=update 自动生成；后续可将脚本改写为 PG 方言再启用
+    # V1/V2 已改写为 PostgreSQL 方言；dev 保持 ddl-auto=update（flyway 关闭），
+    # prod 为 flyway+validate（见 application-prod.yml）
     enabled: false
     locations: classpath:db/migration
     baseline-on-migrate: true

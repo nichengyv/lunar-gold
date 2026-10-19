@@ -4,6 +4,8 @@ import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.LoginRequest;
 import com.capsule.agentkey.dto.RegisterRequest;
 import com.capsule.agentkey.exception.BusinessException;
+import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.service.LoginAttemptService;
 import com.capsule.agentkey.service.UserService;
 import com.capsule.agentkey.util.JwtUtil;
 import com.capsule.agentkey.util.RsaUtil;
@@ -24,11 +26,14 @@ public class AuthController {
     private final UserService userService;
     private final JwtUtil jwtUtil;
     private final RsaUtil rsaUtil;
+    private final LoginAttemptService loginAttemptService;
 
-    public AuthController(UserService userService, JwtUtil jwtUtil, RsaUtil rsaUtil) {
+    public AuthController(UserService userService, JwtUtil jwtUtil, RsaUtil rsaUtil,
+                          LoginAttemptService loginAttemptService) {
         this.userService = userService;
         this.jwtUtil = jwtUtil;
         this.rsaUtil = rsaUtil;
+        this.loginAttemptService = loginAttemptService;
     }
 
     //接口1：获取公钥
@@ -48,14 +53,21 @@ public class AuthController {
     //登录
     @PostMapping("/login")
     //RequestBody注解，自动读取body，根据字段名，在自动把它转换为LoginRequest对象
+    //valid搭配实体类里的notblank验证对象字段是否为空     @RequestBody读取http请求体里的json字符串，自动反序列化为java对象
     public ApiResponse<Map<String, String>> login(@Valid @RequestBody LoginRequest req) throws Exception {
+        //A7 防爆破：连续失败 5 次锁定 15 分钟，锁定期间直接拒绝，不校验密码
+        if (loginAttemptService.isLocked(req.getUsername())) {
+            throw new BusinessException(ErrorCode.RATE_LIMITED, "登录尝试次数过多，请15分钟后再试");
+        }
         String realPassword = rsaUtil.decryptPassword(req.getEncryptedPassword());//解码
         var user = userService.findByUsername(req.getUsername())//var通过右边返回值来推断左边变量的类型
                 .orElseThrow(() -> new BusinessException("用户不存在或密码错误"));//orElseThrow的作用：前面查找之后，有值则返回，无值则抛异常
         //realPassword就是解码出来的密码，后者是数据库存的密码哈希值，checkPassword就是拿明文和哈希对比
         if (!userService.checkPassword(realPassword, user.getPasswordHash())) {
+            loginAttemptService.onFailure(req.getUsername());//失败计数，达 5 次触发锁定
             throw new BusinessException("用户不存在或密码错误");
         }
+        loginAttemptService.onSuccess(req.getUsername());//成功即清空失败记录
         String token = jwtUtil.generateToken(user.getId(), user.getUsername());//生成JWT令牌放进token字段
         return ApiResponse.success(Map.of("token", token));//把JWT令牌返回给前端，Map.of创建不可变的Map集合
     }

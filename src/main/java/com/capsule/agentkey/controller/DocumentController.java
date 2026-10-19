@@ -1,6 +1,7 @@
 package com.capsule.agentkey.controller;
 
 import com.capsule.agentkey.dto.ApiResponse;
+import com.capsule.agentkey.dto.DocumentSummary;
 import com.capsule.agentkey.entity.Document;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.service.DocumentService;
@@ -38,7 +39,7 @@ public class DocumentController {
      */
     @PostMapping("/upload")
     public ApiResponse<Map<String, Object>> upload(
-            @RequestParam("file") MultipartFile file,//找字段名是file的值并放入这里的对象
+            @RequestParam("file") MultipartFile file,//绑定表单里字段名为file的文件数据到这个变量
             @RequestParam(value = "description", required = false) String description) throws Exception {
         Long userId = getCurrentUserId();
         Document doc = documentService.upload(userId, file, description);
@@ -52,10 +53,12 @@ public class DocumentController {
 
     /**
      * 列出用户的所有文档
+     * 返回 DocumentSummary 而非实体：隐藏 storagePath 等服务器内部信息
      */
     @GetMapping("/documents")
-    public ApiResponse<List<Document>> listDocuments() {
-        return ApiResponse.success(documentService.listByUserId(getCurrentUserId()));
+    public ApiResponse<List<DocumentSummary>> listDocuments() {
+        return ApiResponse.success(documentService.listByUserId(getCurrentUserId())
+                .stream().map(DocumentSummary::from).toList());
     }
 
     /**

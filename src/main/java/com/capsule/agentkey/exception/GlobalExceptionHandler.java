@@ -8,10 +8,19 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.io.IOException;
 import java.util.stream.Collectors;
 
+/**
+ * 全局异常处理器：把异常统一翻译成"HTTP 状态 + 统一信封"。
+ *
+ * 职责边界：Controller / Service 只负责抛异常，不决定状态码；
+ * 状态码的唯一来源是 ErrorCode，因此本类内不出现 400/403/500 等字面量。
+ */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
@@ -21,47 +30,58 @@ public class GlobalExceptionHandler {
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
                 .collect(Collectors.joining(", "));
-        return ResponseEntity.badRequest().body(ApiResponse.fail(400, msg));
+        return build(ErrorCode.PARAM_INVALID, msg);
     }
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException e) {
-        return ResponseEntity.badRequest().body(ApiResponse.fail(e.getCode(), e.getMessage()));
+        //状态码来自异常自带的 ErrorCode，而不是固定 400，业务语义得以保留
+        return build(e.getErrorCode(), e.getMessage());
     }
 
     @ExceptionHandler({AuthenticationException.class, AccessDeniedException.class})
     public ResponseEntity<ApiResponse<Void>> handleAuth(Exception e) {
         log.warn("权限异常: {}", e.getMessage());
-        return ResponseEntity.status(403).body(ApiResponse.fail(403, "无权访问"));
+        return build(ErrorCode.FORBIDDEN, "无权访问");
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
-        return ResponseEntity.status(404).body(ApiResponse.fail(404, "资源不存在"));
+        return build(ErrorCode.NOT_FOUND, null);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
         log.error("系统异常", e);
-        return ResponseEntity.status(500).body(ApiResponse.fail(500, "系统繁忙，请稍后重试"));
+        return build(ErrorCode.INTERNAL_ERROR, null);
     }
-    @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMultipart(org.springframework.web.multipart.MultipartException e) {
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMultipart(MultipartException e) {
         log.warn("文件上传协议异常: {}", e.getMessage());
-        return ResponseEntity.status(400).body(ApiResponse.fail(400, "文件上传格式错误或文件过大"));
+        return build(ErrorCode.UPLOAD_PROTOCOL_ERROR, "文件上传格式错误或文件过大");
     }
 
-    @ExceptionHandler(java.io.IOException.class)
-    public ResponseEntity<ApiResponse<Void>> handleIOException(java.io.IOException e) {
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIOException(IOException e) {
         log.error("IO 异常", e);
-        return ResponseEntity.status(500).body(ApiResponse.fail(500, "文件读写失败: " + e.getMessage()));
-    }
-    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMaxSize(
-            org.springframework.web.multipart.MaxUploadSizeExceededException e) {
-        log.warn("文件大小超过限制: {}", e.getMessage());
-        return ResponseEntity.status(413).body(ApiResponse.fail(413,
-                "文件过大，请上传不超过 20MB 的文件"));
+        return build(ErrorCode.IO_ERROR, "文件读写失败: " + e.getMessage());
     }
 
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxSize(MaxUploadSizeExceededException e) {
+        log.warn("文件大小超过限制: {}", e.getMessage());
+        return build(ErrorCode.PAYLOAD_TOO_LARGE, "文件过大，请上传不超过 20MB 的文件");
+    }
+
+    /**
+     * 本类唯一的响应构造出口。
+     * HTTP 状态与响应体 code 都取自同一个 ErrorCode，机制上保证二者不可能不一致；
+     * message 为 null 时回退到错误码默认文案。
+     */
+    private ResponseEntity<ApiResponse<Void>> build(ErrorCode errorCode, String message) {
+        String msg = (message == null || message.isBlank()) ? errorCode.getDefaultMessage() : message;
+        return ResponseEntity.status(errorCode.getHttpStatus())
+                .body(ApiResponse.fail(errorCode, msg));
+    }
 }

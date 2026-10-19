@@ -130,7 +130,15 @@ public class ReActAgentService {
                 round++;
             }
 
-            callback.onChunk("\n\n（思考轮次过多，基于已有信息给出最佳回答）");
+            //轮次耗尽：不再允许工具调用，让模型基于已收集的工具结果做最终生成。
+            //原实现直接 onComplete，用户收不到任何实质回答——这是核心体验 bug
+            callback.onChunk("\n\n（已达到最大工具调用轮次，以下基于已获取的信息作答）\n\n");
+            //第三个参数传空工具列表：收尾这一次调用模型不能再发起 tool_calls，只能输出文本答案
+            JsonNode finalResponse = llmClient.callSync(apiKey, messages, List.of());
+            String finalContent = finalResponse.path("choices").path(0).path("message").path("content").asText("");
+            if (!finalContent.isEmpty()) {
+                callback.onChunk(finalContent);
+            }
             callback.onComplete();
 
         } catch (Exception e) {

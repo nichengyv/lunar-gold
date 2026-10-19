@@ -1,5 +1,7 @@
 package com.capsule.agentkey.interceptor;
 
+import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.util.ResponseWriter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.Authentication;
@@ -7,7 +9,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,9 +18,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 //限流检查类
+//每分钟最多 10 次；登录用户按 userId 计数，未登录（/api/auth/**）按客户端 IP 计数
 @Component
 public class RateLimitInterceptor implements HandlerInterceptor {
-//设置每个用户十秒内最多请求十次
     private static final int MAX_REQUESTS = 10;
     private static final long WINDOW_MS = 60_000;
 
@@ -47,12 +48,20 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        Long userId = getCurrentUserId();
-        if (userId == null) {
+        //CORS 预检请求不占限流配额
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
 
-        String key = "chat:" + userId;
+        Long userId = getCurrentUserId();
+        String key;
+        if (userId != null) {
+            key = "chat:" + userId;
+        } else {
+            //A7：未登录接口（/api/auth/**）按客户端 IP 限流，否则无凭据可依、限流会整体失效
+            key = "ip:" + request.getRemoteAddr();
+        }
+
         long now = System.currentTimeMillis();
 
         Window window = windows.compute(key, (k, v) -> {
@@ -63,7 +72,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         });
 
         if (window.count.incrementAndGet() > MAX_REQUESTS) {
-            writeError(response, 429, "请求过于频繁，请稍后再试");
+            //429 Too Many Requests，状态码与文案都来自 ErrorCode，此处不再手写 JSON
+            ResponseWriter.writeError(response, ErrorCode.RATE_LIMITED, null);
             return false;
         }
         return true;
@@ -75,13 +85,5 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return (Long) auth.getPrincipal();
         }
         return null;
-    }
-
-    private void writeError(HttpServletResponse response, int code, String msg) throws IOException {
-        response.setStatus(code);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(
-            String.format("{\"code\":%d,\"message\":\"%s\",\"data\":null,\"timestamp\":%d}", code, msg, System.currentTimeMillis())
-        );
     }
 }

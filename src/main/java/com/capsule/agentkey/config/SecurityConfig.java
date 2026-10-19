@@ -1,5 +1,7 @@
 package com.capsule.agentkey.config;
 
+import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.util.ResponseWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -70,6 +72,12 @@ public class SecurityConfig {
                         //其他没有进白名单的接口都需要认证
                         .anyRequest().authenticated()
                 )
+                //未认证（无 token / token 过期）统一返回 401 信封，与前端 api.js 的 401 跳转约定闭环。
+                //不配置此项时 Spring 默认返回 403，前端等不到 401，登录过期后用户会卡死在当前页。
+                //403 只保留给"已认证但无权限"的场景，符合 RFC 7235 语义
+                .exceptionHandling(e -> e.authenticationEntryPoint(
+                        (request, response, authException) ->
+                                ResponseWriter.writeError(response, ErrorCode.UNAUTHORIZED, null)))
                 //内容安全策略，浏览器的安全防护，限制网页可以加载哪些外部资源
                 .headers(headers -> headers
                         .contentSecurityPolicy(csp -> csp.policyDirectives(

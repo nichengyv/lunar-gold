@@ -6,6 +6,7 @@ import com.capsule.agentkey.entity.ChatAttachment;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.exception.BusinessException;
+import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.service.ApiKeyService;
 import com.capsule.agentkey.service.ChatAttachmentService;
 import com.capsule.agentkey.service.ChatService;
@@ -312,7 +313,7 @@ public class AgentChatController {
 
         if (file == null || file.isEmpty()) {
             log.warn("附件上传失败: 文件为空 [userId={}]", userId);
-            return ApiResponse.fail(400, "请选择要上传的文件");
+            return ApiResponse.fail(ErrorCode.PARAM_INVALID, "请选择要上传的文件");
         }
         try {
             ChatAttachment att = chatAttachmentService.uploadAttachment(userId, file, description);
@@ -333,10 +334,10 @@ public class AgentChatController {
         } catch (BusinessException e) {
             // 直接透传业务异常，避免被全局兜底的 500 覆盖
             log.warn("附件上传业务异常 [userId={}]: {}", userId, e.getMessage());
-            return ApiResponse.fail(e.getCode(), e.getMessage());
+            return ApiResponse.fail(e.getErrorCode(), e.getMessage());
         } catch (Exception e) {
             log.error("上传聊天附件系统异常 [userId={}]", userId, e);
-            return ApiResponse.fail(500, "上传失败: " + e.getMessage());
+            return ApiResponse.fail(ErrorCode.INTERNAL_ERROR, "上传失败: " + e.getMessage());
         }
     }
 }

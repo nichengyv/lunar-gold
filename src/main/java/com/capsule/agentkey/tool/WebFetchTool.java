@@ -10,8 +10,14 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Component;
 
+import java.net.InetAddress;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -22,6 +28,39 @@ public class WebFetchTool implements BaseTool {
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build();
+
+    //响应体硬上限：超过直接拒绝，防止超大响应撑爆内存（chunked 传输无 Content-Length 时靠文本截断兜底）
+    private static final long MAX_RESPONSE_BYTES = 200 * 1024;
+
+    /**
+     * SSRF 防护：Agent 工具由模型自主调用，目标 URL 可能被提示注入诱导指向内网。
+     * 规则：仅允许 http/https；解析出的 IP 不得是本机回环/内网段/链路本地地址（含云元数据接口 169.254.x.x）。
+     * 注意按解析后的 IP 判断而不是字符串匹配，防止 xip.io 之类的 DNS 解析绕过。
+     */
+    private void assertSafeUrl(String urlStr) {
+        URL url;
+        try {
+            url = URI.create(urlStr).toURL();
+        } catch (MalformedURLException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("非法 URL");
+        }
+        String protocol = url.getProtocol();
+        if (!"http".equals(protocol) && !"https".equals(protocol)) {
+            throw new IllegalArgumentException("仅支持 http/https 协议");
+        }
+        try {
+            InetAddress addr = InetAddress.getByName(url.getHost());
+            if (addr.isLoopbackAddress()        //127.0.0.0/8、::1（本机）
+                    || addr.isSiteLocalAddress()      //10/8、172.16/12、192.168/16（内网）
+                    || addr.isLinkLocalAddress()      //169.254/16（含云主机元数据接口，可泄露临时凭证）
+                    || addr.isAnyLocalAddress()       //0.0.0.0
+                    || addr.isMulticastAddress()) {
+                throw new IllegalArgumentException("禁止访问内网或保留地址");
+            }
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("无法解析目标主机");
+        }
+    }
 
     @Override
     public String getName() {
@@ -56,6 +95,8 @@ public class WebFetchTool implements BaseTool {
             return ToolResult.fail("请提供有效的 http/https URL");
         }
         try {
+            //SSRF 校验：先确认目标不是本机/内网/元数据地址，再发起请求
+            assertSafeUrl(url);
 
             //User—Agent（UA）伪装（让浏览器允许程序访问）
             //这里url：要访问的地址
@@ -65,6 +106,11 @@ public class WebFetchTool implements BaseTool {
             try (Response response = HTTP_CLIENT.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     return ToolResult.fail("网页访问失败: HTTP " + response.code());
+                }
+                //Content-Length 明确超限时直接拒绝（chunked 响应无该头，靠下方文本截断兜底）
+                long contentLength = response.body() != null ? response.body().contentLength() : -1;
+                if (contentLength > MAX_RESPONSE_BYTES) {
+                    return ToolResult.fail("网页内容过大（超过 200KB），已拒绝抓取");
                 }
                 String html = response.body() != null ? response.body().string() : "";
 

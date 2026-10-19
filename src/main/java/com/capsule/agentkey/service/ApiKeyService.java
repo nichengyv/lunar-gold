@@ -6,6 +6,7 @@ import com.capsule.agentkey.repository.UserApiKeyRepository;
 import com.capsule.agentkey.util.AesUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 //把用户填写的第三方API-KEY加密后存入数据库
@@ -21,15 +22,20 @@ public class ApiKeyService {
     }
 
     //保存API密钥
+    //事务保证原子性：旧实现"先删后插"中途异常（如 AES 加密失败）会丢掉用户已存的 Key，
+    //且 delete+insert 会导致主键变化；改为查询命中则原地更新（upsert）
+    @Transactional
     public void saveApiKey(Long userId, String provider, String plainKey, String alias) throws Exception {
-        //如果该用户已经存过这个服务商的key，先删除旧记录
-        repo.findByUserIdAndProvider(userId, provider).ifPresent(repo::delete);
-        UserApiKey key = new UserApiKey();
-        key.setUserId(userId);
-        key.setProvider(provider);
+        UserApiKey key = repo.findByUserIdAndProvider(userId, provider)
+                .orElseGet(() -> {
+                    UserApiKey created = new UserApiKey();
+                    created.setUserId(userId);
+                    created.setProvider(provider);
+                    return created;
+                });
         key.setEncryptedKey(aesUtil.encrypt(plainKey));//plainKey就是用户输入的明文apikey
         key.setKeyAlias(alias);
-        repo.save(key);//存入数据库
+        repo.save(key);//存在则更新，不存在则插入
         log.info("API Key 已保存 [userId={}, provider={}]", userId, provider);
     }
 

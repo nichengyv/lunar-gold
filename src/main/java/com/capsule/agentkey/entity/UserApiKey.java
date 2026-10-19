@@ -31,9 +31,9 @@ public class UserApiKey {
     @Column(length = 50)
     private String keyAlias;
 
-    @CreatedDate
+    @CreatedDate//首次插入数据库时，自动填充创建时间，后续不再修改
     private LocalDateTime createTime;
 
-    @LastModifiedDate
+    @LastModifiedDate//每次插入时填充，每次更新这条记录时，自动刷新为最新时间
     private LocalDateTime updateTime;
 }

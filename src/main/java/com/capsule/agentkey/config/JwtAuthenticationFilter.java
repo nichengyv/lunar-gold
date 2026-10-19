@@ -1,6 +1,8 @@
 package com.capsule.agentkey.config;
 
+import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.util.JwtUtil;
+import com.capsule.agentkey.util.ResponseWriter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,22 +38,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             //去掉“Bear前缀”
             String token = authHeader.substring(7);
             try {
-                //利用token解密来获取信息，这里获取userid
+                //利用token解密从jwt来获取信息，这里获取userid
                 Long userId = jwtUtil.getUserIdFromToken(token);
 
                 //把用户id塞进Spring Security上下文，相当于告诉Spring本次请求已登录，用户id是这个
-                //第一行先把信息打包，第二行入上下文
+                //第一段先包装authentication对象，第二段写入security上下文
                 UsernamePasswordAuthenticationToken auth =
-                        new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());
+                        new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());//（principal，credential凭证（但是jwt场景不需要密码），权限集合）
                 //SecurityContextHolder.getContext()设置当前线程上下文盒子， setAuthentication把token放进上下文
                 SecurityContextHolder.getContext().setAuthentication(auth);//放进上下文
             }
             //验证失败
             catch (Exception e) {
                 log.warn("JWT 校验失败: {}", e.getMessage());
-                response.setStatus(401);
-                response.setContentType("application/json;charset=UTF-8");
-                response.getWriter().write("{\"code\":401,\"message\":\"无效的令牌\",\"data\":null,\"timestamp\":" + System.currentTimeMillis() + "}");
+                //401 = 未携带或无效凭证。这里在 Filter 层，@RestControllerAdvice 覆盖不到，
+                //所以借 ResponseWriter 输出与全局信封一致的结构（原先手写 JSON 拼接，message 含引号即坏）
+                ResponseWriter.writeError(response, ErrorCode.UNAUTHORIZED, "无效的令牌");
                 return;//直接返回，不放行
             }
         }
