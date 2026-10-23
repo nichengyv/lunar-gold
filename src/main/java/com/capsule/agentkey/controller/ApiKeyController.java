@@ -62,4 +62,14 @@ public class ApiKeyController {
         apiKeyService.deleteById(id, getCurrentUserId());
         return ApiResponse.success(null);
     }
+
+    /**
+     * 测试 API Key 是否可用：保存前让用户先验证，避免聊天时才发现 Key 错了。
+     * 请求体：{ provider, apiKey }——只用于测试，不入库。
+     */
+    @PostMapping("/test")
+    public ApiResponse<Void> testKey(@RequestBody Map<String, String> body) {
+        apiKeyService.testConnection(body.get("provider"), body.get("apiKey"));
+        return ApiResponse.success(null);
+    }
 }

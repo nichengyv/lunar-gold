@@ -10,23 +10,27 @@ import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.service.ApiKeyService;
 import com.capsule.agentkey.service.ChatAttachmentService;
 import com.capsule.agentkey.service.ChatService;
+import com.capsule.agentkey.service.DocumentService;
+import com.capsule.agentkey.service.ProjectService;
 import com.capsule.agentkey.service.ReActAgentService;
 import com.capsule.agentkey.tool.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/api/agent")
@@ -38,15 +42,21 @@ public class AgentChatController {
     private final ChatService chatService;
     private final ObjectMapper mapper = new ObjectMapper();
     private final ChatAttachmentService chatAttachmentService;
+    private final ProjectService projectService;
+    private final Executor agentStreamExecutor;
 
     public AgentChatController(ApiKeyService apiKeyService,
                                ReActAgentService agentService,
                                ChatService chatService,
-                               ChatAttachmentService chatAttachmentService) {
+                               ChatAttachmentService chatAttachmentService,
+                               ProjectService projectService,
+                               @Qualifier("agentStreamExecutor") Executor agentStreamExecutor) {
         this.apiKeyService = apiKeyService;
         this.agentService = agentService;
         this.chatService = chatService;
         this.chatAttachmentService = chatAttachmentService;
+        this.projectService = projectService;
+        this.agentStreamExecutor = agentStreamExecutor;
     }
 
     //从security上下文取出（princcipal就是取出第一个参数，这里是userid）
@@ -58,37 +68,62 @@ public class AgentChatController {
         throw new BusinessException("用户未认证");
     }
 
-    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public void streamChat(@RequestBody ChatRequest request, HttpServletResponse response) {
+    /**
+     * 流式聊天（SSE）。
+     *
+     * 为什么用 SseEmitter 而不是手写 HttpServletResponse 流：
+     * 旧实现在 Tomcat 请求线程上同步调用 LLM，每次聊天占用一个 Tomcat 线程
+     * 直到流结束（5~60s），并发稍高就把默认 200 个请求线程耗尽，其他接口被拖死。
+     * SseEmitter 让 Controller 立即返回（容器释放请求线程），
+     * 真正的 LLM 调用在独立 agentStreamExecutor 上执行，互不阻塞。
+     */
+    @PostMapping(value = "/chat/stream")
+    public SseEmitter streamChat(@RequestBody ChatRequest request, HttpServletResponse response) {
         String prompt = request.getPrompt();
         Long sessionId = request.getSessionId();
         boolean useRag = request.isUseRag();
         List<Long> attachmentIds = request.getAttachmentIds();
-        //获取当前用户id
         Long userId = getCurrentUserId();
 
-        //规定sse流
-        response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);//告诉客户端这是sse流
-        response.setCharacterEncoding(StandardCharsets.UTF_8.name());//指定编码，防止中文乱码
-        response.setHeader("Cache-Control", "no-cache");//禁止浏览器缓存事件
-        response.setHeader("X-Accel-Buffering", "no");//（Nginx专属）关闭代理缓存/缓冲
+        //Nginx 默认会缓冲 SSE，置 no 让事件实时下发
+        response.setHeader("X-Accel-Buffering", "no");
 
+        //LLM 流式响应可能持续几十秒；超时后容器会自动 complete 并触发 onTimeout 回调
+        SseEmitter emitter = new SseEmitter(180_000L);
+
+        //B3：断连标记——任一 SSE 写出抛异常即置位，ReAct 循环在每轮开始前检查该标记并中止
+        AtomicBoolean clientDisconnected = new AtomicBoolean(false);
+
+        emitter.onTimeout(() -> {
+            clientDisconnected.set(true);
+            log.warn("SSE 超时，中止 LLM 调用 [userId={}]", userId);
+        });
+        emitter.onError(t -> {
+            clientDisconnected.set(true);
+            log.warn("SSE 连接错误 [userId={}]: {}", userId, t.getMessage());
+        });
+
+        //———— 准备阶段（仍在请求线程上，失败直接抛 4xx/5xx 给前端，不走 SSE） ————
         Long finalSessionId = sessionId;
-        if (finalSessionId == null) {
-            try {
-                String title = (prompt != null && !prompt.isEmpty())
-                        ? prompt.substring(0, Math.min(20, prompt.length()))
-                        : "文件分析";
-                //如果没有会话，创建一个
-                ChatSession session = chatService.createSession(userId, title);
-                finalSessionId = session.getId();
-            } catch (Exception e) {
-                log.error("创建会话失败", e);
-                writeError(response, "创建会话失败: " + e.getMessage());
-                return;
+        Long effectiveProjectId;
+        if (finalSessionId != null) {
+            //老会话：以会话自身的项目归属为准，避免切项目后把别的项目资料混进上下文
+            effectiveProjectId = chatService.getOwnedSession(finalSessionId, userId).getProjectId();
+        } else {
+            effectiveProjectId = projectService.resolveProjectId(userId, request.getProjectId());
+            String title;
+            if (prompt != null && !prompt.isEmpty()) {
+                //B6：按 Unicode 码点截断标题，避免 substring 按 UTF-16 切代理对字符成乱码
+                int cp = Math.min(20, prompt.codePointCount(0, prompt.length()));
+                title = prompt.substring(0, prompt.offsetByCodePoints(0, cp));
+            } else {
+                title = "文件分析";
             }
+            ChatSession session = chatService.createSession(userId, effectiveProjectId, title);
+            finalSessionId = session.getId();
         }
         final Long chatSessionId = finalSessionId;
+        final Long projectId = effectiveProjectId;
 
         String fileContext = "";
         if (attachmentIds != null && !attachmentIds.isEmpty()) {
@@ -100,8 +135,7 @@ public class AgentChatController {
             }
         }
 
-        // 先加载历史（此时还不包含当前这条用户消息），再保存当前消息
-        // 否则历史里已含当前消息，buildMessages 又会追加一次 userPrompt → 大模型看到重复两遍的用户消息
+        //先加载历史再保存当前消息，避免历史里已含当前消息导致 buildMessages 重复追加一遍
         List<ChatMessage> history;
         try {
             history = chatService.getHistory(chatSessionId, userId);
@@ -112,7 +146,6 @@ public class AgentChatController {
 
         try {
             String msgContent = (prompt != null && !prompt.isEmpty()) ? prompt : "[文件提问]";
-            //保存用户消息到数据库
             ChatMessage savedMsg = chatService.saveMessage(userId, chatSessionId,
                     ChatMessage.MessageRole.USER, msgContent, null);
             if (attachmentIds != null && !attachmentIds.isEmpty()) {
@@ -122,174 +155,182 @@ public class AgentChatController {
             log.error("保存用户消息失败", e);
         }
 
+        final String realApiKey;
         try {
-            String realApiKey = apiKeyService.getDecryptedKey(userId, "DEEPSEEK");
-
-            OutputStream out = response.getOutputStream();
-            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-            StringBuilder fullResponse = new StringBuilder();
-
-            writeEvent(writer, out, "session_id", String.valueOf(chatSessionId));
-
-
-
-            //调用agent大脑开始执行
-            //这里用了匿名内部类
-            agentService.execute(realApiKey, prompt, history, userId, useRag, fileContext,
-                    new ReActAgentService.StreamCallback() {
-                //当ai在后台进行推理，反思，或者思考下一步怎么做，会触发这个回调
-                        //把思考内容thouhgt打包成一个map对象
-                        @Override
-                        public void onThinking(String thought) {
-                            try {
-                                Map<String, String> data = new HashMap<>();
-                                data.put("thought", thought);
-
-                                //writeValueAsString把map转为json字符串
-                                writeEvent(writer, out, "thinking", mapper.writeValueAsString(data));
-                            } catch (IOException e) {
-                                log.error("发送 thinking 事件失败", e);
-                            }
-                        }
-
-                        //监听工具事件
-                        //当AI发现靠自己不行，需要外部资料和调用API时，，触发此回调，把工具名，参数，状态打包
-                        @Override
-                        public void onToolCall(String toolName, String arguments) {
-                            try {
-                                Map<String, Object> data = new HashMap<>();
-                                data.put("tool", toolName);
-                                data.put("args", arguments);
-                                data.put("status", "calling");
-                                //向sse流写入一个事件名为tool_call的数据
-                                writeEvent(writer, out, "tool_call", mapper.writeValueAsString(data));
-                            } catch (IOException e) {
-                                log.error("发送 tool_call 事件失败", e);
-                            }
-                        }
-
-                        //处理AI调用外部工具后的返回结果，并通知前端
-                        //AI调用工具后返回result对象，这里把工具名，是否成功，返回的内容，错误信息，耗时等详细信息打包放进HashMap
-
-                        @Override
-                        public void onToolResult(String toolName, ToolResult result) {
-                            try {
-                                Map<String, Object> data = new HashMap<>();
-                                data.put("tool", toolName);
-                                data.put("success", result.isSuccess());
-                                data.put("content", result.getContent());
-                                data.put("error", result.getError());
-                                data.put("costMs", result.getCostMs());
-                                data.put("status", "done");
-                                //通过这个方法，发送一个event:"tool_result"的事件给前端
-                                writeEvent(writer, out, "tool_result", mapper.writeValueAsString(data));
-                            } catch (IOException e) {
-                                log.error("发送 tool_result 事件失败", e);
-                            }
-                        }
-
-                        //接收AI生成的一句完整回复的每个切片，并实时推送给前端（流水一般的文字浮现）
-                        //大模型生成文本并非一个一个字，而是一段一段，这里chunk参数就是一段
-                        @Override
-                        public void onChunk(String chunk) {
-                            //fullResponse用于拼接片段，等说完就放进数据库
-                            fullResponse.append(chunk);
-                            try {
-                                //发送一个event:"content"的事件给前端，前端把chunk追加到事件上
-                                writeEvent(writer, out, "content", chunk);
-                            } catch (IOException e) {
-                                log.error("写入 content 失败", e);
-                            }
-                        }
-
-                        //结局（正常结束）：AI的话说完后触发此方法
-                        //1.data:"[DONE]"正式结束SSE流
-                        @Override
-                        public void onComplete() {
-                            try {
-                                writeEvent(writer, out, "done", "[DONE]");
-                                writer.close();//关闭输出字符流，释放连接资源，防止前端以为服务器还在传输数据
-
-                                //持久化 对话记录
-                                //这里判断AI确实说了话，就存数据库
-                                if (fullResponse.length() > 0) {
-                                    //这里就是把AI的完整回复以“ASSISTANT”的身份，连同用户id和会话id一起保存下来
-                                    chatService.saveMessage(userId, chatSessionId,
-                                            ChatMessage.MessageRole.ASSISTANT,
-                                            fullResponse.toString(), null);
-                                }
-                            } catch (Exception e) {
-                                log.error("SSE 完成处理失败", e);
-                            }
-                        }
-
-                        //异常结局
-                        @Override
-                        public void onError(Throwable t) {
-                            log.error("Agent 执行错误", t);
-                            try {
-                                writeEvent(writer, out, "error", t.getMessage());
-                                writer.close();
-                            } catch (Exception e) {
-                                log.error("发送 error 事件失败", e);
-                            }
-                        }
-                    });
-
+            realApiKey = apiKeyService.getDecryptedKey(userId, "DEEPSEEK");
         } catch (Exception e) {
-            log.error("流式聊天处理失败", e);
-            writeError(response, e.getMessage());
+            //用户未配置 Key：通过 SSE 通道下发错误事件后正常关闭，前端按协议处理即可
+            sendEventQuietly(emitter, "error", e.getMessage(), clientDisconnected);
+            emitter.complete();
+            return emitter;
         }
-    }
 
-    //解决SSE里data内容自动换行的问题
-    private void writeEvent(OutputStreamWriter writer, OutputStream out,
-                            String event, String data) throws IOException {
-        //写入事件类型
-        writer.write("event: " + event + "\n");
-        if (data != null) {
-            //把data按换行符切分成字符串数组
+        final String finalFileContext = fileContext;
+        final List<ChatMessage> finalHistory = history;
 
-            String[] lines = data.split("\n", -1); // -1 保留末尾空行
-            for (String line : lines) {
-                // SSE 规范：多行 data 必须每行加 "data: " 前缀
-                writer.write("data: " + line + "\n");
-            }
-        } else {
-            //data为null也要写一行空的data：
-            writer.write("data: \n");
-        }
-        //空行：再写一个\n，组合起来就是\n\n，代表本条事件结束
-        writer.write("\n"); // 空行表示事件结束
-        writer.flush();//强制把缓冲区的数据立刻推送到网络，让前端马上收到
-        out.flush();
-    }
+        //———— 执行阶段：提交到独立线程池，Controller 立即 return emitter 释放 Tomcat 线程 ————
+        agentStreamExecutor.execute(() -> {
+            StringBuilder fullResponse = new StringBuilder();
+            try {
+                //先告诉前端 sessionId，前端用它把后续流式消息挂到正确的会话上
+                sendEvent(emitter, "session_id", String.valueOf(chatSessionId));
 
-    private void writeError(HttpServletResponse response, String msg) {
-        try {
-            response.setStatus(500);
-            OutputStreamWriter writer = new OutputStreamWriter(response.getOutputStream(), StandardCharsets.UTF_8);
-            writer.write("event: error\n");
-            if (msg != null) {
-                String[] lines = msg.split("\n", -1);
-                for (String line : lines) {
-                    writer.write("data: " + line + "\n");
+                agentService.execute(realApiKey, prompt, finalHistory, userId, projectId, useRag, finalFileContext,
+                        clientDisconnected,
+                        new ReActAgentService.StreamCallback() {
+                            @Override
+                            public void onSources(List<DocumentService.Source> sources) {
+                                try {
+                                    //只下发用户能理解的三项：资料 id、文件名、相关度
+                                    List<Map<String, Object>> list = sources.stream()
+                                            .map(s -> {
+                                                Map<String, Object> item = new HashMap<String, Object>();
+                                                item.put("id", s.documentId());
+                                                item.put("name", s.fileName());
+                                                item.put("score", Math.round(s.score() * 100) / 100.0);
+                                                return item;
+                                            })
+                                            .toList();
+                                    sendEvent(emitter, "sources", mapper.writeValueAsString(list));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 sources 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onThinking(String thought) {
+                                try {
+                                    Map<String, String> data = new HashMap<>();
+                                    data.put("thought", thought);
+                                    sendEvent(emitter, "thinking", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 thinking 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onToolCall(String toolName, String arguments) {
+                                try {
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("tool", toolName);
+                                    data.put("args", arguments);
+                                    data.put("status", "calling");
+                                    sendEvent(emitter, "tool_call", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 tool_call 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onToolResult(String toolName, ToolResult result) {
+                                try {
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("tool", toolName);
+                                    data.put("success", result.isSuccess());
+                                    data.put("content", result.getContent());
+                                    data.put("error", result.getError());
+                                    data.put("costMs", result.getCostMs());
+                                    data.put("status", "done");
+                                    sendEvent(emitter, "tool_result", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 tool_result 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onChunk(String chunk) {
+                                fullResponse.append(chunk);
+                                try {
+                                    //按 JSON 下发：答案里的换行/冒号不会被 SSE 行协议截断
+                                    Map<String, String> data = new HashMap<>();
+                                    data.put("text", chunk);
+                                    sendEvent(emitter, "content", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("写入 content 失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onComplete() {
+                                //客户端已断开 → 不发 done 事件也不持久化半截回复，避免污染历史
+                                if (clientDisconnected.get()) {
+                                    log.info("客户端已断开，丢弃未完成回复 [sessionId={}]", chatSessionId);
+                                    //仍要结束异步请求，否则要挂到超时（默认 180s）才释放
+                                    emitter.complete();
+                                    return;
+                                }
+                                try {
+                                    sendEvent(emitter, "done", "[DONE]");
+                                    if (fullResponse.length() > 0) {
+                                        chatService.saveMessage(userId, chatSessionId,
+                                                ChatMessage.MessageRole.ASSISTANT,
+                                                fullResponse.toString(), null);
+                                    }
+                                } catch (Exception e) {
+                                    log.error("SSE 完成处理失败", e);
+                                } finally {
+                                    emitter.complete();
+                                }
+                            }
+
+                            @Override
+                            public void onError(Throwable t) {
+                                //真实异常只进日志；下发给用户的是一句能看懂的话
+                                log.error("Agent 执行错误", t);
+                                try {
+                                    sendEvent(emitter, "error", "这次回答没有完成，请稍后再试一次");
+                                } catch (Exception ignore) {
+                                    //连接已断，无需再发
+                                } finally {
+                                    emitter.complete();
+                                }
+                            }
+                        });
+            } catch (Exception e) {
+                log.error("流式聊天执行异常", e);
+                try {
+                    sendEvent(emitter, "error", "这次回答没有完成，请稍后再试一次");
+                } catch (Exception ignore) {
+                    //连接已断
+                } finally {
+                    emitter.complete();
                 }
-            } else {
-                writer.write("data: \n");
             }
-            writer.write("\n");
-            writer.flush();
-            writer.close();
-        } catch (IOException e) {
-            log.error("写入错误响应失败", e);
+        });
+
+        return emitter;
+    }
+
+    /**
+     * 发送 SSE 事件。
+     * SseEmitter 内部已按 SSE 协议格式化多行 data，无需像手写流那样逐行加 "data: " 前缀。
+     */
+    private void sendEvent(SseEmitter emitter, String event, String data) throws IOException {
+        emitter.send(SseEmitter.event().name(event).data(data == null ? "" : data));
+    }
+
+    /** 静默发送：失败不抛异常（用于错误已经发生、尽力通知前端的场景） */
+    private void sendEventQuietly(SseEmitter emitter, String event, String data, AtomicBoolean disconnectedFlag) {
+        try {
+            sendEvent(emitter, event, data);
+        } catch (Exception e) {
+            disconnectedFlag.set(true);
+            log.warn("SSE 事件发送失败 [{}]: {}", event, e.getMessage());
         }
     }
 
     @GetMapping("/sessions")
-    public ApiResponse<List<ChatSession>> listSessions() {
+    public ApiResponse<List<ChatSession>> listSessions(
+            @RequestParam(value = "projectId", required = false) Long projectId) {
         //List<ChatSession>规定了查询结果是列表
-        return ApiResponse.success(chatService.listSessions(getCurrentUserId()));
+        Long userId = getCurrentUserId();
+        return ApiResponse.success(chatService.listSessions(
+                userId, projectService.resolveProjectId(userId, projectId)));
     }
 
     @GetMapping("/sessions/{sessionId}/messages")
@@ -301,6 +342,16 @@ public class AgentChatController {
     public ApiResponse<Void> deleteSession(@PathVariable Long sessionId) {
         chatService.deleteSession(sessionId, getCurrentUserId());
         return ApiResponse.success(null);
+    }
+
+    @PatchMapping("/sessions/{sessionId}")
+    public ApiResponse<Void> renameSession(@PathVariable Long sessionId,
+                                           @RequestBody RenameSessionRequest request) {
+        chatService.renameSession(sessionId, getCurrentUserId(), request == null ? null : request.title());
+        return ApiResponse.success(null);
+    }
+
+    public record RenameSessionRequest(String title) {
     }
 
     @PostMapping("/chat/attachment")

@@ -28,6 +28,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class VectorStoreService {
 
+    /**
+     * 默认相关度下限：0.3 对 bge-m3 太宽松（中文无关文本的相似度普遍落在 0.3~0.45），
+     * 只适合"必须给我几条"的场景（如附件定向检索）。知识库检索走调用方传入的更高阈值。
+     */
+    private static final float DEFAULT_MIN_SCORE = 0.3f;
+
     // JdbcTemplate 由 Spring 根据 datasource 自动装配，用于执行带 pgvector 专有运算符的原生 SQL
     private final JdbcTemplate jdbc;
 
@@ -42,11 +48,20 @@ public class VectorStoreService {
             Long userId,//所属用户id
             String content,//切片原文文本
             float[] vector,//向量浮点数组（用于数学计算）
-            String sourceType//数据来源标记，默认knwledge
+            String sourceType,//数据来源标记，默认knwledge
+            Long projectId//所属项目（聊天附件没有项目归属，保持 null）
     ) {
 
         public VectorRecord(Long chunkId, Long documentId, Long userId, String content, float[] vector) {
-            this(chunkId, documentId, userId, content, vector, "knowledge");
+            this(chunkId, documentId, userId, content, vector, "knowledge", null);
+        }
+
+        public VectorRecord(Long chunkId, Long documentId, Long userId, String content, float[] vector, Long projectId) {
+            this(chunkId, documentId, userId, content, vector, "knowledge", projectId);
+        }
+
+        public VectorRecord(Long chunkId, Long documentId, Long userId, String content, float[] vector, String sourceType) {
+            this(chunkId, documentId, userId, content, vector, sourceType, null);
         }
     }
 
@@ -65,8 +80,8 @@ public class VectorStoreService {
         // ?::vector 是 PostgreSQL 的类型强转语法：把参数从文本转成 vector 类型。
         // float[] 先序列化成 pgvector 的文本格式 "[0.1,0.2,...]"，入库时由 PG 解析
         String sql = """
-                INSERT INTO vector_record (user_id, document_id, chunk_id, content, source_type, embedding)
-                VALUES (?, ?, ?, ?, ?, ?::vector)
+                INSERT INTO vector_record (user_id, document_id, chunk_id, content, source_type, project_id, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?::vector)
                 """;
         jdbc.batchUpdate(sql, records, records.size(), (ps, r) -> {
             ps.setLong(1, r.userId());
@@ -74,7 +89,8 @@ public class VectorStoreService {
             ps.setObject(3, r.chunkId());//chunkId 允许为 null
             ps.setString(4, r.content());
             ps.setString(5, r.sourceType());
-            ps.setString(6, toVectorLiteral(r.vector()));
+            ps.setObject(6, r.projectId());//附件没有项目归属，允许为 null
+            ps.setString(7, toVectorLiteral(r.vector()));
         });
         log.info("✅ {} 条向量已写入 PostgreSQL", records.size());
     }
@@ -93,16 +109,31 @@ public class VectorStoreService {
         jdbc.update("DELETE FROM vector_record WHERE user_id = ?", userId);
     }
 
-    public List<SearchResult> search(Long userId, float[] queryVec, int topK) {
-        return search(userId, queryVec, topK, null, null);
+    /** 项目内检索：只取当前项目下的知识库向量，附件向量（无项目归属）不参与 */
+    public List<SearchResult> searchForProject(Long userId, Long projectId, float[] queryVec, int topK) {
+        return search(userId, queryVec, topK, null, null, projectId, DEFAULT_MIN_SCORE);
+    }
+
+    /**
+     * 项目知识库检索，可指定相关度下限。
+     * bge-m3 对中文无关文本的余弦相似度普遍在 0.3~0.45，用默认 0.3 会把毫不相干的片段也当成命中。
+     */
+    public List<SearchResult> searchForProject(Long userId, Long projectId, float[] queryVec,
+                                               int topK, float minScore) {
+        return search(userId, queryVec, topK, null, null, projectId, minScore);
     }
 
     //余弦相似度检索：由 pgvector 的 HNSW 索引加速，替代原内存版的 O(N) 暴力扫描
     public List<SearchResult> search(Long userId, float[] queryVec, int topK,
                                      Long documentId, String sourceType) {
+        return search(userId, queryVec, topK, documentId, sourceType, null, DEFAULT_MIN_SCORE);
+    }
+
+    private List<SearchResult> search(Long userId, float[] queryVec, int topK,
+                                      Long documentId, String sourceType, Long projectId, float minScore) {
         if (queryVec == null || queryVec.length == 0) return Collections.emptyList();
 
-        //动态拼接过滤条件：documentId / sourceType 为 null 时不限定（对应原内存版的 filter 逻辑）
+        //动态拼接过滤条件：documentId / sourceType / projectId 为 null 时不限定（对应原内存版的 filter 逻辑）
         StringBuilder sql = new StringBuilder("""
                 SELECT chunk_id, document_id, content,
                        1 - (embedding <=> CAST(? AS vector)) AS score
@@ -120,6 +151,10 @@ public class VectorStoreService {
             sql.append(" AND source_type = ?");
             params.add(sourceType);
         }
+        if (projectId != null) {
+            sql.append(" AND project_id = ?");
+            params.add(projectId);
+        }
         //按相似度从高到低取前 topK 条（score 是 SELECT 别名，PG 支持按别名排序）
         sql.append(" ORDER BY score DESC LIMIT ?");
         params.add(topK);
@@ -131,8 +166,8 @@ public class VectorStoreService {
                         rs.getFloat("score")),
                 params.toArray())
                 .stream()
-                //相似度阈值过滤：分数小于等于0.3直接丢弃（语义检索阈值不宜过高，否则相关但表述不同的内容会被误杀）
-                .filter(r -> r.score() > 0.3f)
+                //相似度阈值过滤：低于下限的片段直接丢弃
+                .filter(r -> r.score() > minScore)
                 .collect(Collectors.toList());
     }
 

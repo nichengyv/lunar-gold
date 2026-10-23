@@ -22,6 +22,10 @@ public class ChatSession {
     @Column(nullable = false)
     private Long userId;
 
+    /** 所属项目：会话列表按项目过滤 */
+    @Column(nullable = false)
+    private Long projectId;
+
     @Column(length = 100)
     private String title;
 

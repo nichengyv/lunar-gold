@@ -33,3 +33,9 @@ build/
 
 ### 开发环境配置（包含敏感密钥，不上传） ###
 src/main/resources/application-dev.yml
+
+### 部署与运行时产物 ###
+.env
+uploads/
+data/
+*.log

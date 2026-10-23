@@ -9,6 +9,13 @@ spring:
 server:
   port: 8080
 
+# 生产环境关闭接口文档：避免暴露全部接口结构给公网探测
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 logging:
   level:
     root: WARN

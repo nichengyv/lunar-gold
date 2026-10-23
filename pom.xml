@@ -44,9 +44,26 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
+        <!-- Flyway 10 起数据库支持按厂商拆分到独立模块，只引 flyway-core 时
+             prod 启动会报 Unsupported Database: PostgreSQL（dev 因为关闭了 Flyway 从未暴露） -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- 指标输出为 Prometheus 文本格式：/actuator/prometheus 供采集端抓取 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!-- 接口文档：自动生成 OpenAPI 描述并提供 Swagger UI 交互页面 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.6.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -122,12 +139,13 @@
             <artifactId>poi-scratchpad</artifactId>
             <version>5.2.5</version>
         </dependency>
+        <!-- Tika：按文件内容嗅探真实 MIME 类型，不信任用户给的扩展名，
+             防止把 evil.exe 改名 evil.pdf 混进解析管线 -->
         <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>2.9.1</version>
         </dependency>
-
-
 
     </dependencies>
     <build>

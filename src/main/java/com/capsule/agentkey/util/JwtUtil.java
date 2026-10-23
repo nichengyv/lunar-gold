@@ -27,6 +27,7 @@ public class JwtUtil {
     public String generateToken(Long userId, String username) {
         return Jwts.builder()//开始构建JWT令牌
                 .setSubject(username)//存放用户名
+                .setId(java.util.UUID.randomUUID().toString())//jti：本次会话唯一编号，撤销白名单依赖它
                 .claim("userId", userId)//自定义载荷数据
                 .setIssuedAt(new Date())//签发时间（什么时候生成令牌）
                 .setExpiration(new Date(System.currentTimeMillis() + expiration))//过期时间（当前时间+有效时间）
@@ -56,5 +57,15 @@ public class JwtUtil {
     //封存快捷方法，先解析token，再取出载荷里存的userid，返回给程序用
     public Long getUserIdFromToken(String token) {
         return parseToken(token).get("userId", Long.class);
+    }
+
+    //取 jti（JWT ID），撤销白名单的键；老 token（无 jti）返回 null
+    public String getJtiFromToken(String token) {
+        return parseToken(token).getId();
+    }
+
+    //返回 JWT 配置的过期毫秒数，用于把 jti 写入 Redis 时对齐 TTL
+    public long getExpirationMillis() {
+        return expiration;
     }
 }

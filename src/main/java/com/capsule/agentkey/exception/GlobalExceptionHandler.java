@@ -3,11 +3,14 @@ package com.capsule.agentkey.exception;
 import com.capsule.agentkey.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -31,6 +34,27 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + ": " + error.getDefaultMessage())
                 .collect(Collectors.joining(", "));
         return build(ErrorCode.PARAM_INVALID, msg);
+    }
+
+    /**
+     * 请求体无法解析：JSON 语法错误、字段类型不匹配、body 为空。
+     * 这类问题属于客户端输入错误，应答 400；
+     * 此前没有对应处理器，异常落到 Exception 兜底分支变成 500「系统繁忙」，
+     * 把可预期的输入错误混进了服务端故障告警。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return build(ErrorCode.PARAM_INVALID, "请求内容格式不正确，请检查后重试");
+    }
+
+    /**
+     * 路径变量 / 查询参数类型不匹配，例如 /documents/abc（期望 Long）。
+     */
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ApiResponse<Void>> handleParamMismatch(Exception e) {
+        log.warn("请求参数格式不匹配: {}", e.getMessage());
+        return build(ErrorCode.PARAM_INVALID, "请求参数格式不正确");
     }
 
     @ExceptionHandler(BusinessException.class)
@@ -64,8 +88,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IOException.class)
     public ResponseEntity<ApiResponse<Void>> handleIOException(IOException e) {
+        //异常细节只进日志，不回给前端：路径、权限等信息对用户无意义且属内部实现
         log.error("IO 异常", e);
-        return build(ErrorCode.IO_ERROR, "文件读写失败: " + e.getMessage());
+        return build(ErrorCode.IO_ERROR, null);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

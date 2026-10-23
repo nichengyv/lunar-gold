@@ -1,6 +1,7 @@
 package com.capsule.agentkey.config;
 
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.filter.JwtAuthenticationFilter;
 import com.capsule.agentkey.util.ResponseWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +30,10 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:8080,http://127.0.0.1:8080}")
     private String allowedOrigins;
 
+    //CSP 的 connect-src：允许前端 fetch 的目标，部署时通过 CSP_CONNECT_SRC 覆盖，不必改代码
+    @Value("${app.security.csp-connect-src:http://localhost:8080 http://127.0.0.1:8080}")
+    private String cspConnectSrc;
+
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
@@ -52,6 +57,8 @@ public class SecurityConfig {
 
                 //STATELESS表示无会话模式，不创建服务器Session，放弃服务器记忆用户
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                //配置不需要认证的路由
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/auth/**",
@@ -63,7 +70,13 @@ public class SecurityConfig {
                                 "/js/**",
                                 "/favicon.ico",
                                 "/api/agent/test-stream",
-                                "/actuator/health"
+                                "/actuator/health",
+                                //Prometheus 采集端不带 JWT，需放行；生产务必用网络策略/反代只允许采集器访问
+                                "/actuator/prometheus",
+                                //接口文档（springdoc）：生产通过 SPRINGDOC_ENABLED=false 整体关闭
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html"
                         )
                         //白名单接口，不需要登录，不需要token，任何人可以访问
                         .permitAll()
@@ -85,7 +98,7 @@ public class SecurityConfig {
                                         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
                                         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
                                         "font-src 'self' https://cdnjs.cloudflare.com; " +
-                                        "connect-src 'self' http://localhost:8080 http://127.0.0.1:8080 https://api.deepseek.com https://api.tavily.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+                                        "connect-src 'self' " + cspConnectSrc + " https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
                                         "img-src 'self' data: https:;"
                         ))
                 )

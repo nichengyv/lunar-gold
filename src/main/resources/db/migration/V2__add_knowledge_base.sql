@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS document_chunk (
     document_id BIGINT NOT NULL,
     chunk_index INT NOT NULL,
     content     TEXT NOT NULL,
-    token_count INT DEFAULT 0,
+    token_count INT NOT NULL DEFAULT 0,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_chunk_doc FOREIGN KEY (document_id) REFERENCES document (id) ON DELETE CASCADE
 );

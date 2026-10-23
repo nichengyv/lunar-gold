@@ -30,12 +30,16 @@ spring:
     enabled: false
     locations: classpath:db/migration
     baseline-on-migrate: true
-  redis:
-    host: ${REDIS_HOST:localhost}
-    port: ${REDIS_PORT:6379}
-    password: ${REDIS_PASSWORD:}
-    ssl: ${REDIS_SSL:false}
-    timeout: 2000
+  # 【Boot 3 配置键】Redis 配置必须挂在 spring.data.redis 下；
+  # 旧写法 spring.redis 在 Boot 3 会被完全忽略，导致连接参数不生效
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+      timeout: 2000ms
   servlet:
     multipart:
       max-file-size: 50MB      # 单个文件最大 50MB
@@ -55,6 +59,13 @@ embedding:
     key: ${EMBEDDING_API_KEY:}
   model: ${EMBEDDING_MODEL:BAAI/bge-m3}
 
+# 知识库检索门槛：min-score 为单片段相关度下限，gate-score 为"本轮是否使用资料"的最低分。
+# bge-m3 对中文无关文本的相似度普遍在 0.3~0.45、相关文本多在 0.55 以上，故抬到 0.5/0.55，
+# 避免问"现在几点"这类与资料无关的问题时也标注出处。语料差异大时按日志「RAG 命中片段相关度」微调。
+rag:
+  min-score: ${RAG_MIN_SCORE:0.5}
+  gate-score: ${RAG_GATE_SCORE:0.55}
+
 app:
   jwt:
     # 【本地开发】默认 32 字节以上密钥；生产环境必须通过 JWT_SECRET 环境变量注入
@@ -69,12 +80,19 @@ app:
   rate-limit:
     chat-requests-per-minute: ${RATE_LIMIT_CHAT:10}
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:8080,http://127.0.0.1:8080}
+    # 前后端分离：Vite 开发服务器(5173)也需要直连后端；生产由 Nginx 同源反代，不产生跨域
+    allowed-origins: ${CORS_ORIGINS:http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173}
   security:
-    force-https: ${FORCE_HTTPS:false}
+    # CSP 的 connect-src（浏览器允许前端发起 fetch 的目标）。
+    # 部署到正式域名后通过 CSP_CONNECT_SRC 覆盖，无需改代码：
+    #   CSP_CONNECT_SRC='https://你的域名 https://api.deepseek.com https://api.tavily.com'
+    csp-connect-src: ${CSP_CONNECT_SRC:http://localhost:8080 http://127.0.0.1:8080 http://localhost:5173 http://127.0.0.1:5173 https://api.deepseek.com https://api.tavily.com}
 
 server:
   port: ${SERVER_PORT:8080}
+  # HTTPS 由 Nginx / 云负载均衡终结，应用对外只提供 plain HTTP（容器内 8080）。
+  # 下面几项仅在本地做 SSL 联调时临时启用，生产不要设置 SSL_ENABLED=true——
+  # 应用自己管证书会让续期、重定向、HSTS 都变得更麻烦。
   ssl:
     enabled: ${SSL_ENABLED:false}
     key-store: ${SSL_KEY_STORE:}
@@ -93,11 +111,25 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # prometheus 暴露指标文本供采集端抓取；metrics 便于人工排查
+        include: health,info,prometheus,metrics
       base-path: /actuator
   endpoint:
     health:
       show-details: when_authorized
+  metrics:
+    tags:
+      # 打上应用标签，多服务共用 Prometheus 时可区分来源
+      application: agent-gateway
+
+# 接口文档（springdoc）：本地/测试环境开启，生产通过 SPRINGDOC_ENABLED=false 关闭
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
+    path: /swagger-ui.html
 
 tavily:
   api:

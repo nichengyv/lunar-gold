@@ -40,9 +40,10 @@ public class DocumentController {
     @PostMapping("/upload")
     public ApiResponse<Map<String, Object>> upload(
             @RequestParam("file") MultipartFile file,//绑定表单里字段名为file的文件数据到这个变量
+            @RequestParam(value = "projectId", required = false) Long projectId,
             @RequestParam(value = "description", required = false) String description) throws Exception {
         Long userId = getCurrentUserId();
-        Document doc = documentService.upload(userId, file, description);
+        Document doc = documentService.upload(userId, projectId, file, description);
         Map<String, Object> map = new HashMap<>();
         map.put("id", doc.getId());
         map.put("fileName", doc.getFileName());
@@ -52,12 +53,13 @@ public class DocumentController {
     }
 
     /**
-     * 列出用户的所有文档
+     * 列出当前项目内的资料；不传 projectId 时回落到默认项目
      * 返回 DocumentSummary 而非实体：隐藏 storagePath 等服务器内部信息
      */
     @GetMapping("/documents")
-    public ApiResponse<List<DocumentSummary>> listDocuments() {
-        return ApiResponse.success(documentService.listByUserId(getCurrentUserId())
+    public ApiResponse<List<DocumentSummary>> listDocuments(
+            @RequestParam(value = "projectId", required = false) Long projectId) {
+        return ApiResponse.success(documentService.listByUserId(getCurrentUserId(), projectId)
                 .stream().map(DocumentSummary::from).toList());
     }
 
@@ -68,6 +70,15 @@ public class DocumentController {
     //@PathVariable从URL路径取出占位符的值
     public ApiResponse<Void> deleteDocument(@PathVariable Long id) {
         documentService.deleteDocument(getCurrentUserId(), id);//前者是从上下文拿到的userid，后者是文档id
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * B7：重试处理失败的文档（自动重试 3 次仍为 ERROR 后，用户可手动再触发一轮）
+     */
+    @PostMapping("/documents/{id}/retry")
+    public ApiResponse<Void> retryDocument(@PathVariable Long id) {
+        documentService.retryDocument(getCurrentUserId(), id);
         return ApiResponse.success(null);
     }
 }

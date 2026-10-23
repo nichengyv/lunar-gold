@@ -42,8 +42,9 @@ public enum ErrorCode {
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试"),
 
     // ---------- 500 ----------
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "系统繁忙，请稍后重试"),
-    IO_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "文件读写失败");
+    //文案面向普通用户：不出现"系统""服务端""异常"等技术词，也不暴露内部细节
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "出了点小状况，请稍后再试一次"),
+    IO_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "文件处理失败，请稍后重试");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

@@ -14,8 +14,10 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -37,6 +39,11 @@ public class DeepSeekAgentClient {
 
     public interface Callback {
         void onChunk(String chunk);//收到一小块文字，反复触发
+        /**
+         * 流式返回中累积完成的工具调用（已把分片拼成完整 JSON）。
+         * 用 default 实现，其他只关心文本的调用方无需实现。
+         */
+        default void onToolCalls(List<ObjectNode> toolCalls) {}
         void onComplete();//流式全部结束
         void onError(Throwable t);//网络，解析，异常
     }
@@ -96,6 +103,9 @@ public class DeepSeekAgentClient {
                         //byteStream()拿到原始字节输入流   InputStreamReader字节流转字符流，后面指定了解码用UTF-8
                         new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
                     String line;//考虑到sse协议格式，循环逐行解析
+                    //工具调用在流式里是按 index 分片下发的：id/name 只在首片出现，
+                    //arguments 被切成多段，必须按 index 累积拼回完整 JSON
+                    Map<Integer, ObjectNode> toolCallAcc = new TreeMap<>();
                     while ((line = reader.readLine()) != null) {
 
                         //截取：把前面“data：6”这六个字符切掉，拿到纯json字符串
@@ -103,6 +113,7 @@ public class DeepSeekAgentClient {
                             String data = line.substring(6).trim();
                             //[DONE]是结束标记，当遍历到最后一行就是它
                             if ("[DONE]".equals(data)) {
+                                emitToolCalls(toolCallAcc, callback);
                                 callback.onComplete();//结束回调
                                 return;
                             }
@@ -115,17 +126,54 @@ public class DeepSeekAgentClient {
                                         callback.onChunk(content);//回调向外吐出每一小段文字，上层业务发给前端，实现打字效果
                                     }
                                 }
+                                accumulateToolCalls(delta.path("tool_calls"), toolCallAcc);
                             } catch (Exception e) {
                                 log.warn("解析 SSE 失败: {}", data);
                             }
                         }
                     }
+                    emitToolCalls(toolCallAcc, callback);
                     callback.onComplete();
                 }
             }
         } catch (Exception e) {
             log.error("流式请求失败", e);
             callback.onError(e);
+        }
+    }
+
+    private void accumulateToolCalls(JsonNode deltaToolCalls, Map<Integer, ObjectNode> acc) {
+        if (deltaToolCalls == null || !deltaToolCalls.isArray()) {
+            return;
+        }
+        for (JsonNode tc : deltaToolCalls) {
+            int index = tc.path("index").asInt(0);
+            ObjectNode call = acc.computeIfAbsent(index, k -> mapper.createObjectNode());
+            if (call.path("id").asText("").isEmpty() && tc.hasNonNull("id")) {
+                call.put("id", tc.get("id").asText());
+            }
+            call.put("type", "function");
+            JsonNode fn = tc.path("function");
+            if (fn.isMissingNode()) {
+                continue;
+            }
+            ObjectNode fnNode = call.has("function") ? (ObjectNode) call.get("function") : mapper.createObjectNode();
+            if (!call.has("function")) {
+                call.set("function", fnNode);
+            }
+            if (fn.hasNonNull("name")) {
+                fnNode.put("name", fn.get("name").asText());
+            }
+            if (fn.hasNonNull("arguments")) {
+                //arguments 是分片字符串，逐段拼接
+                fnNode.put("arguments", fnNode.path("arguments").asText("") + fn.get("arguments").asText());
+            }
+        }
+    }
+
+    private void emitToolCalls(Map<Integer, ObjectNode> acc, Callback callback) {
+        if (!acc.isEmpty()) {
+            callback.onToolCalls(new ArrayList<>(acc.values()));
         }
     }
 

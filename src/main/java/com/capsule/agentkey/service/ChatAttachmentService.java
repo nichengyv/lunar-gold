@@ -3,6 +3,7 @@ package com.capsule.agentkey.service;
 import com.capsule.agentkey.entity.ChatAttachment;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.repository.ChatAttachmentRepository;
+import com.capsule.agentkey.util.FileUploadValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -55,21 +56,13 @@ public class ChatAttachmentService {
     }
 
     public ChatAttachment uploadAttachment(Long userId, MultipartFile file, String description) throws IOException {
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("上传文件不能为空");
-        }
-
-        //getOriginalFilename()获取用户把本地原始文件名，还能判断是否有后缀，没有就抛异常
+        //扩展名白名单 + Tika 内容嗅探；不通过直接抛 400，且附带可读错误消息
+        String ext = FileUploadValidator.validateAttachment(file);
         String originalName = file.getOriginalFilename();
-        if (originalName == null || !originalName.contains(".")) {
-            throw new BusinessException("文件名格式不正确");
-        }
 
         //保证上传文件夹存在，若目录不存在，就创建文件夹，防止后面文件IO报错
         ensureUploadDirExists();
 
-        //提出后缀转小写   toLowerCase()统一转小写   lastIndexOf找到最后一个小数点位置
-        String ext = originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase();
         //生成服务器侧存储文件名（生成随机文件名）
         String fileName = UUID.randomUUID() + "." + ext;
         //uploadDir是Path对象，表示目标文件夹   resolve(fileName)把文件名拼接在文件夹路径后

@@ -23,6 +23,10 @@ public class Document {
     @Column(nullable = false)
     private Long userId;
 
+    /** 所属项目：资料按项目隔离，检索只在本项目内进行 */
+    @Column(nullable = false)
+    private Long projectId;
+
     @Column(nullable = false, length = 255)
     private String fileName;
 
