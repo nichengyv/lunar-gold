@@ -49,6 +49,14 @@ spring:
 deepseek:
   api:
     url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+  # 主对话模型（ReAct 循环、工具调用）
+  model: ${DEEPSEEK_MODEL:deepseek-chat}
+  # 允许用户在对话框里切换的模型白名单，逗号分隔；不在列表内的请求一律回落到 model
+  allowed-models: ${DEEPSEEK_ALLOWED_MODELS:deepseek-chat,deepseek-reasoner}
+  # 视觉模型：用户上传截图时用来转写图片内容。DeepSeek 官方 deepseek-flash 支持图片输入
+  vision-model: ${DEEPSEEK_VISION_MODEL:deepseek-flash}
+  # 关掉后图片只按文件名元数据参与对话（不再调用视觉模型）
+  vision-enabled: ${DEEPSEEK_VISION_ENABLED:true}
 
 # Embedding 服务配置（RAG 向量化）
 # 注意：DeepSeek 不提供 Embedding 端点，这里默认使用硅基流动 SiliconFlow（兼容 OpenAI 格式，国内可直连）
@@ -65,6 +73,51 @@ embedding:
 rag:
   min-score: ${RAG_MIN_SCORE:0.5}
   gate-score: ${RAG_GATE_SCORE:0.55}
+
+# 长上下文滚动摘要：历史超阈值时把较早的对话压成摘要持久化，后续注入 system prompt
+context:
+  summary:
+    # 总开关：置 false 时退化为「只保留最近消息」的旧策略
+    enabled: ${CONTEXT_SUMMARY_ENABLED:true}
+    # 历史条数超过该值才考虑压缩
+    trigger-messages: ${CONTEXT_SUMMARY_TRIGGER_MESSAGES:20}
+    # 最近多少条保持原文，不压进摘要（与模型可见的最近窗口对齐）
+    keep-recent-messages: ${CONTEXT_SUMMARY_KEEP_RECENT_MESSAGES:10}
+    # 一次至少压缩多少条新消息才调用模型，避免每轮都压缩一两条
+    min-new-messages: ${CONTEXT_SUMMARY_MIN_NEW_MESSAGES:6}
+    # 送入摘要模型的原文上限（字符）
+    max-input-chars: ${CONTEXT_SUMMARY_MAX_INPUT_CHARS:12000}
+    # 摘要本身上限（字符），防止摘要越滚越长
+    max-summary-chars: ${CONTEXT_SUMMARY_MAX_SUMMARY_CHARS:1200}
+
+# 工作区文件系统配置
+workspace:
+  # Agent 单次读取文件的最大字节数，超出截断并提示。代码文件通常 < 100KB。
+  max-read-bytes: ${WORKSPACE_MAX_READ_BYTES:102400}
+  # Agent 可写文件的最大字节数，防止误写超大文件撑爆磁盘。
+  max-write-bytes: ${WORKSPACE_MAX_WRITE_BYTES:524288}
+  # 搜索结果最大返回条数，避免 grep 整库把上下文撑爆。
+  max-search-results: ${WORKSPACE_MAX_SEARCH_RESULTS:50}
+  # Agent 单次操作目录的最大深度（list_dir 递归时防止扫全盘）
+  max-list-depth: ${WORKSPACE_MAX_LIST_DEPTH:3}
+  # 终端命令执行（run_command）的沙箱参数
+  command:
+    # 总开关：部署到不受信任环境时置 false，Agent 只能读写文件、不能执行命令
+    enabled: ${WORKSPACE_COMMAND_ENABLED:true}
+    # 单条命令默认超时（秒），模型可通过 timeout 参数调大，但不超过 max-timeout-seconds
+    timeout-seconds: ${WORKSPACE_COMMAND_TIMEOUT_SECONDS:60}
+    max-timeout-seconds: ${WORKSPACE_COMMAND_MAX_TIMEOUT_SECONDS:300}
+    # 返回给模型的输出上限（字符），超出只保留头部并标记截断
+    max-output-bytes: ${WORKSPACE_COMMAND_MAX_OUTPUT_BYTES:8192}
+    # 可执行程序白名单，逗号分隔；不配置则用代码里的默认开发工具列表
+    allowed: ${WORKSPACE_COMMAND_ALLOWED:npm,npx,node,pnpm,yarn,git,mvn,mvnw,java,javac,gradle,gradlew,python,python3,pip,pip3,pytest,go,dotnet,cargo,make,cmake,tsc,vite}
+    # 找不到 java/mvn 时的兜底：显式指定安装目录（IDEA 能编译不代表它们在系统 PATH 里）。
+    # 下面两个是当前机器的默认值，换机器时改成自己的，或用环境变量覆盖；
+    # 目录不存在会自动忽略并回退到 JAVA_HOME / MAVEN_HOME / PATH。
+    java-home: "${WORKSPACE_JAVA_HOME:C:/Users/16680/.jdks/ms-21.0.11}"
+    maven-home: "${WORKSPACE_MAVEN_HOME:D:/IDEA/IntelliJ IDEA 2024.1/plugins/maven/lib/maven3}"
+    # 额外参与程序查找的目录，多个用分号分隔，如 "D:/tools/bin;D:/other/bin"
+    extra-path: ${WORKSPACE_COMMAND_EXTRA_PATH:}
 
 app:
   jwt:

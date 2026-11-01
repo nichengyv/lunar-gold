@@ -161,9 +161,10 @@ public class DocumentService {
     }
 
     /**
-     * 引用的资料：只暴露用户能理解的字段，前端用于在回答下方展示出处
+     * 引用的资料：只暴露用户能理解的字段，前端用于在回答下方展示出处。
+     * 额外带 content：让前端点击时能展开原文片段，实现"有据可依"的助手体验。
      */
-    public record Source(Long documentId, String fileName, float score) {
+    public record Source(Long documentId, String fileName, float score, String content) {
     }
 
     /**
@@ -176,22 +177,72 @@ public class DocumentService {
     }
 
     /**
+     * 解析消息里点名的资料（前端插入的 `@资料:《文件名》`），返回本工作区内匹配的文档 id。
+     * 名字按文件名精确匹配（忽略大小写），找不到的直接忽略，不影响普通提问。
+     */
+    public List<Long> resolveReferencedDocuments(Long userId, Long projectId, String prompt) {
+        if (prompt == null || !prompt.contains("@资料")) {
+            return List.of();
+        }
+        // 没有工作区上下文时无法定位资料，直接按普通提问处理
+        if (projectId == null) {
+            return List.of();
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("@资料[：:]《([^》]+)》").matcher(prompt);
+        List<String> names = new ArrayList<>();
+        while (m.find()) {
+            String name = m.group(1).trim();
+            if (!name.isEmpty() && !names.contains(name)) names.add(name);
+        }
+        if (names.isEmpty()) return List.of();
+
+        List<Document> docs = documentRepository.findByUserIdAndProjectIdOrderByCreateTimeDesc(userId, projectId);
+        List<Long> ids = new ArrayList<>();
+        for (String name : names) {
+            docs.stream()
+                    .filter(d -> d.getFileName() != null && d.getFileName().equalsIgnoreCase(name))
+                    .findFirst()
+                    .ifPresent(d -> {
+                        if (!ids.contains(d.getId())) ids.add(d.getId());
+                    });
+        }
+        if (ids.isEmpty()) {
+            log.info("点名的资料未在当前工作区找到: {}", names);
+        } else {
+            log.info("点名引用资料 {} 份: {}", ids.size(), ids);
+        }
+        return ids;
+    }
+
+    /**
      * RAG 检索：只检索当前项目内的知识库，避免不同项目的资料互相串味。
      * 两道门槛避免"答非所问却标出处"：
      * 1) 单片段相关度低于 minScore 丢弃；
      * 2) 最高分都低于 gateScore 时，判定本次问题与资料无关，整体不使用知识库。
      */
     public RagResult retrieveContext(Long userId, Long projectId, String query, int topK) throws Exception {
+        return retrieveContext(userId, projectId, query, topK, List.of());
+    }
+
+    /**
+     * 点名资料检索：documentIds 非空时只在这些资料内部检索，且跳过"整体不相关"门槛——
+     * 用户既然主动 @ 了这份资料，就按他的意图检索，只保留单片段相关度下限。
+     */
+    public RagResult retrieveContext(Long userId, Long projectId, String query, int topK,
+                                     List<Long> documentIds) throws Exception {
         String apiKey = processingService.resolveEmbeddingKey(userId);
         float[] queryVec = embeddingService.embedSingle(apiKey, query);
 
-        List<VectorStoreService.SearchResult> results =
-                vectorStoreService.searchForProject(userId, projectId, queryVec, topK, minScore);
+        boolean targeted = documentIds != null && !documentIds.isEmpty();
+        List<VectorStoreService.SearchResult> results = targeted
+                ? vectorStoreService.searchForProject(userId, projectId, queryVec, topK, minScore, documentIds)
+                : vectorStoreService.searchForProject(userId, projectId, queryVec, topK, minScore);
 
         if (results.isEmpty()) return RagResult.empty();
 
         float topScore = results.get(0).score();
-        if (topScore < gateScore) {
+        if (!targeted && topScore < gateScore) {
             log.info("知识库最高相关度 {} 未达门槛 {}，本轮不引用资料", String.format("%.2f", topScore), gateScore);
             return RagResult.empty();
         }
@@ -214,11 +265,12 @@ public class DocumentService {
               .append(r.content()).append("\n\n");
         }
 
-        //同一份资料可能命中多个片段，出处按文档去重并保留最高分
+        //同一份资料可能命中多个片段，出处按文档去重并保留最高分（同时带上该片段的原文，前端可展开查看）
         Map<Long, Source> byDoc = new LinkedHashMap<>();
         for (VectorStoreService.SearchResult r : results) {
             byDoc.merge(r.documentId(),
-                    new Source(r.documentId(), names.getOrDefault(r.documentId(), "未知资料"), r.score()),
+                    new Source(r.documentId(), names.getOrDefault(r.documentId(), "未知资料"),
+                            r.score(), r.content()),
                     (a, b) -> a.score() >= b.score() ? a : b);
         }
         return new RagResult(sb.toString(), new ArrayList<>(byDoc.values()));

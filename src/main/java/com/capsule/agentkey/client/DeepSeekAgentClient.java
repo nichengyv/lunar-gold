@@ -37,6 +37,10 @@ public class DeepSeekAgentClient {
     @Value("${deepseek.api.url:https://api.deepseek.com/chat/completions}")
     private String apiUrl;
 
+    /** 主对话模型；视觉识别由调用方显式传入 vision-model，默认值只用于普通对话 */
+    @Value("${deepseek.model:deepseek-chat}")
+    private String defaultModel;
+
     public interface Callback {
         void onChunk(String chunk);//收到一小块文字，反复触发
         /**
@@ -53,8 +57,16 @@ public class DeepSeekAgentClient {
      */
     public JsonNode callSync(String apiKey, List<ObjectNode> messages,
                              List<Map<String, Object>> tools) throws IOException {
+        return callSync(apiKey, defaultModel, messages, tools);
+    }
+
+    /**
+     * 同步调用（指定模型）：用于 ReAct 决策阶段，也可用视觉模型做图片转写。
+     */
+    public JsonNode callSync(String apiKey, String model, List<ObjectNode> messages,
+                             List<Map<String, Object>> tools) throws IOException {
         ObjectNode requestBody = mapper.createObjectNode();//新建json对象，用来组装请求体，put（字段名，普通值） set（字段名，jsonnode节点）
-        requestBody.put("model", "deepseek-chat");//指定调用模型
+        requestBody.put("model", model);//指定调用模型
         requestBody.set("messages", mapper.valueToTree(messages));//把对话列表转换为json格式，放进请求
         if (tools != null && !tools.isEmpty()) {
             requestBody.set("tools", mapper.valueToTree(tools));//把工具定义列表传给大模型
@@ -81,9 +93,17 @@ public class DeepSeekAgentClient {
      */
     public void streamChat(String apiKey, List<ObjectNode> messages,
                            List<Map<String, Object>> tools, Callback callback) {
+        streamChat(apiKey, defaultModel, messages, tools, callback);
+    }
+
+    /**
+     * 流式调用（指定模型）。
+     */
+    public void streamChat(String apiKey, String model, List<ObjectNode> messages,
+                           List<Map<String, Object>> tools, Callback callback) {
         try {
             ObjectNode requestBody = mapper.createObjectNode();
-            requestBody.put("model", "deepseek-chat");
+            requestBody.put("model", model);
             requestBody.set("messages", mapper.valueToTree(messages));
             if (tools != null && !tools.isEmpty()) {
                 requestBody.set("tools", mapper.valueToTree(tools));

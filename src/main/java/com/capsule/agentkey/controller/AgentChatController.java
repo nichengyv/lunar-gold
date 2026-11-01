@@ -2,17 +2,24 @@ package com.capsule.agentkey.controller;
 
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.ChatRequest;
+import com.capsule.agentkey.dto.MessageSearchHit;
 import com.capsule.agentkey.entity.ChatAttachment;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.service.AgentPolicy;
+import com.capsule.agentkey.service.AgentPolicyResolver;
 import com.capsule.agentkey.service.ApiKeyService;
 import com.capsule.agentkey.service.ChatAttachmentService;
 import com.capsule.agentkey.service.ChatService;
+import com.capsule.agentkey.service.ContextSummaryService;
 import com.capsule.agentkey.service.DocumentService;
+import com.capsule.agentkey.service.GenerationRegistry;
 import com.capsule.agentkey.service.ProjectService;
 import com.capsule.agentkey.service.ReActAgentService;
+import com.capsule.agentkey.service.VisionService;
+import com.capsule.agentkey.tool.FileChange;
 import com.capsule.agentkey.tool.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -26,6 +33,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +51,10 @@ public class AgentChatController {
     private final ObjectMapper mapper = new ObjectMapper();
     private final ChatAttachmentService chatAttachmentService;
     private final ProjectService projectService;
+    private final GenerationRegistry generationRegistry;
+    private final VisionService visionService;
+    private final ContextSummaryService contextSummaryService;
+    private final AgentPolicyResolver policyResolver;
     private final Executor agentStreamExecutor;
 
     public AgentChatController(ApiKeyService apiKeyService,
@@ -50,12 +62,20 @@ public class AgentChatController {
                                ChatService chatService,
                                ChatAttachmentService chatAttachmentService,
                                ProjectService projectService,
+                               GenerationRegistry generationRegistry,
+                               VisionService visionService,
+                               ContextSummaryService contextSummaryService,
+                               AgentPolicyResolver policyResolver,
                                @Qualifier("agentStreamExecutor") Executor agentStreamExecutor) {
         this.apiKeyService = apiKeyService;
         this.agentService = agentService;
         this.chatService = chatService;
         this.chatAttachmentService = chatAttachmentService;
         this.projectService = projectService;
+        this.generationRegistry = generationRegistry;
+        this.visionService = visionService;
+        this.contextSummaryService = contextSummaryService;
+        this.policyResolver = policyResolver;
         this.agentStreamExecutor = agentStreamExecutor;
     }
 
@@ -106,11 +126,32 @@ public class AgentChatController {
         //———— 准备阶段（仍在请求线程上，失败直接抛 4xx/5xx 给前端，不走 SSE） ————
         Long finalSessionId = sessionId;
         Long effectiveProjectId;
+        ChatSession existingSession = null;
         if (finalSessionId != null) {
             //老会话：以会话自身的项目归属为准，避免切项目后把别的项目资料混进上下文
-            effectiveProjectId = chatService.getOwnedSession(finalSessionId, userId).getProjectId();
+            existingSession = chatService.getOwnedSession(finalSessionId, userId);
+            effectiveProjectId = existingSession.getProjectId();
         } else {
             effectiveProjectId = projectService.resolveProjectId(userId, request.getProjectId());
+        }
+
+        //运行参数以会话已存值为基线，请求显式传值则覆盖（用户在会话头切换模型/档位/权限）；
+        //老会话没有存权限时继承项目默认，项目未配置按可执行处理
+        String baseModel = existingSession != null ? existingSession.getModel() : null;
+        String baseReasoning = existingSession != null ? existingSession.getReasoning() : null;
+        String basePermission = existingSession != null ? existingSession.getPermission() : null;
+        if (basePermission == null) {
+            basePermission = projectService.getOwned(userId, effectiveProjectId).getDefaultPermission();
+        }
+        final AgentPolicy policy = policyResolver.resolve(
+                request.getModel() != null ? request.getModel() : baseModel,
+                request.getReasoning() != null ? request.getReasoning() : baseReasoning,
+                request.getPermission() != null ? request.getPermission() : basePermission);
+
+        if (existingSession != null) {
+            //把本次选择写回会话，切回旧会话时下拉框仍显示当时的配置
+            chatService.applyAgentPolicy(existingSession.getId(), userId, policy);
+        } else {
             String title;
             if (prompt != null && !prompt.isEmpty()) {
                 //B6：按 Unicode 码点截断标题，避免 substring 按 UTF-16 切代理对字符成乱码
@@ -119,7 +160,7 @@ public class AgentChatController {
             } else {
                 title = "文件分析";
             }
-            ChatSession session = chatService.createSession(userId, effectiveProjectId, title);
+            ChatSession session = chatService.createSession(userId, effectiveProjectId, title, policy);
             finalSessionId = session.getId();
         }
         final Long chatSessionId = finalSessionId;
@@ -167,30 +208,84 @@ public class AgentChatController {
 
         final String finalFileContext = fileContext;
         final List<ChatMessage> finalHistory = history;
+        final List<Long> finalAttachmentIds = attachmentIds;
+
+        //登记本次生成：前端点「停止」时通过 /chat/stop 置位同一标记，长命令也能被及时杀掉
+        generationRegistry.register(chatSessionId, clientDisconnected);
 
         //———— 执行阶段：提交到独立线程池，Controller 立即 return emitter 释放 Tomcat 线程 ————
         agentStreamExecutor.execute(() -> {
             StringBuilder fullResponse = new StringBuilder();
+            // 本轮执行轨迹：思考/工具/来源/改动，完成时随助手消息一起落库，切回会话仍能还原卡片
+            long traceStartedAt = System.currentTimeMillis();
+            StringBuilder traceThinking = new StringBuilder();
+            List<Map<String, Object>> traceTools = new ArrayList<>();
+            List<Map<String, Object>> traceSources = new ArrayList<>();
+            List<Map<String, Object>> traceChanges = new ArrayList<>();
             try {
                 //先告诉前端 sessionId，前端用它把后续流式消息挂到正确的会话上
                 sendEvent(emitter, "session_id", String.valueOf(chatSessionId));
 
-                agentService.execute(realApiKey, prompt, finalHistory, userId, projectId, useRag, finalFileContext,
+                //截图：先交给视觉模型转写成文字，主对话模型再基于这段文字推理
+                String imageContext = "";
+                if (finalAttachmentIds != null && !finalAttachmentIds.isEmpty() && visionService.isEnabled()) {
+                    try {
+                        List<ChatAttachmentService.ImageInput> images =
+                                chatAttachmentService.buildImageInputs(userId, finalAttachmentIds);
+                        if (!images.isEmpty()) {
+                            sendEventQuietly(emitter, "thinking",
+                                    "{\"thought\":\"🖼 正在识别截图…\"}", clientDisconnected);
+                            imageContext = visionService.describeImages(realApiKey, images, prompt);
+                        }
+                    } catch (Exception e) {
+                        log.warn("截图识别失败，降级为纯文本对话: {}", e.getMessage());
+                    }
+                }
+
+                //长会话：把较早的对话压成滚动摘要并注入本轮上下文；
+                //失败只降级为不注入摘要，不影响本轮回答
+                String contextSummary = "";
+                try {
+                    contextSummary = contextSummaryService.refresh(realApiKey, chatSessionId, finalHistory, policy);
+                } catch (Exception e) {
+                    log.warn("生成会话摘要失败，跳过摘要注入: {}", e.getMessage());
+                }
+
+                //@会话 点名的历史会话：取最近几轮问答作为背景注入；失败只跳过引用，不影响本轮回答
+                String sessionReferenceContext = "";
+                try {
+                    sessionReferenceContext =
+                            chatService.resolveReferencedSessionContext(userId, projectId, chatSessionId, prompt);
+                    if (!sessionReferenceContext.isEmpty()) {
+                        sendEventQuietly(emitter, "thinking",
+                                "{\"thought\":\"🔗 已引用历史会话\"}", clientDisconnected);
+                    }
+                } catch (Exception e) {
+                    log.warn("解析点名会话失败，跳过引用: {}", e.getMessage());
+                }
+
+                agentService.execute(realApiKey, policy, prompt, finalHistory, userId, projectId, useRag, finalFileContext,
+                        imageContext,
+                        contextSummary,
+                        sessionReferenceContext,
                         clientDisconnected,
                         new ReActAgentService.StreamCallback() {
                             @Override
                             public void onSources(List<DocumentService.Source> sources) {
                                 try {
-                                    //只下发用户能理解的三项：资料 id、文件名、相关度
+                                    //下发资料出处：id、文件名、相关度、片段原文（前端可点击展开）
                                     List<Map<String, Object>> list = sources.stream()
                                             .map(s -> {
                                                 Map<String, Object> item = new HashMap<String, Object>();
                                                 item.put("id", s.documentId());
                                                 item.put("name", s.fileName());
                                                 item.put("score", Math.round(s.score() * 100) / 100.0);
+                                                item.put("content", s.content());
                                                 return item;
                                             })
                                             .toList();
+                                    traceSources.clear();
+                                    traceSources.addAll(list);
                                     sendEvent(emitter, "sources", mapper.writeValueAsString(list));
                                 } catch (IOException e) {
                                     clientDisconnected.set(true);
@@ -201,6 +296,8 @@ public class AgentChatController {
                             @Override
                             public void onThinking(String thought) {
                                 try {
+                                    if (traceThinking.length() > 0) traceThinking.append('\n');
+                                    traceThinking.append(thought == null ? "" : thought);
                                     Map<String, String> data = new HashMap<>();
                                     data.put("thought", thought);
                                     sendEvent(emitter, "thinking", mapper.writeValueAsString(data));
@@ -213,6 +310,11 @@ public class AgentChatController {
                             @Override
                             public void onToolCall(String toolName, String arguments) {
                                 try {
+                                    Map<String, Object> item = new HashMap<>();
+                                    item.put("name", toolName);
+                                    item.put("args", arguments == null ? "{}" : arguments);
+                                    item.put("status", "running");
+                                    traceTools.add(item);
                                     Map<String, Object> data = new HashMap<>();
                                     data.put("tool", toolName);
                                     data.put("args", arguments);
@@ -227,6 +329,17 @@ public class AgentChatController {
                             @Override
                             public void onToolResult(String toolName, ToolResult result) {
                                 try {
+                                    // 与前端一致：回填最近一条同名且仍在运行的调用
+                                    for (int i = traceTools.size() - 1; i >= 0; i--) {
+                                        Map<String, Object> item = traceTools.get(i);
+                                        if (equalsIgnoreCase(item.get("name"), toolName) && "running".equals(item.get("status"))) {
+                                            item.put("status", result.isSuccess() ? "success" : "error");
+                                            item.put("result", truncateForTrace(result.getContent(), 2000));
+                                            item.put("error", truncateForTrace(result.getError(), 1000));
+                                            item.put("costMs", result.getCostMs());
+                                            break;
+                                        }
+                                    }
                                     Map<String, Object> data = new HashMap<>();
                                     data.put("tool", toolName);
                                     data.put("success", result.isSuccess());
@@ -238,6 +351,27 @@ public class AgentChatController {
                                 } catch (IOException e) {
                                     clientDisconnected.set(true);
                                     log.error("发送 tool_result 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onFileChange(FileChange change) {
+                                try {
+                                    //下发「这次改了什么文件」：路径、动作、来源工具、增删行数与逐行 diff
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("path", change.path());
+                                    data.put("action", change.action());
+                                    data.put("source", change.source());
+                                    data.put("additions", change.additions());
+                                    data.put("deletions", change.deletions());
+                                    data.put("diff", change.diff());
+                                    // 同一文件多次改动只留最新一条，与前端展示规则一致
+                                    traceChanges.removeIf(c -> change.path().equals(c.get("path")));
+                                    traceChanges.add(data);
+                                    sendEvent(emitter, "file_change", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 file_change 事件失败（客户端可能已断开）", e);
                                 }
                             }
 
@@ -267,9 +401,20 @@ public class AgentChatController {
                                 try {
                                     sendEvent(emitter, "done", "[DONE]");
                                     if (fullResponse.length() > 0) {
+                                        // 轨迹只随完整回答落库；断线丢弃半截回复时也不留残缺轨迹
+                                        Map<String, Object> trace = new HashMap<>();
+                                        if (traceThinking.length() > 0) {
+                                            trace.put("thinking", truncateForTrace(traceThinking.toString(), 6000));
+                                        }
+                                        if (!traceTools.isEmpty()) trace.put("tools", traceTools);
+                                        if (!traceSources.isEmpty()) trace.put("sources", traceSources);
+                                        if (!traceChanges.isEmpty()) trace.put("changes", traceChanges);
+                                        // 耗时随轨迹落库，切回历史会话也能显示「已完成，用时…」
+                                        trace.put("durationMs", System.currentTimeMillis() - traceStartedAt);
                                         chatService.saveMessage(userId, chatSessionId,
                                                 ChatMessage.MessageRole.ASSISTANT,
-                                                fullResponse.toString(), null);
+                                                fullResponse.toString(), null,
+                                                mapper.writeValueAsString(trace));
                                     }
                                 } catch (Exception e) {
                                     log.error("SSE 完成处理失败", e);
@@ -300,10 +445,28 @@ public class AgentChatController {
                 } finally {
                     emitter.complete();
                 }
+            } finally {
+                generationRegistry.unregister(chatSessionId, clientDisconnected);
             }
         });
 
         return emitter;
+    }
+
+    /**
+     * 停止生成：把该会话的生成标记置位。
+     * 前端会 abort 自己的 SSE 请求，但长命令执行期间没有 SSE 写出、后端感知不到断连，
+     * 所以需要这个接口让 ReAct 循环与运行中的子进程尽快停下。
+     */
+    @PostMapping("/chat/stop")
+    public ApiResponse<Void> stopGeneration(@RequestParam(value = "sessionId", required = false) Long sessionId) {
+        Long userId = getCurrentUserId();
+        if (sessionId != null) {
+            //校验归属，避免用别人的 sessionId 打断别人的生成
+            chatService.getOwnedSession(sessionId, userId);
+            generationRegistry.cancel(sessionId);
+        }
+        return ApiResponse.success(null);
     }
 
     /**
@@ -312,6 +475,16 @@ public class AgentChatController {
      */
     private void sendEvent(SseEmitter emitter, String event, String data) throws IOException {
         emitter.send(SseEmitter.event().name(event).data(data == null ? "" : data));
+    }
+
+    /** 轨迹落库前截断：工具返回可能是整份文件，避免把 chat_message 撑到几 MB */
+    private static String truncateForTrace(String text, int max) {
+        if (text == null || text.length() <= max) return text;
+        return text.substring(0, max) + "…（已截断）";
+    }
+
+    private static boolean equalsIgnoreCase(Object value, String expected) {
+        return value != null && expected != null && expected.equalsIgnoreCase(value.toString());
     }
 
     /** 静默发送：失败不抛异常（用于错误已经发生、尽力通知前端的场景） */
@@ -338,6 +511,13 @@ public class AgentChatController {
         return ApiResponse.success(chatService.getHistory(sessionId, getCurrentUserId()));
     }
 
+    /** 消息全文搜索：在当前用户的会话正文里找关键字，按会话归并返回命中片段 */
+    @GetMapping("/messages/search")
+    public ApiResponse<List<MessageSearchHit>> searchMessages(
+            @RequestParam(value = "keyword", required = false) String keyword) {
+        return ApiResponse.success(chatService.searchMessages(getCurrentUserId(), keyword));
+    }
+
     @DeleteMapping("/sessions/{sessionId}")
     public ApiResponse<Void> deleteSession(@PathVariable Long sessionId) {
         chatService.deleteSession(sessionId, getCurrentUserId());
@@ -352,6 +532,18 @@ public class AgentChatController {
     }
 
     public record RenameSessionRequest(String title) {
+    }
+
+    /** 会话头切换工作权限：立即持久化到会话，避免切走再切回被旧值覆盖 */
+    @PatchMapping("/sessions/{sessionId}/permission")
+    public ApiResponse<Void> updateSessionPermission(@PathVariable Long sessionId,
+                                                     @RequestBody SessionPermissionRequest request) {
+        chatService.updateSessionPermission(sessionId, getCurrentUserId(),
+                request == null ? null : request.permission());
+        return ApiResponse.success(null);
+    }
+
+    public record SessionPermissionRequest(String permission) {
     }
 
     @PostMapping("/chat/attachment")

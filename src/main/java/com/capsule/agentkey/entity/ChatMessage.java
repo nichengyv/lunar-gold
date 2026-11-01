@@ -34,6 +34,10 @@ public class ChatMessage {
     @Column(length = 50)
     private String toolName;
 
+    /** 本轮助手消息的执行轨迹 JSON（思考/工具调用/来源/文件改动），历史还原时前端据此重建卡片 */
+    @Column(columnDefinition = "TEXT")
+    private String trace;
+
     @CreatedDate
     private LocalDateTime createTime;
 

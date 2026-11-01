@@ -9,12 +9,13 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.util.Date;
 
+//JWT 编解码：签发、解 jti、解 userId、验签、验过期
 @Component
 public class JwtUtil {
     //从配置里获取JWT签名密钥，密钥本身不参与解密，只做防伪校验，JWT载荷本身是BASE64
     @Value("${app.jwt.secret}")
     private String secret;
-    //读取token过期时长
+    //读取token有效时长
     @Value("${app.jwt.expiration}")
     private Long expiration;
 
@@ -23,7 +24,7 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(secret.getBytes());
     }
 
-    //生成令牌（登录时调用）
+    //生成令牌token（登录时调用）
     public String generateToken(Long userId, String username) {
         return Jwts.builder()//开始构建JWT令牌
                 .setSubject(username)//存放用户名

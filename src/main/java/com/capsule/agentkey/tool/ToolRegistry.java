@@ -66,12 +66,35 @@ public class ToolRegistry {
     }
 
 
+    //写文件类工具：只读权限下不暴露
+    private static final Set<String> WRITE_TOOLS = Set.of("write_file", "edit_file");
+
+    //执行命令工具：只有「可执行」权限才暴露
+    private static final Set<String> EXECUTE_TOOLS = Set.of("run_command");
+
+    /**
+     * 权限过滤：模型只能看到当前工作权限允许的工具，
+     * 避免它尝试越权调用、答非所问地反复报错。
+     */
+    private boolean isAllowed(String toolName, com.capsule.agentkey.service.AgentPolicy.Permission permission) {
+        if (permission == null) {
+            return true;
+        }
+        if (!permission.canWrite() && WRITE_TOOLS.contains(toolName)) {
+            return false;
+        }
+        return permission.canExecute() || !EXECUTE_TOOLS.contains(toolName);
+    }
+
     //这个方法告诉大模型有哪些工具可以用
     // 把工具翻译成"大模型能看懂的语言"
     // 生成 OpenAI/DeepSeek 格式的 function calling 定义
-    public List<Map<String, Object>> buildToolDefinitions() {
+    public List<Map<String, Object>> buildToolDefinitions(com.capsule.agentkey.service.AgentPolicy.Permission permission) {
         List<Map<String, Object>> definitions = new ArrayList<>();//json最外层，工具清单
         for (BaseTool tool : tools.values()) {
+            if (!isAllowed(tool.getName(), permission)) {
+                continue;//越权工具不进清单
+            }
             Map<String, Object> def = new HashMap<>();//单个工具的包装壳
             def.put("type", "function");//告诉模型，这是一个函数类型的工具
             Map<String, Object> function = new HashMap<>();//工具说明书
@@ -86,11 +109,17 @@ public class ToolRegistry {
 //大模型决定调用后，真正执行工具，解析大模型传来的参数字符串，dispatch调用execute
 // 大模型说："我要用 get_current_weather，参数是 {'city':'北京'}"
 // 这里负责：找到工具 → 解析参数 → 执行 → 返回结果
-    public ToolResult dispatch(String toolName, String argumentsJson) {
+    public ToolResult dispatch(String toolName, String argumentsJson,
+                               com.capsule.agentkey.service.AgentPolicy.Permission permission) {
         //用map集合自带的get方法，根据工具名称，取出对应的工具实例
         BaseTool tool = tools.get(toolName);
         if (tool == null) {
             return ToolResult.fail("未知工具: " + toolName);
+        }
+        //兜底：模型可能绕过工具清单直接指名调用，这里再拦一次
+        if (!isAllowed(toolName, permission)) {
+            String label = permission == null ? "受限" : permission.label();
+            return ToolResult.fail("当前工作权限为「" + label + "」，不允许调用工具 " + toolName);
         }
         try {
             //创建jsckson序列化对象，把传入的参数字符串json转换为jsonNode树形对象

@@ -123,14 +123,26 @@ public class VectorStoreService {
         return search(userId, queryVec, topK, null, null, projectId, minScore);
     }
 
+    /** 项目知识库检索，限定到指定资料（用户在 @ 里点名引用的资料） */
+    public List<SearchResult> searchForProject(Long userId, Long projectId, float[] queryVec,
+                                               int topK, float minScore, List<Long> documentIds) {
+        return search(userId, queryVec, topK, null, null, projectId, minScore, documentIds);
+    }
+
     //余弦相似度检索：由 pgvector 的 HNSW 索引加速，替代原内存版的 O(N) 暴力扫描
     public List<SearchResult> search(Long userId, float[] queryVec, int topK,
                                      Long documentId, String sourceType) {
-        return search(userId, queryVec, topK, documentId, sourceType, null, DEFAULT_MIN_SCORE);
+        return search(userId, queryVec, topK, documentId, sourceType, null, DEFAULT_MIN_SCORE, null);
     }
 
     private List<SearchResult> search(Long userId, float[] queryVec, int topK,
                                       Long documentId, String sourceType, Long projectId, float minScore) {
+        return search(userId, queryVec, topK, documentId, sourceType, projectId, minScore, null);
+    }
+
+    private List<SearchResult> search(Long userId, float[] queryVec, int topK,
+                                      Long documentId, String sourceType, Long projectId, float minScore,
+                                      List<Long> documentIds) {
         if (queryVec == null || queryVec.length == 0) return Collections.emptyList();
 
         //动态拼接过滤条件：documentId / sourceType / projectId 为 null 时不限定（对应原内存版的 filter 逻辑）
@@ -154,6 +166,15 @@ public class VectorStoreService {
         if (projectId != null) {
             sql.append(" AND project_id = ?");
             params.add(projectId);
+        }
+        //点名的资料：只在这些文档内部检索
+        if (documentIds != null && !documentIds.isEmpty()) {
+            sql.append(" AND document_id IN (");
+            for (int i = 0; i < documentIds.size(); i++) {
+                sql.append(i == 0 ? "?" : ", ?");
+                params.add(documentIds.get(i));
+            }
+            sql.append(")");
         }
         //按相似度从高到低取前 topK 条（score 是 SELECT 别名，PG 支持按别名排序）
         sql.append(" ORDER BY score DESC LIMIT ?");

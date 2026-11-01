@@ -8,4 +8,11 @@ import java.util.List;
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
     List<ChatMessage> findBySessionIdOrderByCreateTimeAsc(Long sessionId);
     void deleteBySessionId(Long sessionId);
+
+    /**
+     * 消息全文搜索：按用户 + 正文包含关键字（忽略大小写），按时间倒序取最近若干条。
+     * 多取一些是为了在服务层按会话去重后还能凑够目标条数。
+     */
+    List<ChatMessage> findTop30ByUserIdAndContentContainingIgnoreCaseOrderByCreateTimeDesc(
+            Long userId, String content);
 }

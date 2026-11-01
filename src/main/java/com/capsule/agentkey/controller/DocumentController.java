@@ -27,7 +27,7 @@ public class DocumentController {
     }
 
     private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();//从上下文拿取Authtication对象
         if (auth != null && auth.getPrincipal() instanceof Long) {
             return (Long) auth.getPrincipal();
         }

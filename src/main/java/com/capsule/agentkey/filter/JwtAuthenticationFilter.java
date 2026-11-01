@@ -43,6 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 //利用token解密从jwt来获取信息，这里获取userid
                 Long userId = jwtUtil.getUserIdFromToken(token);
+                //校验签名和有效期，jti是token的唯一id
                 String jti = jwtUtil.getJtiFromToken(token);
 
                 //可撤销校验：jti 必须在 Redis 白名单里（登出/改密码会剔除）

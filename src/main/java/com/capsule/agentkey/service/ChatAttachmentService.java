@@ -29,6 +29,22 @@ public class ChatAttachmentService {
     private final VectorStoreService vectorStoreService;
     private final Path uploadDir;
 
+    /** 单轮最多送给视觉模型的图片数，避免一次请求过大 */
+    private static final int MAX_VISION_IMAGES = 4;
+    /** 单张图片原始字节上限（DeepSeek 单图上限 32MiB，这里更保守，base64 会膨胀 4/3） */
+    private static final long MAX_VISION_IMAGE_BYTES = 8L * 1024 * 1024;
+    /** 一轮图片原始字节总量上限 */
+    private static final long MAX_VISION_TOTAL_BYTES = 12L * 1024 * 1024;
+
+    /** 视觉模型只支持 JPEG/PNG/GIF/WebP，bmp 要转换成 PNG 再发 */
+    private static final Map<String, String> VISION_MIME = Map.of(
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "png", "image/png",
+            "gif", "image/gif",
+            "webp", "image/webp"
+    );
+
     public ChatAttachmentService(ChatAttachmentRepository attachmentRepository,
                                  DocumentParserService parserService,
                                  ApiKeyService apiKeyService,
@@ -260,6 +276,46 @@ public class ChatAttachmentService {
         attachmentRepository.delete(att);
     }
 
+    /**
+     * 把图片附件转成视觉模型可用的 base64 data URL。
+     * 只处理 jpg/jpeg/png/gif/webp；bmp/svg 这类视觉模型不支持的格式直接跳过。
+     */
+    public List<ImageInput> buildImageInputs(Long userId, List<Long> attachmentIds) {
+        if (attachmentIds == null || attachmentIds.isEmpty()) return List.of();
+        List<ImageInput> result = new ArrayList<>();
+        long totalBytes = 0;
+        for (ChatAttachment att : attachmentRepository.findAllById(attachmentIds)) {
+            if (!Objects.equals(att.getUserId(), userId)) continue;
+            String ext = att.getFileType() == null ? "" : att.getFileType().toLowerCase();
+            String mime = VISION_MIME.get(ext);
+            if (mime == null) continue;//非图片，或视觉模型不支持的图片格式
+            if (result.size() >= MAX_VISION_IMAGES) {
+                log.warn("图片数量超过 {} 张，多余部分跳过视觉输入 [attachmentId={}]", MAX_VISION_IMAGES, att.getId());
+                break;
+            }
+            if (att.getFileSize() != null && att.getFileSize() > MAX_VISION_IMAGE_BYTES) {
+                log.warn("图片超过 {}MB，跳过视觉输入 [{}]", MAX_VISION_IMAGE_BYTES / 1024 / 1024, att.getFileName());
+                continue;
+            }
+            try {
+                byte[] bytes = Files.readAllBytes(Paths.get(att.getStoragePath()));
+                if (totalBytes + bytes.length > MAX_VISION_TOTAL_BYTES) {
+                    log.warn("图片总量超过上限，跳过视觉输入 [{}]", att.getFileName());
+                    continue;
+                }
+                totalBytes += bytes.length;
+                String b64 = Base64.getEncoder().encodeToString(bytes);
+                result.add(new ImageInput(att.getFileName(), mime, "data:" + mime + ";base64," + b64));
+            } catch (IOException e) {
+                log.warn("读取图片失败，跳过视觉输入 [{}]: {}", att.getFileName(), e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /** 视觉模型输入：文件名 + MIME + 可直接放进 image_url.url 的 data URL */
+    public record ImageInput(String fileName, String mimeType, String dataUrl) {}
+
     private String extractContent(Path filePath, String ext, String originalName) {
         try {
             //isImage判断后缀是不是图片
@@ -289,7 +345,7 @@ public class ChatAttachmentService {
         } catch (Exception e) {
             log.warn("读取图片元数据失败: {}", originalName);
         }
-        sb.append("说明：当前模型不支持直接识别图片内容。如需分析图片，请描述图片内容或提供文字版本。");
+        sb.append("说明：这是用户上传的图片，内容已交给视觉模型转写后并入对话上下文。");
         return sb.toString();
     }
 

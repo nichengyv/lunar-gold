@@ -113,7 +113,9 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         List<String> origins = List.of(allowedOrigins.split(","));
         config.setAllowedOrigins(origins);
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        // 必须包含 PATCH：会话头改权限、工作区默认权限、重命名会话都走 PATCH，
+        // 漏掉时浏览器预检直接失败，前端只会看到"网络不稳定"
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

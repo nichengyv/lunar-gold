@@ -21,4 +21,10 @@ public class ChatRequest {
      */
     private boolean useRag = true;
     private List<Long> attachmentIds = new ArrayList<>();
+    /** 对话模型；为空沿用会话已存配置，非法值回落到配置默认模型 */
+    private String model;
+    /** 推理档位：FAST / STANDARD / DEEP；为空沿用会话配置 */
+    private String reasoning;
+    /** 工作权限：READ_ONLY / WRITE / EXECUTE；为空沿用会话配置，新会话继承项目默认 */
+    private String permission;
 }
