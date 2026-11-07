@@ -1,0 +1,54 @@
+version: '1.0'
+name: agentkey-ci
+displayName: AgentKey CI
+
+triggers:
+  push:
+    branches:
+      precise:
+        - master
+  pr:
+    branches:
+      precise:
+        - master
+
+stages:
+  - name: verify
+    displayName: 编译与测试
+    strategy: fast
+    trigger: auto
+    steps:
+      - step: build@maven
+        name: backend_verify
+        displayName: 后端 Java 21 编译与测试
+        # Gitee Go 插件最高内置 JDK 17，任务内引导项目要求的 JDK 21。
+        jdkVersion: '17'
+        mavenVersion: 3.6.3
+        commands:
+          - |
+            set -e
+            mkdir -p .ci/jdk-21
+            wget -q https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz -O .ci/jdk-21.tar.gz
+            tar -xzf .ci/jdk-21.tar.gz --strip-components=1 -C .ci/jdk-21
+            export JAVA_HOME="$PWD/.ci/jdk-21"
+            export PATH="$JAVA_HOME/bin:$PATH"
+            java -version
+            mvn -B --no-transfer-progress verify
+
+      - step: build@nodejs
+        name: frontend_verify
+        displayName: 前端 Node 22 类型检查与构建
+        # Gitee Go 插件最高内置 Node 15，任务内引导项目要求的 Node 22。
+        nodeVersion: 15.12.0
+        commands:
+          - |
+            set -e
+            cd frontend
+            mkdir -p .ci/node-22
+            wget -q https://registry.npmmirror.com/-/binary/node/v22.14.0/node-v22.14.0-linux-x64.tar.xz -O .ci/node-22.tar.xz
+            tar -xJf .ci/node-22.tar.xz --strip-components=1 -C .ci/node-22
+            export PATH="$PWD/.ci/node-22/bin:$PATH"
+            node --version
+            npm --version
+            npm ci
+            npm run build
