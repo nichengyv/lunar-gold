@@ -92,7 +92,7 @@ public class VectorStoreService {
             ps.setObject(6, r.projectId());//附件没有项目归属，允许为 null
             ps.setString(7, toVectorLiteral(r.vector()));
         });
-        log.info("✅ {} 条向量已写入 PostgreSQL", records.size());
+        log.info("{} 条向量已写入 PostgreSQL", records.size());
     }
 
     public void deleteByDocumentId(Long userId, Long documentId) {

@@ -1,7 +1,11 @@
 package com.capsule.agentkey.controller;
 
+import com.capsule.agentkey.config.Capability;
+import com.capsule.agentkey.config.RequiresCapability;
+import com.capsule.agentkey.dto.ApprovalDecisionRequest;
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.ChatRequest;
+import com.capsule.agentkey.dto.ChatSessionStats;
 import com.capsule.agentkey.dto.MessageSearchHit;
 import com.capsule.agentkey.entity.ChatAttachment;
 import com.capsule.agentkey.entity.ChatMessage;
@@ -21,6 +25,7 @@ import com.capsule.agentkey.service.ReActAgentService;
 import com.capsule.agentkey.service.VisionService;
 import com.capsule.agentkey.tool.FileChange;
 import com.capsule.agentkey.tool.ToolResult;
+import com.capsule.agentkey.tool.WorkspaceContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -35,9 +40,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
@@ -53,8 +60,14 @@ public class AgentChatController {
     private final ProjectService projectService;
     private final GenerationRegistry generationRegistry;
     private final VisionService visionService;
+    /** D3 可观测性：MeterRegistry 用于查 Agent 工具调用 Timer */
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     private final ContextSummaryService contextSummaryService;
     private final AgentPolicyResolver policyResolver;
+    /** 第六十八批 A2：工具审批登记表 */
+    private final com.capsule.agentkey.service.ToolApprovalRegistry toolApprovalRegistry;
+    /** 批次 B2：会话级自动记忆 */
+    private final com.capsule.agentkey.service.SessionMemoryExtractionService memoryService;
     private final Executor agentStreamExecutor;
 
     public AgentChatController(ApiKeyService apiKeyService,
@@ -66,7 +79,10 @@ public class AgentChatController {
                                VisionService visionService,
                                ContextSummaryService contextSummaryService,
                                AgentPolicyResolver policyResolver,
-                               @Qualifier("agentStreamExecutor") Executor agentStreamExecutor) {
+                               com.capsule.agentkey.service.ToolApprovalRegistry toolApprovalRegistry,
+                               com.capsule.agentkey.service.SessionMemoryExtractionService memoryService,
+                               @Qualifier("agentStreamExecutor") Executor agentStreamExecutor,
+                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.apiKeyService = apiKeyService;
         this.agentService = agentService;
         this.chatService = chatService;
@@ -76,7 +92,10 @@ public class AgentChatController {
         this.visionService = visionService;
         this.contextSummaryService = contextSummaryService;
         this.policyResolver = policyResolver;
+        this.toolApprovalRegistry = toolApprovalRegistry;
+        this.memoryService = memoryService;
         this.agentStreamExecutor = agentStreamExecutor;
+        this.meterRegistry = meterRegistry;
     }
 
     //从security上下文取出（princcipal就是取出第一个参数，这里是userid）
@@ -108,8 +127,9 @@ public class AgentChatController {
         //Nginx 默认会缓冲 SSE，置 no 让事件实时下发
         response.setHeader("X-Accel-Buffering", "no");
 
-        //LLM 流式响应可能持续几十秒；超时后容器会自动 complete 并触发 onTimeout 回调
-        SseEmitter emitter = new SseEmitter(180_000L);
+        // SSE 不设固定总时长：多轮审批可能超过 180 秒，审批本身由 ToolApprovalRegistry 独立超时。
+        // 客户端断开仍通过写出异常或 /chat/stop 置位，不会放任工具继续执行。
+        SseEmitter emitter = new SseEmitter(0L);
 
         //B3：断连标记——任一 SSE 写出抛异常即置位，ReAct 循环在每轮开始前检查该标记并中止
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
@@ -218,13 +238,26 @@ public class AgentChatController {
             StringBuilder fullResponse = new StringBuilder();
             // 本轮执行轨迹：思考/工具/来源/改动，完成时随助手消息一起落库，切回会话仍能还原卡片
             long traceStartedAt = System.currentTimeMillis();
+            // 第五十六批：耗时口径拆分——记录各阶段时间戳
+            // 用 AtomicLong 才能在匿名 StreamCallback 内部读写（Java effectively final 要求）
+            java.util.concurrent.atomic.AtomicLong firstToolCallAt = new java.util.concurrent.atomic.AtomicLong(0);
+            java.util.concurrent.atomic.AtomicLong lastToolResultAt = new java.util.concurrent.atomic.AtomicLong(0);
+            java.util.concurrent.atomic.AtomicLong toolCostMsSum = new java.util.concurrent.atomic.AtomicLong(0);
+            java.util.concurrent.atomic.AtomicLong firstChunkAt = new java.util.concurrent.atomic.AtomicLong(0);
             StringBuilder traceThinking = new StringBuilder();
             List<Map<String, Object>> traceTools = new ArrayList<>();
             List<Map<String, Object>> traceSources = new ArrayList<>();
             List<Map<String, Object>> traceChanges = new ArrayList<>();
+            // 第六十八批 A1：本轮任务计划的最新快照，随助手消息 trace 落库
+            java.util.concurrent.atomic.AtomicReference<Map<String, Object>> tracePlan =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            // 第六十八批 A3：本轮执行 id，本轮所有文件改动共享，前端据此「撤回本轮」
+            String turnId = "turn-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
             try {
                 //先告诉前端 sessionId，前端用它把后续流式消息挂到正确的会话上
                 sendEvent(emitter, "session_id", String.valueOf(chatSessionId));
+                //本轮 id 用于按轮次撤回文件改动；失败也不影响主流程
+                sendEventQuietly(emitter, "turn_id", turnId, clientDisconnected);
 
                 //截图：先交给视觉模型转写成文字，主对话模型再基于这段文字推理
                 String imageContext = "";
@@ -234,11 +267,26 @@ public class AgentChatController {
                                 chatAttachmentService.buildImageInputs(userId, finalAttachmentIds);
                         if (!images.isEmpty()) {
                             sendEventQuietly(emitter, "thinking",
-                                    "{\"thought\":\"🖼 正在识别截图…\"}", clientDisconnected);
-                            imageContext = visionService.describeImages(realApiKey, images, prompt);
+                                    "{\"thought\":\"正在识别截图…\"}", clientDisconnected);
+                            try {
+                                imageContext = visionService.describeImages(realApiKey, images, prompt);
+                                //补发收尾事件：否则前端思考链会一直停在「正在识别截图…」
+                                sendEventQuietly(emitter, "thinking",
+                                        imageContext.isBlank()
+                                                ? "{\"thought\":\"截图识别无结果，已按纯文本处理\"}"
+                                                : "{\"thought\":\"截图识别完成\"}",
+                                        clientDisconnected);
+                            } catch (Exception e) {
+                                //带异常类型，便于区分超时 / 鉴权 / 参数错误
+                                log.warn("截图识别失败，降级为纯文本对话 [type={}]: {}",
+                                        e.getClass().getSimpleName(), e.getMessage());
+                                sendEventQuietly(emitter, "thinking",
+                                        "{\"thought\":\"截图识别失败，已降级为纯文本\"}", clientDisconnected);
+                            }
                         }
                     } catch (Exception e) {
-                        log.warn("截图识别失败，降级为纯文本对话: {}", e.getMessage());
+                        log.warn("截图识别失败，降级为纯文本对话 [type={}]: {}",
+                                e.getClass().getSimpleName(), e.getMessage());
                     }
                 }
 
@@ -258,13 +306,13 @@ public class AgentChatController {
                             chatService.resolveReferencedSessionContext(userId, projectId, chatSessionId, prompt);
                     if (!sessionReferenceContext.isEmpty()) {
                         sendEventQuietly(emitter, "thinking",
-                                "{\"thought\":\"🔗 已引用历史会话\"}", clientDisconnected);
+                                "{\"thought\":\"已引用历史会话\"}", clientDisconnected);
                     }
                 } catch (Exception e) {
                     log.warn("解析点名会话失败，跳过引用: {}", e.getMessage());
                 }
 
-                agentService.execute(realApiKey, policy, prompt, finalHistory, userId, projectId, useRag, finalFileContext,
+                agentService.execute(realApiKey, policy, prompt, finalHistory, userId, projectId, chatSessionId, turnId, useRag, finalFileContext,
                         imageContext,
                         contextSummary,
                         sessionReferenceContext,
@@ -310,6 +358,8 @@ public class AgentChatController {
                             @Override
                             public void onToolCall(String toolName, String arguments) {
                                 try {
+                                    // 第五十六批：记录工具阶段起始时间
+                                    if (firstToolCallAt.get() == 0) firstToolCallAt.set(System.currentTimeMillis());
                                     Map<String, Object> item = new HashMap<>();
                                     item.put("name", toolName);
                                     item.put("args", arguments == null ? "{}" : arguments);
@@ -329,6 +379,9 @@ public class AgentChatController {
                             @Override
                             public void onToolResult(String toolName, ToolResult result) {
                                 try {
+                                    // 第五十六批：记录工具阶段结束时间 + 累加 costMs
+                                    lastToolResultAt.set(System.currentTimeMillis());
+                                    if (result.getCostMs() > 0) toolCostMsSum.addAndGet(result.getCostMs());
                                     // 与前端一致：回填最近一条同名且仍在运行的调用
                                     for (int i = traceTools.size() - 1; i >= 0; i--) {
                                         Map<String, Object> item = traceTools.get(i);
@@ -376,7 +429,63 @@ public class AgentChatController {
                             }
 
                             @Override
+                            public void onPlan(List<WorkspaceContext.PlanStep> steps) {
+                                try {
+                                    // 下发任务计划：前端凭 plan 事件实时刷新计划面板
+                                    List<Map<String, Object>> list = new ArrayList<>();
+                                    for (WorkspaceContext.PlanStep step : steps) {
+                                        Map<String, Object> item = new HashMap<>();
+                                        item.put("title", step.title());
+                                        item.put("status", step.status());
+                                        list.add(item);
+                                    }
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("steps", list);
+                                    data.put("updatedAt", System.currentTimeMillis());
+                                    tracePlan.set(data);
+                                    sendEvent(emitter, "plan", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 plan 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onApprovalRequired(String approvalId, String tool,
+                                                           com.capsule.agentkey.dto.ApprovalPreview preview,
+                                                           String risk, long expiresAt) {
+                                try {
+                                    // 审批卡片只收到可读摘要（路径/命令/改了多少行），不下发裸参数 JSON
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("approvalId", approvalId);
+                                    data.put("tool", tool);
+                                    data.put("preview", preview);
+                                    data.put("risk", risk);
+                                    data.put("expiresAt", expiresAt);
+                                    sendEvent(emitter, "approval_required", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 approval_required 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onApprovalResolved(String approvalId, String decision) {
+                                try {
+                                    Map<String, Object> data = new HashMap<>();
+                                    data.put("approvalId", approvalId);
+                                    data.put("decision", decision);
+                                    sendEvent(emitter, "approval_resolved", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 approval_resolved 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
                             public void onChunk(String chunk) {
+                                // 第五十六批：记录回答阶段起始时间
+                                if (firstChunkAt.get() == 0) firstChunkAt.set(System.currentTimeMillis());
                                 fullResponse.append(chunk);
                                 try {
                                     //按 JSON 下发：答案里的换行/冒号不会被 SSE 行协议截断
@@ -409,12 +518,64 @@ public class AgentChatController {
                                         if (!traceTools.isEmpty()) trace.put("tools", traceTools);
                                         if (!traceSources.isEmpty()) trace.put("sources", traceSources);
                                         if (!traceChanges.isEmpty()) trace.put("changes", traceChanges);
+                                        // 第六十八批 A1：计划随轨迹落库，切回旧会话可还原计划面板
+                                        Map<String, Object> plan = tracePlan.get();
+                                        if (plan != null) trace.put("plan", plan);
+                                        // 第六十八批 A3：本轮 id 随轨迹落库，切回历史消息也能撤回该轮
+                                        trace.put("turnId", turnId);
                                         // 耗时随轨迹落库，切回历史会话也能显示「已完成，用时…」
-                                        trace.put("durationMs", System.currentTimeMillis() - traceStartedAt);
+                                        long totalMs = System.currentTimeMillis() - traceStartedAt;
+                                        trace.put("durationMs", totalMs);
+
+                                        // 第五十六批：耗时口径拆分——写入三段耗时用于追踪面板 breakdown 展示
+                                        // setup: traceStartedAt → 第一次工具调用 或 第一个回答字符
+                                        // tools: 所有工具调用 costMs 之和（精确到单次工具执行，含 ReAct 循环间的 LLM 决策时间）
+                                        // answer: 第一个回答字符 → 完成
+                                        long setupMs;
+                                        long answerMs;
+                                        if (firstToolCallAt.get() > 0) {
+                                            setupMs = firstToolCallAt.get() - traceStartedAt;
+                                        } else if (firstChunkAt.get() > 0) {
+                                            setupMs = firstChunkAt.get() - traceStartedAt;
+                                        } else {
+                                            setupMs = totalMs;
+                                        }
+                                        if (firstChunkAt.get() > 0) {
+                                            answerMs = System.currentTimeMillis() - firstChunkAt.get();
+                                        } else {
+                                            answerMs = 0;
+                                        }
+                                        long toolsMs = toolCostMsSum.get();
+                                        // 安全兜底：setup + tools + answer 不能超过 total
+                                        if (setupMs + toolsMs + answerMs > totalMs) {
+                                            // 只保留 total - setup - answer 作为 tools 的兜底
+                                            toolsMs = Math.max(0, totalMs - setupMs - answerMs);
+                                        }
+                                        List<Map<String, Object>> segments = new ArrayList<>();
+                                        Map<String, Object> s1 = new HashMap<>();
+                                        s1.put("phase", "setup");
+                                        s1.put("ms", setupMs);
+                                        segments.add(s1);
+                                        Map<String, Object> s2 = new HashMap<>();
+                                        s2.put("phase", "tools");
+                                        s2.put("ms", toolsMs);
+                                        segments.add(s2);
+                                        Map<String, Object> s3 = new HashMap<>();
+                                        s3.put("phase", "answer");
+                                        s3.put("ms", answerMs);
+                                        segments.add(s3);
+                                        trace.put("segments", segments);
                                         chatService.saveMessage(userId, chatSessionId,
                                                 ChatMessage.MessageRole.ASSISTANT,
                                                 fullResponse.toString(), null,
                                                 mapper.writeValueAsString(trace));
+                                        // 批次 B2：会话级自动记忆——每次助手消息后判断是否到了触发点
+                                        try {
+                                            memoryService.onAssistantMessage(
+                                                    chatSessionId, userId, realApiKey, policy.model());
+                                        } catch (Exception ignore) {
+                                            // 提炼失败不影响主流程，Service 内部已经 log
+                                        }
                                     }
                                 } catch (Exception e) {
                                     log.error("SSE 完成处理失败", e);
@@ -465,6 +626,24 @@ public class AgentChatController {
             //校验归属，避免用别人的 sessionId 打断别人的生成
             chatService.getOwnedSession(sessionId, userId);
             generationRegistry.cancel(sessionId);
+            //第六十八批 A2：同时拒绝该会话所有待审批，唤醒 ReAct 线程
+            toolApprovalRegistry.cancelSession(sessionId);
+        }
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 第六十八批 A2：提交工具审批结果。
+     * 前端在审批卡片上点「批准 / 拒绝 / 本会话总是允许」后调用。
+     */
+    @PostMapping("/approvals/{approvalId}")
+    @RequiresCapability(Capability.APPROVAL)
+    public ApiResponse<Void> respondApproval(@PathVariable String approvalId,
+                                             @RequestBody ApprovalDecisionRequest request) {
+        Long userId = getCurrentUserId();
+        boolean remember = "SESSION".equalsIgnoreCase(request.getRemember());
+        if (!toolApprovalRegistry.resolve(approvalId, userId, request.getDecision(), remember)) {
+            throw new BusinessException("审批已失效或不属于当前用户");
         }
         return ApiResponse.success(null);
     }
@@ -522,6 +701,16 @@ public class AgentChatController {
     public ApiResponse<Void> deleteSession(@PathVariable Long sessionId) {
         chatService.deleteSession(sessionId, getCurrentUserId());
         return ApiResponse.success(null);
+    }
+
+    /**
+     * 第五十四批：前端侧边栏"会话追踪"面板的聚合统计接口。
+     * 数据源：ChatMessage.trace（每次 assistant 消息的执行轨迹 JSON）。
+     * 不新建表——按需 parse + 聚合。
+     */
+    @GetMapping("/sessions/{sessionId}/stats")
+    public ApiResponse<ChatSessionStats> sessionStats(@PathVariable Long sessionId) {
+        return ApiResponse.success(chatService.aggregateStats(sessionId, getCurrentUserId()));
     }
 
     @PatchMapping("/sessions/{sessionId}")
@@ -582,5 +771,78 @@ public class AgentChatController {
             log.error("上传聊天附件系统异常 [userId={}]", userId, e);
             return ApiResponse.fail(ErrorCode.INTERNAL_ERROR, "上传失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * D3 可观测性前端面板：返回当前应用累计的 Agent 工具调用统计。
+     * 聚合 MeterRegistry 里的 agent.tool.execution Timer，按 tool 分组输出调用次数、P50/P95/P99 耗时（毫秒）、成功率。
+     * 前端工作台"监控"tab 直接调这个 endpoint 展示。
+     */
+    @GetMapping("/metrics")
+    public ApiResponse<Map<String, Object>> metrics(
+            @RequestParam(value = "projectId", required = false) Long projectId) {
+        Long userId = getCurrentUserId();
+        if (projectId != null) {
+            projectService.getOwned(userId, projectId);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> tools = new LinkedHashMap<>();
+        long totalCalls = 0;
+        long totalSuccess = 0;
+        long totalFail = 0;
+
+        for (var timer : meterRegistry.find("agent.tool.execution").timers()) {
+            // 无归属标签的旧指标及其他用户/项目的指标一律不可见
+            if (!userId.toString().equals(timer.getId().getTag("userId"))) continue;
+            if (projectId != null && !projectId.toString().equals(timer.getId().getTag("projectId"))) continue;
+            String toolName = timer.getId().getTag("tool");
+            if (toolName == null) toolName = "(unknown)";
+            String source = timer.getId().getTag("source");
+            String outcome = timer.getId().getTag("result");
+
+            totalCalls += timer.count();
+            if ("success".equals(outcome)) totalSuccess += timer.count();
+            else totalFail += timer.count();
+
+            Map<String, Object> bucket = tools.computeIfAbsent(toolName, k -> new LinkedHashMap<>());
+            bucket.put("calls", ((Number) bucket.getOrDefault("calls", 0L)).longValue() + timer.count());
+            bucket.put("count", ((Number) bucket.getOrDefault("count", 0L)).longValue() + timer.count());
+            bucket.put("p50Ms", Math.round(timer.percentile(0.5, TimeUnit.MILLISECONDS)));
+            bucket.put("p95Ms", Math.round(timer.percentile(0.95, TimeUnit.MILLISECONDS)));
+            bucket.put("p99Ms", Math.round(timer.percentile(0.99, TimeUnit.MILLISECONDS)));
+            bucket.put("maxMs", Math.round(timer.max(TimeUnit.MILLISECONDS)));
+            // source tag 合并（可能有多个 source 打到同一个 tool）
+            @SuppressWarnings("unchecked")
+            java.util.Set<String> srcs = (java.util.Set<String>) bucket.computeIfAbsent("sources", k -> new java.util.LinkedHashSet<String>());
+            if (source != null) srcs.add(source);
+            // result 分桶累计（success/fail）
+            @SuppressWarnings("unchecked")
+            Map<String, Long> outcomes = (Map<String, Long>) bucket.computeIfAbsent("outcomes", k -> new HashMap<String, Long>());
+            outcomes.merge(outcome == null ? "unknown" : outcome, timer.count(), Long::sum);
+        }
+
+        // 计算成功率（每个 tool 自己算）
+        for (var entry : tools.entrySet()) {
+            Map<String, Object> b = entry.getValue();
+            @SuppressWarnings("unchecked")
+            Map<String, Long> outcomes = (Map<String, Long>) b.get("outcomes");
+            long succ = outcomes.getOrDefault("success", 0L);
+            long tot = succ + outcomes.getOrDefault("fail", 0L) + outcomes.getOrDefault("error", 0L) + outcomes.getOrDefault("unknown", 0L);
+            b.put("successRate", tot == 0 ? 0.0 : Math.round(succ * 10000.0 / tot) / 100.0);
+        }
+
+        result.put("generatedAt", java.time.Instant.now().toString());
+        result.put("userId", userId);
+        if (projectId != null) result.put("projectId", projectId);
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalCalls", totalCalls);
+        summary.put("uniqueTools", tools.size());
+        summary.put("successCalls", totalSuccess);
+        summary.put("failCalls", totalFail);
+        summary.put("successRate", totalCalls == 0 ? 0.0 : Math.round(totalSuccess * 10000.0 / totalCalls) / 100.0);
+        result.put("summary", summary);
+        result.put("tools", tools);
+
+        return ApiResponse.success(result);
     }
 }

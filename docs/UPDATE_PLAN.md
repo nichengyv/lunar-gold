@@ -1,0 +1,604 @@
+# AgentKey 双端更新规划（v1.3 · 免费版）
+
+> 版本：v1.3
+> 日期：2026-11-06
+> 变更说明：完成 SQLite + sqlite-vec 与内嵌 PostgreSQL + pgvector 双路线实测，选定内嵌 PostgreSQL 作为桌面端数据库；补齐 Windows x64 包体、重复启动、内存、迁移与向量 SQL 改动量数据，以及 PR-06 的实施清单。
+> 依据：[STATUS.md](STATUS.md)、[design.md](design.md)、[operations.md](operations.md) 及当前代码事实
+> 说明：本文按“阶段 + 出口标准”组织，不以日历工期作为承诺；每个阶段完成后可独立演示、独立回滚。
+
+---
+
+## 0. 一页结论
+
+### 产品形态（对标 DeepSeek）
+
+- **网页端**：注册/登录、对话（可生成代码片段）、知识库 RAG、附件问答、**下载桌面端入口**。不操作工作区、不生成可下载工程、不执行命令。
+- **桌面端**：完整能力。本地项目读写、命令执行、Git、MCP、LSP、审批与审查流、按轮撤回。
+- **两端不是两个产品**：同一套后端代码 + 同一套前端，靠 `DeploymentMode` 与能力声明区分。
+- **免费版**：无支付、无订阅。网页端 v1 采用 **BYOK**（用户自备模型 Key），平台不兜底模型成本；网页端账号仅用于会话与知识库数据归属。桌面端完全本地、不强制登录。
+
+### 技术策略
+
+1. **桌面端选定内嵌 PostgreSQL + pgvector，云端继续使用 PostgreSQL**：PR-02 双路线实测已完成。内嵌 PG 的 `VectorStoreService` 与迁移基本复用，以约 32 MiB 的 Windows 发布增量和额外数据库子进程内存，换取最小的方言改造与云端/桌面行为一致性；详细数据与限制见“4.1 DB 选型实测报告”。
+2. **Redis 只属于云端**：桌面端依靠现有内存降级路径，排除 `RedisAutoConfiguration`。
+3. **先分运行时，后补外壳**：桌面端 = 本地全栈 + 一个薄壳；日常在浏览器里跑 `desktop` profile 即为桌面端开发环境。
+4. **不做两个前端**：同一 Vue 应用，按 `/api/meta` 返回的能力渲染不同入口。
+5. **网页端 v1 零工作区**：不做虚拟工作区、不做代码 diff、不做 zip 导出；对话内代码片段生成保留。
+6. **网页端成本模型**：v1 只支持 BYOK；若未来提供平台 Key，必须同时上线每日配额与注册验证码，不允许“平台付费 + 无配额”。
+
+### 六个阶段
+
+| 阶段 | 主题 | 出口标志 |
+|---|---|---|
+| Phase 0 | 工程基线、安全红线、**DB 选型 spike** | CI 全绿、无默认密钥、桌面 DB 路线拍板 |
+| Phase 1 | 运行时拆分（精简版） | 同一套代码可按 `cloud`/`desktop` 启动；网页端只剩对话 + 知识库 + 下载页 |
+| Phase 2 | 桌面运行时（浏览器可测） | 一条命令启动本地模式，浏览器完成本地项目读写、执行、审批 |
+| Phase 3 | 桌面外壳与分发 | 三平台安装/卸载/升级/启动冒烟通过 |
+| Phase 4 | 安全与可靠性加固 | 安全清单全绿，重启/断网/多实例可恢复 |
+| Phase 5 | Agent 质量与差异化 | 评测基线建立，回归门禁生效（可与 2~4 并行） |
+
+---
+
+## 1. 当前基线
+
+| 项目 | 现状 | 与目标的差距 |
+|---|---|---|
+| 后端 | 单模块 Spring Boot，按层分包（controller/service/tool/config） | 缺少运行时模式与能力抽象 |
+| 前端 | Vue 3 + Pinia，单一 Web 形态 | 无能力声明、无下载页、无平台适配层 |
+| 数据库 | PostgreSQL + pgvector，Flyway V1~V14；PR-02 已选定桌面端内嵌 PostgreSQL + pgvector | PR-06 实现本地 DB 生命周期与分平台运行时；另须处理 V13 在全新库建表前 ALTER 的既有缺陷 |
+| 缓存 | Redis（限流、登录锁定、JWT 撤销），已有内存降级 | 桌面端需排除 Redis 自动配置 |
+| 执行 | 宿主进程执行命令，白名单 + 路径校验 | 无 OS 沙箱、继承服务端环境变量、软链接可逃逸 |
+| 状态 | 审批、权限、停止、统计多为进程内存 | 云端多实例不可用；重启丢运行态 |
+| 认证 | 多用户 JWT，开放注册 | 桌面端需单用户本地 token；云端缺邮箱验证/找回密码 |
+| 测试 | 10 个测试文件，以工具类与纯逻辑为主 | ReAct/SSE/审批核心链路无集成测试；前端 0 测试 |
+| CI/CD | 无 | 无流水线、无发布、无签名 |
+| 文档 | 四份交接文档，质量较好 | STATUS/design/operations 与代码存在漂移 |
+| 版本管理 | 大量文件未提交，`frontend/` 未跟踪 | 业务连续性风险 |
+
+---
+
+## 2. 目标形态
+
+### 2.1 能力矩阵
+
+| 能力 | 网页端 | 桌面端 | 说明 |
+|---|---|---|---|
+| 对话、解释、方案设计 | ✅ | ✅ | 共用 Agent 循环 |
+| 对话中生成代码片段 | ✅ | ✅ | 仅文本输出，不写入工作区 |
+| 知识库 RAG / 附件问答 | ✅ 云端库 | ✅ 本地库 | 同一 `VectorStoreService`（方言按 spike 结果） |
+| 会话历史、设置 | ✅ | ✅ | 网页端归账号，桌面端归本地 |
+| 下载桌面端 | ✅ | — | 版本清单接口 |
+| 本机项目读写 | ❌ | ✅ | 文件类工具仅桌面注册；工作区接口在 cloud 返回能力关闭 |
+| 命令执行、构建、测试 | ❌ | ✅ | `RunCommandTool` 仅桌面注册 |
+| Git 操作 | ❌ | ✅ | — |
+| MCP | ❌ | ✅ | 写操作必须审批 |
+| LSP 诊断 | ❌ | ✅ | 桌面端闭环 |
+| 审批与“总是允许” | ❌ | ✅ | 网页端无可审批的写操作 |
+| 审查流 / 按轮撤回 | ❌ | ✅ | 网页端无文件变更 |
+
+### 2.2 运行模式
+
+| 模式 | profile | 数据库 | Redis | 认证 | 执行 | 用途 |
+|---|---|---|---|---|---|---|
+| 云端 | `cloud` | 云 PG | 必需 | 多用户 JWT | 无 | 网页端 |
+| 桌面开发 | `desktop` | 本地内嵌 DB | 排除 | 本地 token | 本机 + OS 沙箱 | 日常开发/测试 |
+| 桌面打包 | `desktop` | 本地内嵌 DB | 排除 | 本地 token | 本机 + OS 沙箱 | 正式发布 |
+
+### 2.3 架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│ 桌面端（Electron / Tauri 薄壳）                      │
+│  ├─ 内嵌 WebView ← 同一套 Vue 前端                  │
+│  ├─ 侧车：Spring Boot（desktop profile）             │
+│  ├─ 本地内嵌数据库 + 工作区                          │
+│  └─ OS 沙箱 / 自动更新 / 崩溃上报                    │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│ 云端（多租户，免费版）                               │
+│  ├─ Spring Boot（cloud profile）+ PG + Redis         │
+│  ├─ 网页端：注册登录 / 对话 / 知识库 / 下载桌面端    │
+│  └─ 版本清单接口 / 遥测（可关闭）                    │
+└─────────────────────────────────────────────────────┘
+```
+
+> 免费版**不做两端账号打通与数据同步**；桌面端完全本地运行。握手接口预留，v1 不实现。
+
+---
+
+## 3. 关键抽象
+
+以下接口是双端复用的“接缝”。业务代码不直接判断模式，只依赖能力与接口。
+
+### 3.1 运行时与能力
+
+```java
+public enum DeploymentMode { CLOUD, DESKTOP }
+
+public enum Capability {
+    CHAT, KNOWLEDGE, LOCAL_WORKSPACE,
+    COMMAND_EXEC, GIT, MCP_READ, MCP_WRITE, LSP,
+    APPROVAL, DOWNLOAD
+}
+
+public interface CapabilityService {
+    DeploymentMode mode();
+    Set<Capability> enabled();
+    boolean has(Capability capability);
+}
+```
+
+- `ToolRegistry` 注册工具时声明所需能力，能力不满足则不注册。
+- 前端不硬编码模式，只读取 `/api/meta`。
+
+### 3.2 密钥与认证
+
+- 云端：沿用现有 AES + JWT（密钥走环境变量/KMS，Phase 0 先删默认值）。
+- 桌面：`LocalTokenAuth`（每次安装生成，存 OS 凭据库：Windows Credential Manager / macOS Keychain / libsecret）。
+
+### 3.3 执行与运行状态
+
+```java
+public interface CommandExecutor {
+    CommandResult run(WorkspaceRef ref, List<String> command, Duration timeout);
+}
+
+public interface AgentRunStore {
+    Long create(RunCreate cmd);
+    void markRunning(Long runId);
+    void markWaitingApproval(Long runId, String approvalId);
+    void finish(Long runId, RunStatus status, RunStats stats);
+}
+```
+
+- 审批、停止、权限都挂在 `runId` 上，不再依赖进程内 Map（`SessionPermissionTracker` 一并纳入）。
+
+---
+
+## 4. 分阶段任务
+
+### Phase 0：工程基线与安全红线
+
+**目标**：可持续交付的最低条件 + 堵住会阻碍拆分的安全问题 + **把数据库路线定下来**。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P0-01 | **已完成**：全量纳入版本管理 | `.gitignore`、`frontend/`、`docs/` | `git status` 干净；前端不再未跟踪 |
+| P0-02 | **已实现（待 PR 验证）**：建立 CI 骨架 | `.github/workflows/ci.yml` | PR 必须通过编译 + 测试 + 前端检查 |
+| P0-03 | **已完成（PR-01）**：删除默认密钥并启动校验 | `application.yml`、`application-dev.yml`、`application-prod.yml` | 缺少密钥时 prod 启动失败；仓库无可用密钥 |
+| P0-04 | **已完成（PR-01）**：修复安全红线 | `SecurityConfig.java`、`AgentChatController.java`、`ApiKeyService.java`、`CommandService.java`、`McpClientConfig.java` | 见“安全清单”P0 项全部关闭 |
+| P0-05 | **已完成**：文档与代码对齐 | `STATUS.md`、`design.md`、`operations.md` | V14、Batch 状态、MCP 默认值一致 |
+| P0-06 | **已完成（未提交）**：依赖与静态扫描 + 补近期测试 | `pom.xml`、`frontend/package.json`、CI | 无 Critical 漏洞；补 `CommandRiskTest`/`AgentPolicyTest`/`DeleteFileToolTest` |
+| P0-07 | **DB 选型 spike（已完成）** | 隔离实验目录；报告见 4.1 | 两条路线均实测 V1~V14、1024 维向量写入/余弦检索、会话保存/读取；完成包体、3 轮干净全链路、内存与 diff 统计；**结论：内嵌 PostgreSQL + pgvector** |
+
+**P0 安全红线明细：**
+
+1. `CommandService` 执行子进程前清洗环境变量，仅保留 `PATH`、`HOME`、`TMPDIR`、`SystemRoot` 等白名单项。
+2. `WorkspaceFileService` 使用 `toRealPath()` 校验，禁止软链接逃逸（`delete_file` 已局部实现，推广到全部读写路径）。
+3. MCP 默认关闭；启用时固定包版本、校验来源，写工具必须走审批。
+4. `/api/agent/metrics` 按用户/项目过滤，禁止跨租户聚合。
+5. `/api/agent/test-stream` 移出匿名白名单或删除。
+6. `ApiKeyService` 的 Provider 测试地址按 Provider 区分，不再统一指向 DeepSeek。
+7. SSE 超时与审批等待解耦，避免“两次审批必断流”。
+
+**PR-01 完成批注（2026-11-06）**：已完成密钥安全、文件沙箱、命令执行隔离、MCP 安全、接口隔离、SSE 超时解耦六大类共 12 项安全加固；完成时 90 项测试全部通过。本次补记仅修正规划文档状态，不重复实施 PR-01。
+
+**P0-05 完成批注（2026-11-07，未提交）**：已按当前代码与配置对齐 `STATUS.md`、`design.md`、`operations.md`：基线更新为 Batch F（批 76）及双端 PR-01/03/04；Flyway 更新为 V14，同时明确 V13 先 ALTER、V14 后建表的全新库缺陷仍未修复；MCP 明确默认关闭、固定 filesystem 包版本、9 个等价工具注册为 fallback、写入/删除类工具强制审批。同步修正指标用户/项目隔离、审批接口与事件、SSE 超时、工具能力门控、数据库环境变量及启动必填密钥等相关漂移。旧表述定向检索与文档行尾空白检查均无匹配；本步无代码改动，未重复执行 Maven 测试，沿用 PR-04 的 105 项回归结果。
+
+**P0-05 本步边界**：仅修正能够由当前代码直接证实的文档漂移，不实施 P0-06 扫描与补测，也不把 V13 全新库缺陷标为已解决。Phase 0 的 P0-01、P0-02、P0-06 仍未完成，本步不代表 Phase 0 全部收尾。
+
+**P0-06 完成批注（2026-11-07，未提交）**：为清除 OSV 检出的 14 条 Critical，后端升级为 Spring Boot 4.1.2、Spring AI 2.0.2、springdoc 3.2.0、Tika 3.2.2，Boot 4 的 AOP starter 改为 `spring-boot-starter-aspectj`；同步迁移 OpenAI Java SDK 模型构造、工具回调和 MCP `McpClientCustomizer<McpClient.SyncSpec>`，保留运行时用户 Key、自研工具执行与初始化超时行为。`JwtUtil` 密钥字节显式固定为 UTF-8。新增 `CommandRiskTest`（5 项）、`AgentPolicyTest`（5 项）、`DeleteFileToolTest`（4 项），三组定向测试共 14 项通过；升级后全量回归为 **119 项，0 失败、0 错误、2 项环境相关跳过**。最终有效 OSV 扫描覆盖 **255 个 Maven 坐标，5 条 findings、0 Critical**，而升级前为 212 个坐标、120 条 findings、14 条 Critical。剩余后端风险为 jsoup 1 High + 1 Moderate、POI 1 Moderate、commons-compress 2 Moderate；前端 `npm audit` 为 **0 Critical、1 High、3 Moderate**，本步未做非 Critical 升级。SpotBugs 4.8.6.6 复扫为 **113 条、0 个分析错误**（3 High、110 Medium），其中 JWT 默认编码问题已修复；其余 High 为两处 `SecureRandom` 使用风格提示和 `EmailEncryptor` 实例写静态字段，Medium 主要为 Spring 注入、Lombok/DTO 可变引用及既有空指针/风格候选，未为清零报告做无关重构。
+
+**P0-06 扫描与验收边界**：OWASP Dependency Check 因无 NVD API Key 下载过慢，在 100,000/420,823 条时停止，未生成报告；OSS Index 返回 HTTP 401，两者均不计为有效通过，最终结论以 OSV 公共 API 为准。前端 `vue-tsc --noEmit` 已通过，但 Vite 在清理临时 esbuild 文件时持续报 `Access is denied`，因此不宣称前端完整构建通过。真实模型/MCP 网络链路及完整 desktop 启动、SSE 端到端未在本次升级后专项验收。P0-01、P0-02 仍未完成，本步不提交代码，也不代表 Phase 0 全部收尾。
+
+**P0-02 实现批注（2026-11-07，未提交）**：新增 `.github/workflows/ci.yml`，在 `master` 的 PR、push 及手动触发时并行运行后端与前端任务。后端使用 Temurin Java 21 和 Maven 缓存，执行 `mvn --batch-mode --no-transfer-progress verify`；前端使用 Node 22 和 npm 缓存，执行 `npm ci` 与 `npm run build`，后者同时覆盖 `vue-tsc --noEmit` 和 Vite 生产构建。现有 `frontend/.gitignore` 已排除 `node_modules` 与 `dist`，无需重复修改根目录规则。本地验证中，CI YAML 解析通过；Maven `verify` 为 **119 项，0 失败、0 错误、2 跳过**；`npm ci` 成功，完整前端类型检查与生产构建通过。Windows 默认系统临时目录仍会触发 esbuild 清理权限错误，本次将 `TEMP`/`TMP` 定向到 `target/ci-tmp` 后构建成功，CI 的 Ubuntu 环境不需要该规避。
+
+**P0-02 验收边界**：本步未提交、未推送，也未实际创建 PR，因此不宣称 GitHub Actions 或 PR 已全绿；还需在仓库分支保护中将 `Backend compile and test` 与 `Frontend type check and build` 设为必需状态检查，才能强制拦截不合格 PR。本地为 Windows + Node 24，CI 为 Ubuntu + Node 22，目前只完成等价命令验证，runner 与 Node 版本差异待首次真实 CI 运行确认。P0-01 仍未完成，本步不代表 Phase 0 全部收尾。
+
+**P0-01 完成批注（2026-11-07）**：后端、前端、测试、Flyway 迁移、CI、容器配置与交接文档已统一纳入基线提交，`frontend/package-lock.json` 一并入库；`node_modules`、`dist`、`.tmp`、日志、上传文件、运行数据及 dev 密钥配置保持忽略。根目录 `KeyCheck.java`、`ResetPwd.java` 为含本机连接信息的临时调试工具，仅保留本地并与 `*.class` 一起排除，未纳入提交；交接文档中的本地数据库口令已移除。提交后 `git status` 干净，前端不再处于未跟踪状态。代码与构建验证沿用 P0-02 的 Maven 119 项测试及前端完整构建结果，本步仅调整版本管理规则、文档脱敏和提交基线。
+
+**出口标准**：CI 全绿；新环境按 README 可启动；安全清单 P0 全关闭；**DB 选型结论与方言改造清单写入本文档**。
+
+#### 4.1 DB 选型实测报告（PR-02，2026-11-06）
+
+**结论：桌面端选用内嵌 PostgreSQL 16 + pgvector，不选 SQLite + sqlite-vec。** 主要原因是迁移与向量 SQL 改动量最小，并能保持云端与桌面的检索语义一致。约 32 MiB 的 Windows 发布增量和额外 PG 子进程内存属于可接受成本；包体预算与内存预算在 Phase 3 继续用真实安装包复核。
+
+实验全部位于 `C:\Users\16680\AppData\Local\Temp\agentkey-db-spike`，未改主源码、dev 配置或密钥，也未进入 PR-03。云端数据库方案不变。
+
+##### 功能与兼容性实测
+
+两条路线均执行同一组断言：Flyway V1~V14 共 14 个迁移；插入两个 1024 维向量并做余弦检索，命中 chunk 为首位且分数大于 0.99；按文档统计向量数；通过 `ChatService` 创建会话、保存消息并读取历史。
+
+| 项目 | SQLite 3.54.1 + sqlite-vec | 内嵌 PostgreSQL 16.11 + pgvector 0.8.1 |
+|---|---|---|
+| 功能链路 | 通过 | 通过 |
+| Flyway | 支持 SQLite，14 个迁移成功 | 14 个迁移成功，`CREATE EXTENSION vector` 成功 |
+| Hibernate | 6.6.22 + community dialect 在 `ddl-auto=validate` 读取 SQLite 元数据时抛 `NoSuchElementException`；实测改用 `none` 后通过，生产必须另补 schema 校验 | 原 `validate` 通过 |
+| 原生库 | Windows `vec0.dll` 289,280 字节，经 Hikari `connection-init-sql` 对每个连接加载 | Windows pgvector 由 MSVC 编译并装入自定义运行时，`vector.dll` 276,992 字节 |
+
+**既有迁移缺陷**：原始 V1~V14 在全新 PostgreSQL 库实测于 V13 失败，因为 V13 对尚未创建的 `pending_file_change` 执行 ALTER，V14 才补建表。内嵌 PG 的 3 轮成功测试使用了隔离副本中的最小 V13 修正；这不代表原始迁移可直接全新启动。PR-06 必须用 Flyway 前置幂等预检或全新安装基线解决，不得直接修改已执行迁移并破坏存量校验。
+
+##### 代码改动量（`git diff --no-index --numstat`）
+
+| 路线 | 迁移 | `VectorStoreService` | 合计 |
+|---|---:|---:|---:|
+| SQLite + sqlite-vec | 14 个文件，+134/-267 行 | +36/-27 行 | 15 个文件，+170/-294 行 |
+| 内嵌 PostgreSQL + pgvector | 仅隔离修正 V13，+20/-0 行 | **0 行** | 1 个文件，+20/-0 行 |
+
+上述统计只比较迁移与向量服务，不含 `pom.xml`、profile、原生库打包、DB 生命周期和测试代码；V13 修正是两种路线共同面对的既有全新安装缺陷，不是 PG 方言成本。
+
+##### Windows x64 包体、重复启动与内存
+
+包体口径为当前共同依赖基线上的 Spring Boot 可执行 jar；SQLite jar 已含 `vec0.dll`，PG 为 jar 加外置 `pg-runtime.txz`。PG 已排除 zonky 默认带入的 macOS/Linux/Linux Alpine 运行时，只保留 Windows amd64。均不含前端、JRE、桌面壳和最终签名安装器。
+
+内存口径为每 200 ms 采样一次 Windows `WorkingSet64` 的峰值；测试进程树包含 Maven、测试 JVM，PG 路线还包含数据库进程，不等于生产稳态 RSS。
+
+| 指标 | SQLite + sqlite-vec | 内嵌 PostgreSQL + pgvector |
+|---|---:|---:|
+| 可执行 jar | 123.837 MiB | 133.807 MiB |
+| 自定义 pgvector 运行时 | — | 21.999 MiB |
+| 发布构成合计 | **123.837 MiB** | **155.805 MiB** |
+| 干净数据库全链路 | **3/3 成功**；38.77 / 38.35 / 37.66 s | **3/3 成功**；61.11 / 59.22 / 59.92 s |
+| 测试 JVM 峰值 | 318.2～322.4 MiB（有单进程明细的 2 轮） | 309.4～329.8 MiB（3 轮） |
+| 整体测试进程树峰值 | 573.1～608.5 MiB | 596.6～618.7 MiB |
+| PG 子进程聚合峰值 | 无独立 DB 进程 | **59.4 MiB（3 轮）** |
+
+PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整体测试树受 Maven/JVM 采样波动影响，不能用其差值替代 DB 开销；可确认的新增开销是独立 PG 子进程约 59.4 MiB 峰值。
+
+##### PR-06 实施文件清单
+
+| 文件/模块 | 需要改动 |
+|---|---|
+| `pom.xml` | 引入 zonky embedded-postgres；按目标 OS/arch 引入二进制并排除其他平台；桌面 profile 隔离依赖 |
+| `application-desktop.yml` | 使用生命周期管理器分配的 JDBC 连接；沿用 `db/migration`；排除 Redis 自动配置 |
+| 新增 `service/desktop/DbLifecycleManager.java` | 数据目录、首次 initdb、空闲端口、启动/健康检查、优雅关闭、崩溃恢复、V13 前置兼容处理 |
+| 新增桌面 PG 运行时解析与构建脚本 | 每平台准备 PG + pgvector 运行时，解析自定义压缩包，校验文件与扩展版本 |
+| `src/main/resources/db/migration/` | 保持云端/桌面共用；不直接改已执行 V1~V14，以前置预检或全新安装基线修复 V13 |
+| `VectorStoreService.java` | **无需方言改造**；保留 pgvector SQL |
+| 新增桌面 DB 集成测试 | 重复执行干净初始化、V1~V14、pgvector 余弦检索、会话读写、重启复用数据目录与异常退出恢复 |
+| Phase 3 安装包清单 | 计入各平台 PG + pgvector 运行时和第三方许可，复测安装后冷/热启动与内存 |
+
+##### 实测边界
+
+- 仅验证 Windows x64；macOS/Linux 的 PG 与 pgvector 运行时、sqlite-vec 均未实测，3/3 不是三平台安装成功率。
+- 验证的是 Spring 测试切片中的干净数据库全链路，不是完整桌面安装包冷启动，也未覆盖崩溃恢复、长稳与大规模向量性能。
+- Windows pgvector 当前为自定义 MSVC 构建；其他 OS/arch 必须分别构建、签名/公证并验证 `CREATE EXTENSION vector`，不能把 Windows 结果外推。
+- 若未来安装包或内存预算收紧，可重评 SQLite，但必须先解决 14 个迁移方言维护、向量 SQL 分叉、Hibernate schema 校验和每连接扩展加载问题。
+
+---
+
+### Phase 1：运行时拆分（精简版）
+
+**目标**：同一套代码支持 `cloud` / `desktop` 两种模式；网页端收缩为 DeepSeek 式精简形态。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P1-01 | **已完成（PR-03）**：引入 `DeploymentMode` 与 `CapabilityService` | 新增 `config/DeploymentMode.java`、`config/Capability.java`、`service/CapabilityService.java` | 默认、`cloud`、`desktop` profile 能力集合均有测试 |
+| P1-02 | **已完成（PR-03）**：新增元信息接口 | 新增 `controller/MetaController.java`、`dto/MetaResponse.java`；改造 `SecurityConfig.java`、`application.yml` | 公开 `GET /api/meta` 返回模式、版本、认证模式、能力与下载声明 |
+| P1-03 | **已完成（PR-04）**：工具按能力注册 | `tool/ToolRegistry.java`、各 `*Tool.java` | 网页端不注册 `RunCommandTool`、`delete_file`、Git、LSP、MCP |
+| P1-04 | **已完成（PR-04）**：控制器按能力收敛 | `WorkspaceController.java`、`FileReviewController.java` 等 | 网页端工作区/审查接口返回 404 或能力关闭响应 |
+| P1-05 | 前端能力渲染 | 新增 `api/meta.ts`、`stores/meta.ts`；改造 `router/index.ts`、`layouts/AppLayout.vue`、`views/ChatView.vue` | 网页端隐藏工作区/终端/审查入口，桌面端显示 |
+| P1-06 | 网页端引导 | 新增 `views/DownloadView.vue`、下载入口组件 | 桌面功能入口处出现“下载桌面端” |
+| P1-07 | 网页端账号安全闭环 | `AuthController.java`、`UserService.java`、`LoginView.vue` | 注册验证码或邮箱验证、找回密码可用；开放注册不再可被无限滥用 |
+
+**PR-03 完成批注（2026-11-06，未提交）**：未启用 `desktop` profile 时默认声明 `CLOUD`，现有 dev/prod 行为不变；cloud 能力固定为 `CHAT`、`KNOWLEDGE`、`DOWNLOAD`，desktop 声明其余本地能力且不声明 `DOWNLOAD`。`/api/meta` 已加入匿名白名单，直接返回第 6.1 节契约；版本默认 `1.0.0`，桌面最新版本由 `DESKTOP_LATEST_VERSION` 注入，未配置时为 `null`。新增 `CapabilityServiceTest` 与 `MetaControllerTest` 共 5 项测试；全量回归 95 项，0 失败、0 错误、2 项环境相关测试跳过。
+
+**PR-03 本步边界**：仅完成运行模式与能力“声明”；按能力关闭工具或控制器由 PR-04 继续完成。本地 token（PR-07）、内嵌 DB（PR-06）和前端消费（PR-05）不在本步范围；因此 desktop 的 `LOCAL_SINGLE_USER` 是目标契约，不代表本地认证已经落地。本步测试覆盖 profile 能力映射与 MVC 序列化，未宣称完整 desktop 运行时已经可启动。
+
+**PR-04 完成批注（2026-11-06，未提交）**：`BaseTool` 新增所需能力声明，`ToolRegistry` 在内置与动态工具注册前统一过滤；6 个工作区文件工具声明 `LOCAL_WORKSPACE`，`RunCommandTool` 声明 `COMMAND_EXEC`。MCP 工具复用审批风险规则区分 `MCP_READ` / `MCP_WRITE`，仅注册成功时建立 fallback 映射，避免残留无效映射。新增 `@RequiresCapability` 与 `CapabilityGuardAspect`：工作区控制器按 `LOCAL_WORKSPACE` 收敛，文件审查和对话审批入口按 `APPROVAL` 收敛，MCP 状态与开关分别按读、写能力收敛；cloud 未启用能力统一经现有异常体系返回 HTTP 404，普通项目、对话、知识库接口未加本地能力门控。新增 10 项测试，定向回归共 15 项全部通过；全量回归 105 项，0 失败、0 错误、2 项环境相关测试跳过。
+
+**PR-04 本步边界**：当前没有独立 Git/LSP 内置工具，Git 命令仅随 `run_command` 的 `COMMAND_EXEC` 能力关闭；未提前实现 PR-05 前端隐藏、PR-06 内嵌数据库或 PR-07 本地认证。测试使用真实能力服务、AOP 代理与 standalone MockMvc 验证 cloud 拒绝、desktop 放行及业务服务零调用，不等同于完整 desktop 运行时启动验收。
+
+**出口标准**：`cloud` 模式打开网页端只有对话 + 知识库 + 下载页；注册有验证码或邮箱验证、找回密码可用；`desktop` 模式功能不回归；前端只有一套构建产物。
+
+---
+
+### Phase 2：桌面运行时（浏览器可测）
+
+**目标**：不依赖桌面外壳，先让 `desktop` profile 在浏览器里完整跑通。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P2-01 | 新增桌面配置 | 新增 `application-desktop.yml` | 本地内嵌 DB、无 Redis、单用户、工作区可配置 |
+| P2-02 | 本地 DB 生命周期 | 新增 `service/desktop/DbLifecycleManager.java` | 按 Phase 0 结论实现：首次初始化、启动、健康检查、优雅关闭、崩溃恢复 |
+| P2-03 | 本地 token 认证 | 新增 `filter/LocalTokenFilter.java`；改造 `SecurityConfig.java` | 无 token 拒绝；token 存 OS 凭据库；浏览器开发模式有 dev token |
+| P2-04 | 排除 Redis 自动配置 | `application-desktop.yml`、`pom.xml` | 启动无 Redis 连接重试日志；限流/锁定走内存 |
+| P2-05 | 单用户初始化 | `AuthController.java`、`UserService.java` | 首次启动创建本地用户；注册接口在桌面模式关闭 |
+| P2-06 | 开发脚本 | 根目录脚本或 `package.json` | `dev:desktop` 一条命令启动后端 + 前端，浏览器可用 |
+| P2-07 | 本地工作区安全 | `WorkspaceFileService.java`、`CommandService.java` | 路径、软链接、环境变量、超时、进程树终止均有测试 |
+| P2-08 | pgvector 随包验证 | 构建脚本、PG 运行时清单、桌面 DB 集成测试 | 每个目标 OS/arch 均验证扩展库存在、`CREATE EXTENSION vector` 成功、版本受控及 1024 维余弦检索；排除无关平台运行时 |
+
+**出口标准**：`dev:desktop` 启动后，在浏览器完成“打开本地项目 → 读文件 → 改文件 → 删除文件 → 跑命令 → 审批 → 撤回”；数据落在本地 DB；断网可用。
+
+---
+
+### Phase 3：桌面外壳与分发
+
+**目标**：把已验证的本地全栈装进桌面壳，打通安装、更新。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P3-01 | 桌面壳骨架 | 新增 `desktop/`（Electron 或 Tauri） | 启动后拉起侧车并加载 UI |
+| P3-02 | 侧车生命周期 | `desktop/*/sidecar` | 选空闲端口、健康检查、退出时杀掉进程树、单实例锁 |
+| P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
+| P3-04 | 安装包与签名 | 构建脚本、证书配置 | Windows/macOS/Linux 可安装；签名校验通过 |
+| P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
+| P3-06 | 崩溃上报 | 壳与后端接入 Sentry 或等价方案 | 崩溃可上报；默认脱敏；可关闭 |
+| P3-07 | 冒烟流水线 | CI 三平台任务 | 静默安装 → 启动 → `/health` → 运行脚本任务 → 卸载 |
+| P3-08 | 发布合规 | 隐私政策、服务条款、遥测开关、第三方许可 | 文档可从网页端与桌面端访问；遥测默认脱敏且可关闭；安装包内含第三方许可 |
+
+**出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
+
+---
+
+### Phase 4：安全与可靠性加固
+
+**目标**：从“能跑”到“敢开放”。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P4-01 | OS 级沙箱 | `CommandService.java`、桌面壳 | Windows Job Object；macOS Seatbelt；Linux Landlock/cgroups |
+| P4-02 | 运行状态机 | 新增 `V15__add_agent_run.sql`、`AgentRunService.java` | QUEUED/RUNNING/WAITING_APPROVAL/SUCCEEDED/FAILED/CANCELLED |
+| P4-03 | 审批与运行状态持久化 | `ToolApprovalRegistry.java`、`SessionPermissionTracker.java` | 桌面端重启后待审批可恢复；云端仅保留 run/stop 状态（多实例可共享），不实现云端审批 |
+| P4-04 | SSE 可靠性 | `AgentChatController.java`、`api/sse.ts` | 心跳、事件 id、断线续传；审批不占用主流生命周期 |
+| P4-05 | 幂等与防重 | `AgentChatController.java`、请求 DTO | 相同 `clientRequestId` 不重复创建消息/运行 |
+| P4-06 | 模型调用韧性 | `SpringAiAgentClient.java` | 超时、重试退避、熔断、按 Provider 隔离 |
+| P4-07 | 上下文与成本 | `ReActAgentService.java`、新增预算管理 | token 计量、预算上限、大结果落文件 |
+| P4-08 | 安全回归 | 测试与 CI | 路径逃逸、命令注入、越权、跨租户均有测试 |
+
+**出口标准**：断网、重启、双实例、审批超时、模型 5xx 五类场景均有明确行为；安全清单全绿。
+
+---
+
+### Phase 5：Agent 质量与差异化
+
+**目标**：让“可控性”从功能变成可证明的质量优势。可与 Phase 2~4 并行。
+
+| ID | 任务 | 涉及文件 | 验收 |
+|---|---|---|---|
+| P5-01 | 提示词外置与版本化 | 新增 `resources/prompts/*`、`PromptService.java`，改造 `ReActAgentService.java` | 提示词可热更新/回滚；按场景配置 |
+| P5-02 | 评测集 | 新增 `eval/tasks/*.yaml`、评测运行器 | 覆盖工具选择、文件编辑/删除、命令审批、RAG、拒答 |
+| P5-03 | 评测门禁 | CI 夜间任务 | 完成率、平均轮次、token、时延有基线；回归即失败 |
+| P5-04 | 代码索引 v1 | 新增 `RepoIndexService.java` | tree-sitter 解析 + 符号索引 + repo map |
+| P5-05 | LSP 诊断闭环 | 新增 `LspClient.java`（桌面） | 编辑后自动取诊断并反馈给模型 |
+| P5-06 | 验证回路 | `ReActAgentService.java`、命令执行 | 改完自动跑配置的 verify 命令，失败回到循环 |
+| P5-07 | RAG 增强 | `VectorStoreService.java`、检索服务 | 混合检索 + rerank + 引用；离线评测可量化 |
+| P5-08 | 并行只读工具 | `ReActAgentService.java` | 只读工具并行；写操作仍串行并审批 |
+
+**出口标准**：评测集可重复运行；核心任务成功率与成本有基线；提示词变更必须过评测。
+
+---
+
+## 5. 数据库迁移计划
+
+| 版本 | 内容 | 归属 | 说明 |
+|---|---|---|---|
+| V15 | `agent_run` / `agent_run_event` | 共用 | 运行状态与事件流（Phase 4） |
+
+**原则**：
+
+1. 不直接修改已执行的 V1~V14，避免 Flyway 校验失败；spike 的 V13 修改仅限隔离副本，不作为生产方案。
+2. 云端与桌面端共用 PostgreSQL 方言和 `db/migration`；大版本升级前自动备份数据目录。
+3. PR-06 在 Flyway 前增加幂等预检或全新安装基线，先解决原始 V13 对不存在表的 ALTER；必须同时覆盖全新库与已执行 V14 的存量库测试。
+4. 所有新增表带 `created_at`/`updated_at`。
+
+---
+
+## 6. 接口契约
+
+### 6.1 `GET /api/meta`（公开）
+
+```json
+{
+  "mode": "CLOUD",
+  "version": "3.0.0",
+  "authMode": "MULTI_USER",
+  "capabilities": ["CHAT", "KNOWLEDGE", "DOWNLOAD"],
+  "download": { "enabled": true, "latestVersion": "3.1.0" }
+}
+```
+
+桌面端返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`，并包含 `LOCAL_WORKSPACE`、`COMMAND_EXEC`、`MCP_WRITE`、`LSP`、`APPROVAL`。
+
+### 6.2 `GET /api/releases/latest?os=windows&arch=x64`
+
+```json
+{
+  "version": "3.1.0",
+  "url": "https://example.com/agentkey/AgentKey-3.1.0-x64.exe",
+  "sha256": "...",
+  "signature": "...",
+  "notesUrl": "https://example.com/agentkey/releases/3.1.0",
+  "minSupportedVersion": "3.0.0",
+  "mandatory": false
+}
+```
+
+### 6.3 桌面登录握手（预留，免费版不实现）
+
+- `POST /api/auth/desktop-handoff`（网页端，已登录）→ `{ "code": "...", "expiresIn": 60 }`
+- `POST /api/auth/desktop-exchange`（桌面端）→ `{ "accessToken": "..." }`
+- 一次性、绑定设备指纹、60 秒过期。免费版桌面端完全本地运行，无需登录。
+
+### 6.4 幂等
+
+- `POST /api/agent/chat` 支持 `X-Client-Request-Id`。
+- 相同 id 在有效期内返回同一 `runId`，不重复创建消息。
+
+---
+
+## 7. 测试与 CI
+
+### 7.1 测试分层
+
+| 层 | 范围 | 工具 | 运行频率 |
+|---|---|---|---|
+| 单元 | 路径校验、命令白名单、命令风险判定、工具参数、加密 | JUnit | 每次提交 |
+| 集成 | ReAct、SSE、审批、DB/Flyway | Testcontainers + WireMock | 每次 PR |
+| 前端单元 | store、工具函数、能力渲染 | Vitest | 每次 PR |
+| E2E 浏览器 | 对话、知识库、下载（cloud）；本地读写、审批、diff、撤回（desktop） | Playwright | 每次 PR（核心用例） |
+| 桌面壳冒烟 | 启动、健康检查、退出 | Playwright Electron / tauri-driver | 每次发布前 |
+| 安装包矩阵 | 安装/卸载/升级/签名 | CI 三平台 | 每次发布 |
+| 手工验收 | 杀毒、防火墙、权限弹窗、更新回滚 | Checklist | 每次发布 |
+
+### 7.2 模式矩阵
+
+核心用例按模式拆分，不要求同一用例在两种模式下都成立：
+
+- `cloud`：注册/登录、对话、知识库、附件问答、下载页。
+- `desktop`：本地 DB、本地工作区、命令执行、审批、diff、撤回。
+- 双端共用用例（对话、知识库、设置）需在两种模式下各跑一遍。
+
+### 7.3 流水线阶段
+
+```
+lint → build → unit → integration → frontend-unit → e2e(cloud) → e2e(desktop)
+     → security-scan → package(3 OS) → smoke → release
+```
+
+**门禁建议：**
+
+- 核心链路集成测试必须通过。
+- 评测集回归不得低于基线（Phase 5 起）。
+- Critical 依赖漏洞阻断发布。
+- 安装包小于预算体积，否则告警。
+
+---
+
+## 8. 安全清单
+
+| 项 | 当前 | 目标 |
+|---|---|---|
+| 默认密钥 | JWT/AES 有默认值 | 仓库无默认值，启动强校验 |
+| 子进程环境 | 继承服务端环境 | 白名单清洗 |
+| 软链接 | `normalize` | `toRealPath` + 边界校验 |
+| 命令执行 | 宿主进程 | 桌面 OS 沙箱 + 云端不执行 |
+| MCP | 默认开启、npx 未固定 | 默认关闭、固定版本、写操作审批 |
+| 跨租户指标 | 全局聚合 | 按用户/项目过滤 |
+| 匿名调试接口 | `test-stream` | 删除或鉴权 |
+| 本地 API | 无 | 127.0.0.1 + 本地 token + Origin 校验 |
+| 密钥存储 | 配置文件/DB | OS 凭据库 / 环境变量 / KMS |
+| 注册与账号 | 开放注册 | 注册验证码或邮箱验证、找回密码（云端，Phase 1） |
+| 审计 | 部分切面 | 按 run 可导出、可追溯 |
+| 依赖安全 | 无扫描 | CI 阻断 Critical |
+
+---
+
+## 9. 可观测性
+
+| 维度 | 目标 |
+|---|---|
+| Trace | run → LLM 调用 → 工具 → MCP 全链路，携带脱敏 `runId`/`userId` |
+| Metrics | 运行数、成功率、p95 首 token、工具错误率、审批等待时长、token 成本 |
+| Logs | 结构化 JSON，带 `runId`/`sessionId`，密钥与用户内容脱敏 |
+| 前端 | 错误上报、关键漏斗埋点、版本分布 |
+| 告警 | 模型失败率、DB/Redis 异常、安装包下载失败 |
+
+时序指标全部持久化，避免重启归零；租户维度注意标签基数。
+
+---
+
+## 10. 风险登记
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| 内嵌 PG 生命周期或跨平台运行时失效 | 桌面端无法启动、僵尸进程、平台发布阻塞 | PR-06 做健康检查/恢复/进程树终止；每 OS/arch 构建并实测 pgvector，P2-08 与安装冒烟共同门禁 |
+| 原始 V13 全新库顺序缺陷 | 云端或桌面全新安装失败 | Flyway 前置幂等预检或全新安装基线；同时测试全新库和存量库，不直接修改已执行迁移 |
+| 安装包过大 | 下载转化低 | `jlink` 裁剪；按需下载组件；展示体积 |
+| Windows 杀毒误报 | 用户流失 | 代码签名；提前送检；提供 SHA-256 |
+| 桌面壳与侧车生命周期不稳 | 卡死/僵尸进程 | 单实例锁、进程树终止、健康检查、日志面板 |
+| 双端耦合回潮 | 维护成本翻倍 | 能力声明 + 接口门面；禁止业务层判断模式 |
+| 模型成本不可控 | 免费版烧钱 | 网页端 v1 仅 BYOK，平台不兜底；若未来提供平台 Key，必须先上线每日配额与注册验证码 |
+| 网页端被期待写代码 | 定位模糊 | 网页端入口明确引导下载桌面端；`/api/meta` 能力声明驱动 UI |
+
+---
+
+## 11. 非目标（v1）
+
+1. 商业化：支付、订阅、设备管理（免费版不做）；平台模型 Key 及配套配额不属于 v1，网页端采用 BYOK。
+2. 云端代码执行沙箱（网页端不跑用户代码）。
+3. 虚拟工作区、代码 diff、zip 导出（网页端不操作工作区，对话内仍可生成代码片段）。
+4. 跨设备数据同步与两端账号打通（预留握手接口）。
+5. 团队协作、组织权限、SSO。
+6. 插件/规则市场。
+7. 移动端、私有化部署套件。
+
+以上能力保留接口与数据字段，但不在 v1 实现。
+
+---
+
+## 12. 发布验收标准
+
+### 功能
+
+- 网页端：注册（验证码或邮箱验证）、登录、找回密码、对话（可生成代码片段）、知识库、附件问答、下载桌面端。
+- 桌面端：安装、首次启动、本地项目读写（含删除/撤回）、命令执行、审批、自动更新。
+- 桌面端完全本地可用，不依赖云端账号。
+
+### 质量
+
+- 核心评测集通过率达到基线，且连续两个版本不下降。
+- p95 首 token 时延与任务成功率有监控、有告警。
+- 崩溃自由会话率达标；关键错误可定位到 `runId`。
+
+### 安全
+
+- 安全清单全绿；无 Critical 依赖漏洞。
+- 安装包签名有效；本地 API 不可被非授权页面调用。
+- 密钥不入库、不入日志、不入安装包。
+
+### 合规
+
+- 隐私政策、服务条款、第三方许可可访问。
+- 遥测默认脱敏且可关闭；用户可导出/删除云端账号数据。
+
+---
+
+## 13. 执行顺序与 PR 拆分
+
+### 依赖关系
+
+```
+P0 基线 / DB 选型 spike / 能力声明（可并行）
+  └─ P1 能力声明 + /api/meta + 前端适配 + 下载页 + 账号安全
+        ├─ P2 桌面运行时（浏览器可测）
+        │     ├─ P3 桌面壳 + 安装 + 更新
+        │     └─ P4 沙箱 + 可靠性
+        └─ P5 评测 + 索引 + LSP（可并行）
+```
+
+### 建议的首批 PR
+
+| PR | 内容 | 依赖 |
+|---|---|---|
+| PR-01 | **已完成**：密钥红线 + 环境变量清洗 + realpath + 匿名接口收敛等 12 项安全加固（完成批注见 Phase 0） | 无 |
+| PR-02 | **已完成（未提交）**：双路线实测 + 内嵌 PG 选型 + 实测报告 + PR-06 文件清单（见 4.1） | 无 |
+| PR-03 | **已完成（未提交）**：`DeploymentMode` + `CapabilityService` + `/api/meta`（完成批注见 Phase 1） | 无 |
+| PR-04 | **已完成（未提交）**：`ToolRegistry` 能力门控 + 控制器按能力收敛（完成批注见 Phase 1） | PR-03 |
+| PR-05 | 前端 `meta` store + 能力路由 + 下载入口 | PR-03 |
+| PR-06 | `application-desktop.yml` + 本地 DB 生命周期 | PR-02、PR-04 |
+| PR-07 | 本地 token 认证 + 桌面单用户初始化 | PR-06 |
+| PR-08 | 桌面壳骨架 + 侧车启动 + 健康检查 | PR-06 |
+| PR-09 | 安装包 + 更新 + 三平台冒烟 | PR-08 |
+| PR-10 | 运行状态机 + 审批持久化 + SSE 续传 | PR-04 |
+| PR-11 | 评测集 + CI 门禁 | PR-04 |
+| PR-12 | 网页端账号安全闭环（验证码/邮箱验证、找回密码） | PR-03 |
+| PR-13 | 发布合规（隐私政策、服务条款、遥测开关、第三方许可） | PR-09 |
+
+---
+
+## 14. 阶段评审清单
+
+每个阶段结束时，用同一组问题评审：
+
+1. 这个阶段能否在不依赖下一阶段的情况下演示？
+2. 新增能力是否有对应的自动化测试？
+3. 是否引入了“只有云端/只有桌面”成立且未抽象的假设？
+4. 是否更新了 STATUS/design/operations 与变更日志？
+5. 是否产生新的安全面？是否已加入安全清单？
+6. 是否可以独立回滚？数据是否需要迁移回滚方案？
+
+---
+
+> 本文是执行基线。后续每次范围变更，先改本文，再改代码。

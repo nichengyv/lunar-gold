@@ -2,6 +2,7 @@ package com.capsule.agentkey.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -30,6 +31,16 @@ public class WeatherTool implements BaseTool {
     //readTree(String)：把 JSON 字符串 → JsonNode 树
     //writeValueAsString(Object)：把 Java 对象 → JSON 字符串
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * 降级通道：wttr.in 服务器在欧洲，国内直连经常超时（2026-11-03 实测本机 connect 直接超时）。
+     * 失败时按序降级：① Open-Meteo（免 key，国内可达）② web_search（需 tavily.api.key）。
+     */
+    private final SearchTool searchTool;
+
+    public WeatherTool(SearchTool searchTool) {
+        this.searchTool = searchTool;
+    }
 
     @Override
     //设置注册在工具箱里的工具名字（工具唯一标识）
@@ -86,7 +97,7 @@ public class WeatherTool implements BaseTool {
             //execute发起请求，执行Call对象
             try (Response response = HTTP_CLIENT.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
-                    return ToolResult.fail("天气服务不可用 (HTTP " + response.code() + ")");
+                    return fallbackByOpenMeteo(city, start, "天气服务不可用 (HTTP " + response.code() + ")");
                 }
 
                 //读取接口返回的响应体字符串，为空则赋值空字符串
@@ -115,9 +126,101 @@ public class WeatherTool implements BaseTool {
             }
         } catch (Exception e) {
             //捕获全部异常（网络超时，json解析失败，接口异常等），打印警告日志
-            log.warn("天气查询失败: {}", city, e);
-            //返回标准化失败结果，异常信息传给大模型
-            return ToolResult.fail("查询失败: " + e.getMessage());
+            log.warn("天气查询失败，尝试降级: {}", city, e);
+            //直连失败时按序降级：Open-Meteo（免 key）→ web_search（需 Tavily key），都失败才返回错误
+            return fallbackByOpenMeteo(city, start, "查询失败: " + e.getMessage());
         }
+    }
+
+    /** WMO weather_code → 中文天气状况（覆盖常见码，未收录的显示"未知(<code>)"） */
+    private static String wmoDescription(int code) {
+        return switch (code) {
+            case 0 -> "晴";
+            case 1 -> "大致晴";
+            case 2 -> "多云";
+            case 3 -> "阴";
+            case 45, 48 -> "雾";
+            case 51, 53, 55 -> "毛毛雨";
+            case 56, 57 -> "冻毛毛雨";
+            case 61 -> "小雨";
+            case 63 -> "中雨";
+            case 65 -> "大雨";
+            case 66, 67 -> "冻雨";
+            case 71 -> "小雪";
+            case 73 -> "中雪";
+            case 75 -> "大雪";
+            case 77 -> "雪粒";
+            case 80, 81, 82 -> "阵雨";
+            case 85, 86 -> "阵雪";
+            case 95 -> "雷暴";
+            case 96, 99 -> "雷暴伴冰雹";
+            default -> "未知(" + code + ")";
+        };
+    }
+
+    /**
+     * 第一级降级：Open-Meteo（免 key，2026-11-03 实测国内可达）。
+     * 先地理编码拿城市坐标，再查实时天气；任一步失败则继续降级到搜索。
+     */
+    private ToolResult fallbackByOpenMeteo(String city, long start, String originalError) {
+        try {
+            String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name="
+                    + URLEncoder.encode(city, StandardCharsets.UTF_8) + "&count=1&language=zh";
+            JsonNode geoRoot = httpGetJson(geoUrl);
+            JsonNode first = geoRoot.path("results").path(0);
+            if (first.isMissingNode()) {
+                return fallbackBySearch(city, start, originalError + "；Open-Meteo 找不到城市: " + city);
+            }
+            double lat = first.path("latitude").asDouble();
+            double lon = first.path("longitude").asDouble();
+
+            String forecastUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
+                    + "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,surface_pressure"
+                    + "&timezone=auto";
+            JsonNode current = httpGetJson(forecastUrl).path("current");
+
+            String result = String.format(
+                    "【%s实时天气（Open-Meteo 数值预报，wttr.in 直连失败的降级结果）】\n天气状况: %s\n温度: %s℃\n体感温度: %s℃\n湿度: %s%%\n风速: %s公里/小时\n气压: %s百帕",
+                    city,
+                    wmoDescription(current.path("weather_code").asInt(-1)),
+                    current.path("temperature_2m").asText("未知"),
+                    current.path("apparent_temperature").asText("未知"),
+                    current.path("relative_humidity_2m").asText("未知"),
+                    current.path("wind_speed_10m").asText("未知"),
+                    current.path("surface_pressure").asText("未知"));
+            return ToolResult.ok(result, System.currentTimeMillis() - start);
+        } catch (Exception e) {
+            log.warn("Open-Meteo 降级失败: {}", city, e);
+            return fallbackBySearch(city, start, originalError + "；Open-Meteo 降级失败: " + e.getMessage());
+        }
+    }
+
+    private JsonNode httpGetJson(String url) throws Exception {
+        Request request = new Request.Builder().url(url).get().build();
+        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new RuntimeException("HTTP " + response.code());
+            }
+            return MAPPER.readTree(response.body() != null ? response.body().string() : "");
+        }
+    }
+
+    /**
+     * wttr.in 直连失败后的降级：用 web_search 查「城市 + 现在天气」。
+     * 搜索可用且成功 → 返回带降级说明的成功结果；搜索未配置或也失败 → 返回合并后的失败文案。
+     */
+    private ToolResult fallbackBySearch(String city, long start, String originalError) {
+        if (searchTool == null || !searchTool.isAvailable()) {
+            return ToolResult.fail(originalError + "（搜索降级未生效：未配置 tavily.api.key）");
+        }
+        ObjectNode args = MAPPER.createObjectNode();
+        args.put("query", city + " 现在天气 气温");
+        args.put("max_results", 3);
+        ToolResult searchResult = searchTool.execute(args);
+        if (searchResult.isSuccess()) {
+            return ToolResult.ok("wttr.in 直连失败（" + originalError + "），以下为联网搜索降级结果：\n\n"
+                    + searchResult.getContent(), System.currentTimeMillis() - start);
+        }
+        return ToolResult.fail(originalError + "；搜索降级也失败：" + searchResult.getError());
     }
 }

@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.4</version>
+        <version>4.1.2</version>
         <relativePath/>
     </parent>
     <groupId>com.capsule</groupId>
@@ -14,7 +14,20 @@
     <description>智能体安全网关</description>
     <properties>
         <java.version>21</java.version>
+        <!-- Spring AI 版本由 BOM 统一下发，业务依赖不写版本号 -->
+        <spring-ai.version>2.0.2</spring-ai.version>
     </properties>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -38,7 +51,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
@@ -63,7 +76,8 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.6.0</version>
+            <!-- Boot 4 使用 springdoc 3.x，与 Spring Framework 7 的 MVC API 对齐 -->
+            <version>3.2.0</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -144,12 +158,41 @@
         <dependency>
             <groupId>org.apache.tika</groupId>
             <artifactId>tika-core</artifactId>
-            <version>2.9.1</version>
+            <version>3.2.2</version>
         </dependency>
 
+        <!-- Spring AI：用 OpenAI 兼容协议接入 DeepSeek。
+             第四十三批只引入依赖，通过 spring.ai.model.chat=none 暂不启用，
+             等第四十四批做双轨桥接时再开 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+        <!-- 第五十一批：MCP 客户端。只做「工具发现 + 工具调用」，
+             执行权仍由自研 ToolRegistry.dispatch 掌握，Spring AI 内部工具执行保持关闭 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
+            <!-- Boot 3.5 的 starter-parent 不再替 Lombok 配置注解处理器，
+                 升级后 @Slf4j/@Data 生成的符号会全部"找不到"。
+                 这里显式声明，保证 Maven 与 IDE 行为一致 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

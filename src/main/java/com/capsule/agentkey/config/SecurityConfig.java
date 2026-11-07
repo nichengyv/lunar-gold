@@ -63,13 +63,13 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/api/public-key",
+                                "/api/meta",
                                 "/",
                                 "/index.html",
                                 "/static/**",
                                 "/css/**",
                                 "/js/**",
                                 "/favicon.ico",
-                                "/api/agent/test-stream",
                                 "/actuator/health",
                                 //Prometheus 采集端不带 JWT，需放行；生产务必用网络策略/反代只允许采集器访问
                                 "/actuator/prometheus",

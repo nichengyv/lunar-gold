@@ -1,0 +1,37 @@
+/* 设计令牌：间距 / 圆角 / 字号 / 图标尺寸 / 动效时长
+ * 颜色沿用 style.css 里的语义变量（--bg / --surface / --text / --primary ...），
+ * 新组件只引用这里和语义色，避免各处再写魔法数字。 */
+:root {
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    --fs-xs: 11px;
+    --fs-sm: 12px;
+    --fs-base: 13.5px;
+    --fs-md: 14.5px;
+    --fs-lg: 16px;
+    --fs-xl: 20px;
+
+    --icon-sm: 14px;
+    --icon-md: 18px;
+    --icon-lg: 22px;
+
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .12);
+
+    /* 浮层（下拉 / 弹窗 / 命令面板）：半透明底色 + 背景模糊，随明暗主题自动变化 */
+    --overlay-bg: color-mix(in srgb, var(--surface) 76%, transparent);
+    --overlay-blur: blur(18px) saturate(180%);
+    --shadow-overlay: 0 16px 40px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .08);
+
+    --dur-fast: .15s;
+    --dur-base: .2s;
+}

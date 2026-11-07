@@ -40,15 +40,83 @@ spring:
       ssl:
         enabled: ${REDIS_SSL:false}
       timeout: 2000ms
+  # 【第四十三批】Spring AI 依赖已引入，但暂不启用自动配置：
+  # 当前对话仍走自研 okhttp 客户端；不关掉的话缺少 api-key 会导致启动失败。
+  # 第四十四批做双轨桥接时，再把 chat 打开并配置 base-url。
+  ai:
+    model:
+      chat: none
+      embedding: none
+    openai:
+      api-key: ${SPRING_AI_OPENAI_API_KEY:not-configured}
+      chat:
+        enabled: false
+      embedding:
+        enabled: false
+    # 【第五十一批】MCP 客户端：默认关闭，不影响现有启动与对话。
+    # 打开后按下面的 stdio 连接拉起外部 server，由 McpToolBridge 把工具注册进 ToolRegistry，
+    # 且只在「可执行」权限下对模型可见。
+    mcp:
+      client:
+        enabled: ${MCP_ENABLED:false}
+        type: sync
+        name: ${MCP_CLIENT_NAME:agent-gateway-mcp}
+        version: 1.0.0
+        # 关闭自动初始化：改由 McpToolBridge 逐个 try/catch 初始化，
+        # 单个 server 拉不起来（npx 拉包失败/进程崩溃）只跳过它自己，不拖垮应用启动
+        initialized: false
+        request-timeout: ${MCP_REQUEST_TIMEOUT:60s}
+        stdio:
+          connections:
+            filesystem:
+              # Windows 不能直接启动 npx.cmd，必须经 cmd /c；
+              # Linux/macOS 部署时把 MCP_STDIO_COMMAND 设为 npx，并同步删掉 args 里的 /c
+              command: ${MCP_STDIO_COMMAND:cmd}
+              args:
+                - /c
+                - npx
+                - "-y"
+                # 固定官方包版本，避免 npx 每次拉取不可审计的最新代码
+                - "${MCP_FILESYSTEM_PACKAGE:@modelcontextprotocol/server-filesystem@2.2.0}"
+                # 启动根目录：filesystem server 启动时必须声明至少一个目录（否则直接退出）。
+                # 用系统临时目录作安全兜底——天然存在、无敏感业务文件；
+                # 真正的可访问范围由会话开始时 McpToolBridge.bindWorkspacePath() 通过 MCP Roots 动态追加，
+                # 这样每个项目的 workspacePath 自动进白名单，用户不用手动改任何配置
+                - ${MCP_FS_TMPDIR:${java.io.tmpdir}}
   servlet:
     multipart:
       max-file-size: 50MB      # 单个文件最大 50MB
       max-request-size: 100MB  # 整个请求最大 100MB
       enabled: true
 
+# 【第四十四批】Spring AI ChatModel（OpenAI 兼容协议接 DeepSeek）。
+# 第四十九批删旧后已是唯一模型接入层；如需回退，回滚到删旧前的提交即可
+agent:
+  spring-ai:
+    # DeepSeek 的 OpenAI 兼容入口；Spring AI 默认补 /v1/chat/completions
+    base-url: ${AGENT_SPRING_AI_BASE_URL:https://api.deepseek.com}
+    completions-path: ${AGENT_SPRING_AI_COMPLETIONS_PATH:/v1/chat/completions}
+  # 【第五十一批】MCP 接入与工具注册策略
+  mcp:
+    client:
+      # MCP SDK 的初始化超时默认 20 秒；stdio server 冷启动要先 npx 拉包，
+      # 实测约 22 秒，故单独放大（通过 McpSyncClientCustomizer 设置）
+      initialization-timeout: ${MCP_INITIALIZATION_TIMEOUT:120s}
+    tools:
+      # 空 = 放行全部已配置的 MCP server；填连接名（逗号分隔，如 filesystem）则只注册这些
+      allowed-servers: ${MCP_ALLOWED_SERVERS:}
+      # 单个工具返回文本上限，防止外部 server 的大输出把上下文撑爆
+      max-result-chars: ${MCP_MAX_RESULT_CHARS:8000}
+    # 【第五十二批】健康监控与熔断
+    health:
+      # 连续失败多少次后标记为 DOWN（熔断）
+      failure-threshold: ${MCP_FAILURE_THRESHOLD:3}
+      # DOWN 状态冷却期（毫秒）：超过这个时间后放行一次探测调用
+      cooldown-ms: ${MCP_COOLDOWN_MS:300000}
+      # 定时探测间隔（毫秒）：每多久 ping 所有已注册的 MCP server 一次
+      probe-interval-ms: ${MCP_PROBE_INTERVAL_MS:30000}
+
 deepseek:
-  api:
-    url: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
   # 主对话模型（ReAct 循环、工具调用）
   model: ${DEEPSEEK_MODEL:deepseek-chat}
   # 允许用户在对话框里切换的模型白名单，逗号分隔；不在列表内的请求一律回落到 model
@@ -89,6 +157,7 @@ context:
     max-input-chars: ${CONTEXT_SUMMARY_MAX_INPUT_CHARS:12000}
     # 摘要本身上限（字符），防止摘要越滚越长
     max-summary-chars: ${CONTEXT_SUMMARY_MAX_SUMMARY_CHARS:1200}
+    # 摘要注入：由 SessionMemoryAdvisor 在 Spring AI 调用链追加到 system 消息（第四十九批删旧后唯一路径）
 
 # 工作区文件系统配置
 workspace:
@@ -105,8 +174,8 @@ workspace:
     # 总开关：部署到不受信任环境时置 false，Agent 只能读写文件、不能执行命令
     enabled: ${WORKSPACE_COMMAND_ENABLED:true}
     # 单条命令默认超时（秒），模型可通过 timeout 参数调大，但不超过 max-timeout-seconds
-    timeout-seconds: ${WORKSPACE_COMMAND_TIMEOUT_SECONDS:60}
-    max-timeout-seconds: ${WORKSPACE_COMMAND_MAX_TIMEOUT_SECONDS:300}
+    timeout-seconds: ${WORKSPACE_COMMAND_TIMEOUT_SECONDS:120}
+    max-timeout-seconds: ${WORKSPACE_COMMAND_MAX_TIMEOUT_SECONDS:600}
     # 返回给模型的输出上限（字符），超出只保留头部并标记截断
     max-output-bytes: ${WORKSPACE_COMMAND_MAX_OUTPUT_BYTES:8192}
     # 可执行程序白名单，逗号分隔；不配置则用代码里的默认开发工具列表
@@ -120,13 +189,18 @@ workspace:
     extra-path: ${WORKSPACE_COMMAND_EXTRA_PATH:}
 
 app:
+  version: ${APP_VERSION:1.0.0}
+  download:
+    # 发布桌面端后由发布环境注入；未配置时仅声明下载能力，不虚构版本号
+    latest-version: ${DESKTOP_LATEST_VERSION:}
   jwt:
-    # 【本地开发】默认 32 字节以上密钥；生产环境必须通过 JWT_SECRET 环境变量注入
-    secret: ${JWT_SECRET:dev-secret-key-01234567890123456789012345678901}
+    # 密钥只从环境变量读取，仓库不保存任何可用默认值。
+    # 缺失或强度不足时 SecretStartupValidator 会拒绝启动。生成：openssl rand -base64 48
+    secret: ${JWT_SECRET:}
     expiration: ${JWT_EXPIRATION:86400000}
   crypto:
-    # 【本地开发】默认 AES 密钥；生产环境必须通过 AES_MASTER_KEY 环境变量注入
-    master-key: ${AES_MASTER_KEY:LYk5GbTLyKXH86K9HEk2mYLPhgTZ2qdM6+RCEvpgYQ4=}
+    # AES 主密钥只从环境变量读取，Base64 编码的 16/24/32 字节。生成：openssl rand -base64 32
+    master-key: ${AES_MASTER_KEY:}
   rsa:
     private-key: ${RSA_PRIVATE_KEY:}
     public-key: ${RSA_PUBLIC_KEY:}
@@ -157,6 +231,10 @@ logging:
   level:
     com.capsule.agentkey: INFO
     org.springframework.security: INFO
+    # MCP 客户端自动配置会无条件创建 sampling/elicitation 提供者，
+    # 未实现对应能力时固定打两条 "No sampling methods found" WARN，属噪音，降为 ERROR
+    org.springaicommunity.mcp.provider.sampling: ERROR
+    org.springaicommunity.mcp.provider.elicitation: ERROR
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] [%X{traceId}] %-5level %logger{36} - %msg%n"
 

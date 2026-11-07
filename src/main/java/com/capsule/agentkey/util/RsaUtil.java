@@ -34,7 +34,7 @@ public class RsaUtil {
                     new PKCS8EncodedKeySpec(Base64.getDecoder().decode(privateKeyBase64)));
             this.publicKey = keyFactory.generatePublic(
                     new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyBase64)));
-            log.info("✅ RSA 密钥已从配置加载 (PKCS1Padding)");
+            log.info("RSA 密钥已从配置加载 (PKCS1Padding)");
         }
         //当配置文件里的公私钥任一为空，则临时随机生成密钥
         else {
@@ -48,7 +48,7 @@ public class RsaUtil {
             //分别提取
             this.privateKey = pair.getPrivate();
             this.publicKey = pair.getPublic();
-            log.warn("⚠️ RSA 密钥未配置，已临时生成（仅开发环境使用）！");
+            log.warn("RSA 密钥未配置，已临时生成（仅开发环境使用）！");
             log.warn("请将以下环境变量配置到生产环境：");
             log.warn("export RSA_PUBLIC_KEY={}", Base64.getEncoder().encodeToString(publicKey.getEncoded()));
             log.warn("export RSA_PRIVATE_KEY=<请从安全渠道获取或自行生成>");

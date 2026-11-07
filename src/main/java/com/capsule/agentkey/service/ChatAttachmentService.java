@@ -139,7 +139,7 @@ public class ChatAttachmentService {
             List<VectorStoreService.VectorRecord> records = new ArrayList<>();//创建列表，装待入库的向量记录
             for (int i = 0; i < chunks.size(); i++) {//遍历每个文本块
                 long chunkId = UUID.randomUUID().getMostSignificantBits();//随机生成id（128位，且有唯一性），最后的方法用来取高64位
-                // ✅ 修复：必须加入 records
+                // 修复：必须加入 records
                 //组装记录
                 records.add(new VectorStoreService.VectorRecord(
                         chunkId, //文本块唯一id

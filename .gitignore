@@ -34,6 +34,11 @@ build/
 ### 开发环境配置（包含敏感密钥，不上传） ###
 src/main/resources/application-dev.yml
 
+### 本地调试工具与编译产物（含本机凭据，不上传） ###
+/KeyCheck.java
+/ResetPwd.java
+*.class
+
 ### 部署与运行时产物 ###
 .env
 uploads/

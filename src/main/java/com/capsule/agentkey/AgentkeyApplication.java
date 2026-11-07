@@ -3,9 +3,11 @@ package com.capsule.agentkey;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 @EnableJpaAuditing//开启JPA自动审计功能//配套entity层的@CreateDate注解和@LastModfiedDate注解
+@EnableScheduling//第五十二批：启用定时任务（MCP 健康监控）
 public class AgentkeyApplication {
     public static void main(String[] args) {
         SpringApplication app = new SpringApplication(AgentkeyApplication.class);

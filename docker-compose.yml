@@ -1,0 +1,81 @@
+# =============================================================
+# AgentKey 部署编排：应用 + PostgreSQL(pgvector) + Redis
+#
+# 使用前：
+#   1. 复制 .env.example 为 .env 并填写所有密钥
+#   2. docker compose up -d --build
+#
+# 端口说明（避开本机已在跑的服务）：
+#   - postgres 映射到宿主机 5434：本机已有 pgvector 容器占用 5433
+#   - redis    映射到宿主机 6380：本机已有 Redis 占用 6379
+#   容器内部通信仍用标准端口 5432 / 6379，应用通过服务名访问。
+# =============================================================
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agentkey-postgres
+    environment:
+      POSTGRES_DB: agentkey_vector
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?必须在 .env 中设置 DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentkey_vector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentkey-redis
+    # 供限流与登录失败锁定使用；数据可丢（重启后计数清零，不影响业务数据）
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: agentkey-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # 容器内用服务名访问，不用 localhost
+      DB_URL: jdbc:postgresql://postgres:5432/agentkey_vector
+      DB_USERNAME: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # 以下密钥全部来自 .env，禁止写死在镜像或 compose 文件里
+      JWT_SECRET: ${JWT_SECRET}
+      AES_MASTER_KEY: ${AES_MASTER_KEY}
+      RSA_PRIVATE_KEY: ${RSA_PRIVATE_KEY}
+      RSA_PUBLIC_KEY: ${RSA_PUBLIC_KEY}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      # 正式域名接入后改成 https 域名，例如 https://agent.example.com
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      CSP_CONNECT_SRC: ${CSP_CONNECT_SRC:-http://localhost:8080 https://api.deepseek.com https://api.tavily.com}
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
 //JWT 编解码：签发、解 jti、解 userId、验签、验过期
@@ -21,7 +22,7 @@ public class JwtUtil {
 
     //把配置文件里的密钥字符串，转换为JJWT库可用来签名，验签的加密密钥对象
     private SecretKey getKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes());
+        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     //生成令牌token（登录时调用）

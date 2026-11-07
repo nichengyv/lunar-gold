@@ -1,11 +1,15 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.dto.ChatSessionStats;
 import com.capsule.agentkey.dto.MessageSearchHit;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.repository.ChatMessageRepository;
 import com.capsule.agentkey.repository.ChatSessionRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -13,8 +17,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +34,13 @@ public class ChatService {
 
     @Autowired
     private ChatMessageRepository messageRepo;
+
+    @Autowired
+    private ObjectMapper mapper;
+
+    // 运行中改权限也立即生效：ReAct 循环每次工具调用前从这里读最新档位
+    @Autowired
+    private SessionPermissionTracker permissionTracker;
 
     @Transactional
     public ChatSession createSession(Long userId, Long projectId, String title, AgentPolicy policy) {
@@ -269,6 +282,8 @@ public class ChatService {
         ChatSession session = getOwnedSession(sessionId, userId);
         session.setPermission(normalized);
         sessionRepo.save(session);
+        // 正在作答的轮次也能看到新档位（不必等下一轮）
+        permissionTracker.put(sessionId, AgentPolicy.Permission.from(normalized));
     }
 
     @Transactional
@@ -303,5 +318,231 @@ public class ChatService {
         }
         messageRepo.deleteBySessionId(sessionId);
         sessionRepo.delete(session);
+    }
+
+    /**
+     * 会话追踪面板的聚合统计。
+     * 数据源：ChatMessage.trace（TEXT 列存的 JSON，每次 assistant 消息执行完工具循环后落库）。
+     * 不新建表——trace 里已有 tools/changes/durationMs，按需 parse + 聚合。
+     *
+     * 第五十四批：前端侧边栏"会话追踪"面板后端支撑。
+     */
+    public ChatSessionStats aggregateStats(Long sessionId, Long userId) {
+        ChatSession session = sessionRepo.findById(sessionId)
+                .orElseThrow(() -> new BusinessException("会话不存在"));
+        if (!session.getUserId().equals(userId)) {
+            throw new BusinessException("无权访问");
+        }
+
+        List<ChatMessage> messages = messageRepo.findBySessionIdOrderByCreateTimeAsc(sessionId);
+        ChatSessionStats stats = new ChatSessionStats();
+
+        // ==== 1. 工具调用聚合 ====
+        // Map<工具名, 调用记录> 统计次数/成功/失败/耗时
+        Map<String, ToolAccumulator> toolAccMap = new LinkedHashMap<>();
+        List<ChatSessionStats.ToolTimelineEntry> timeline = new ArrayList<>();
+        Map<String, FileAccumulator> fileAccMap = new LinkedHashMap<>();
+        Set<String> toolNames = new HashSet<>();
+        Set<String> filePaths = new HashSet<>();
+        long totalToolCalls = 0;
+        long totalToolSuccess = 0;
+        long totalDurationMs = 0;
+        long sessionStartMs = 0;
+        // 第五十六批：耗时口径拆分——会话级 breakdown 累加
+        long setupMsSum = 0;
+        long toolsMsSum = 0;
+        long answerMsSum = 0;
+        int roundsWithSegments = 0;
+
+        for (ChatMessage msg : messages) {
+            String traceJson = msg.getTrace();
+            if (traceJson == null || traceJson.isBlank()) continue;
+            JsonNode root;
+            try {
+                root = mapper.readTree(traceJson);
+            } catch (Exception e) {
+                log.debug("trace JSON 解析跳过（非工具消息）: {}", e.getMessage());
+                continue;
+            }
+            // 跳过非 assistant 消息（user 消息没有 trace）
+            if (msg.getRole() != ChatMessage.MessageRole.ASSISTANT) continue;
+
+            long offsetMs = msg.getCreateTime() == null ? 0 : msg.getCreateTime()
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+            if (sessionStartMs == 0) sessionStartMs = offsetMs;
+
+            // durationMs 累加
+            if (root.has("durationMs")) {
+                totalDurationMs += root.get("durationMs").asLong(0);
+            }
+
+            // 第五十六批：segments 累加（setup/tools/answer 三段耗时）
+            JsonNode segments = root.get("segments");
+            if (segments != null && segments.isArray() && !segments.isEmpty()) {
+                for (JsonNode seg : segments) {
+                    String phase = seg.path("phase").asText("");
+                    long ms = seg.path("ms").asLong(0);
+                    switch (phase) {
+                        case "setup" -> setupMsSum += ms;
+                        case "tools" -> toolsMsSum += ms;
+                        case "answer" -> answerMsSum += ms;
+                    }
+                }
+                roundsWithSegments++;
+            }
+
+            // tools 数组
+            JsonNode tools = root.get("tools");
+            if (tools != null && tools.isArray()) {
+                for (JsonNode tool : tools) {
+                    String name = tool.path("name").asText("");
+                    if (name.isEmpty()) continue;
+                    String status = tool.path("status").asText("unknown");
+                    boolean success = "success".equals(status);
+                    long costMs = tool.path("costMs").asLong(0);
+                    String source = name.startsWith("mcp_") ? "mcp" : "builtin";
+
+                    toolNames.add(name);
+                    totalToolCalls++;
+                    if (success) totalToolSuccess++;
+
+                    // 聚合到 toolAccMap
+                    ToolAccumulator acc = toolAccMap.computeIfAbsent(name, k -> new ToolAccumulator(name, source));
+                    acc.calls++;
+                    if (success) acc.success++;
+                    else acc.failure++;
+                    acc.costs.add(costMs);
+
+                    // 时间线（带 offset 但相对值，前端渲染时用）
+                    ChatSessionStats.ToolTimelineEntry entry = new ChatSessionStats.ToolTimelineEntry();
+                    entry.setOffsetMs(offsetMs);
+                    entry.setName(name);
+                    entry.setSource(source);
+                    entry.setStatus(status);
+                    entry.setCostMs(costMs);
+                    // 参数截断到 80 字符，trace 里 args 已经是字符串
+                    String args = tool.path("args").asText("{}");
+                    entry.setArgsSummary(args.length() > 80 ? args.substring(0, 80) + "…" : args);
+                    timeline.add(entry);
+                }
+            }
+
+            // changes 数组
+            JsonNode changes = root.get("changes");
+            if (changes != null && changes.isArray()) {
+                for (JsonNode change : changes) {
+                    String path = change.path("path").asText("");
+                    if (path.isEmpty()) continue;
+                    filePaths.add(path);
+                    String action = change.path("action").asText("modify");
+                    String source = change.path("source").asText("unknown");
+                    int adds = change.path("additions").asInt(0);
+                    int dels = change.path("deletions").asInt(0);
+
+                    FileAccumulator facc = fileAccMap.computeIfAbsent(path, k -> new FileAccumulator(path));
+                    facc.lastAction = action;
+                    facc.source = source;
+                    facc.additions += adds;
+                    facc.deletions += dels;
+                }
+            }
+        }
+
+        // ==== 2. 构建 Overview ====
+        ChatSessionStats.Overview ov = new ChatSessionStats.Overview();
+        long finalStartMs = sessionStartMs;
+        ov.setTotalRounds((int) messages.stream().filter(m -> m.getRole() == ChatMessage.MessageRole.ASSISTANT).count());
+        ov.setTotalToolCalls((int) totalToolCalls);
+        ov.setToolSuccessRate(totalToolCalls == 0 ? 1.0 : (double) totalToolSuccess / totalToolCalls);
+        ov.setUniqueTools(toolNames.size());
+        ov.setUniqueFilesChanged(filePaths.size());
+        ov.setTotalDurationMs(totalDurationMs);
+        ov.setReasoningPolicy(session.getReasoning() == null ? "STANDARD" : session.getReasoning());
+        ov.setPermission(session.getPermission() == null ? "MANUAL" : session.getPermission());
+        ov.setStartedAt(session.getCreateTime() == null ? null : session.getCreateTime().toString());
+        ov.setLastActiveAt(session.getUpdateTime() == null ? null : session.getUpdateTime().toString());
+        stats.setOverview(ov);
+
+        // 第五十六批：耗时 breakdown（只在有 segments 时才设置，老会话兼容）
+        if (roundsWithSegments > 0) {
+            ChatSessionStats.TimeBreakdown bd = new ChatSessionStats.TimeBreakdown();
+            bd.setSetupMs(setupMsSum);
+            bd.setToolsMs(toolsMsSum);
+            bd.setAnswerMs(answerMsSum);
+            bd.setRoundsWithSegments(roundsWithSegments);
+            stats.setTimeBreakdown(bd);
+        }
+
+        // ==== 3. 构建 ToolStat（按调用次数降序）====
+        List<ChatSessionStats.ToolStat> toolStats = toolAccMap.values().stream()
+                .map(acc -> {
+                    ChatSessionStats.ToolStat ts = new ChatSessionStats.ToolStat();
+                    ts.setName(acc.name);
+                    ts.setSource(acc.source);
+                    ts.setCalls(acc.calls);
+                    ts.setSuccess(acc.success);
+                    ts.setFailure(acc.failure);
+                    ts.setSuccessRate(acc.calls == 0 ? 1.0 : (double) acc.success / acc.calls);
+                    ts.setAvgCostMs(acc.costs.stream().mapToLong(Long::longValue).average().orElse(0));
+                    ts.setP95CostMs(p95(acc.costs));
+                    ts.setMaxCostMs(acc.costs.stream().mapToLong(Long::longValue).max().orElse(0));
+                    return ts;
+                })
+                .sorted((a, b) -> Integer.compare(b.getCalls(), a.getCalls()))
+                .toList();
+        stats.setTools(toolStats);
+
+        // ==== 4. 构建 FileChangeStat（按新增+删除行数降序）====
+        List<ChatSessionStats.FileChangeStat> fileStats = fileAccMap.values().stream()
+                .map(facc -> {
+                    ChatSessionStats.FileChangeStat fs = new ChatSessionStats.FileChangeStat();
+                    fs.setPath(facc.path);
+                    fs.setAction(facc.lastAction);
+                    fs.setSource(facc.source);
+                    fs.setAdditions(facc.additions);
+                    fs.setDeletions(facc.deletions);
+                    return fs;
+                })
+                .sorted((a, b) -> Integer.compare(
+                        b.getAdditions() + b.getDeletions(),
+                        a.getAdditions() + a.getDeletions()))
+                .toList();
+        stats.setFiles(fileStats);
+
+        // ==== 5. 时间线 ====
+        stats.setTimeline(timeline);
+
+        return stats;
+    }
+
+    /** P95：排序后取 ceil(n * 0.95) - 1 位 */
+    private long p95(List<Long> costs) {
+        if (costs.isEmpty()) return 0;
+        List<Long> sorted = new ArrayList<>(costs);
+        Collections.sort(sorted);
+        int idx = (int) Math.ceil(sorted.size() * 0.95) - 1;
+        idx = Math.max(0, Math.min(idx, sorted.size() - 1));
+        return sorted.get(idx);
+    }
+
+    /** 工具调用聚合用的临时 accumulator */
+    private static class ToolAccumulator {
+        final String name;
+        final String source; // builtin / mcp
+        int calls;
+        int success;
+        int failure;
+        List<Long> costs = new ArrayList<>();
+        ToolAccumulator(String name, String source) { this.name = name; this.source = source; }
+    }
+
+    /** 文件变更聚合用的临时 accumulator */
+    private static class FileAccumulator {
+        final String path;
+        String lastAction;
+        String source;
+        int additions;
+        int deletions;
+        FileAccumulator(String path) { this.path = path; }
     }
 }
