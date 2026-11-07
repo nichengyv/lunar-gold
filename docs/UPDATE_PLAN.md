@@ -165,11 +165,11 @@ public interface AgentRunStore {
 | ID | 任务 | 涉及文件 | 验收 |
 |---|---|---|---|
 | P0-01 | **已完成**：全量纳入版本管理 | `.gitignore`、`frontend/`、`docs/` | `git status` 干净；前端不再未跟踪 |
-| P0-02 | **已实现（待 PR 验证）**：建立 CI 骨架 | `.github/workflows/ci.yml` | PR 必须通过编译 + 测试 + 前端检查 |
+| P0-02 | **已完成（Gitee Go 实测通过）**：建立 CI 骨架 | `.github/workflows/ci.yml`、`.workflow/ci.yml` | PR 必须通过编译 + 测试 + 前端检查 |
 | P0-03 | **已完成（PR-01）**：删除默认密钥并启动校验 | `application.yml`、`application-dev.yml`、`application-prod.yml` | 缺少密钥时 prod 启动失败；仓库无可用密钥 |
 | P0-04 | **已完成（PR-01）**：修复安全红线 | `SecurityConfig.java`、`AgentChatController.java`、`ApiKeyService.java`、`CommandService.java`、`McpClientConfig.java` | 见“安全清单”P0 项全部关闭 |
 | P0-05 | **已完成**：文档与代码对齐 | `STATUS.md`、`design.md`、`operations.md` | V14、Batch 状态、MCP 默认值一致 |
-| P0-06 | **已完成（未提交）**：依赖与静态扫描 + 补近期测试 | `pom.xml`、`frontend/package.json`、CI | 无 Critical 漏洞；补 `CommandRiskTest`/`AgentPolicyTest`/`DeleteFileToolTest` |
+| P0-06 | **已完成**：依赖与静态扫描 + 补近期测试 | `pom.xml`、`frontend/package.json`、CI | 无 Critical 漏洞；补 `CommandRiskTest`/`AgentPolicyTest`/`DeleteFileToolTest` |
 | P0-07 | **DB 选型 spike（已完成）** | 隔离实验目录；报告见 4.1 | 两条路线均实测 V1~V14、1024 维向量写入/余弦检索、会话保存/读取；完成包体、3 轮干净全链路、内存与 diff 统计；**结论：内嵌 PostgreSQL + pgvector** |
 
 **P0 安全红线明细：**
@@ -192,9 +192,11 @@ public interface AgentRunStore {
 
 **P0-06 扫描与验收边界**：OWASP Dependency Check 因无 NVD API Key 下载过慢，在 100,000/420,823 条时停止，未生成报告；OSS Index 返回 HTTP 401，两者均不计为有效通过，最终结论以 OSV 公共 API 为准。前端 `vue-tsc --noEmit` 已通过，但 Vite 在清理临时 esbuild 文件时持续报 `Access is denied`，因此不宣称前端完整构建通过。真实模型/MCP 网络链路及完整 desktop 启动、SSE 端到端未在本次升级后专项验收。P0-01、P0-02 仍未完成，本步不提交代码，也不代表 Phase 0 全部收尾。
 
-**P0-02 实现批注（2026-11-07，未提交）**：新增 `.github/workflows/ci.yml`，在 `master` 的 PR、push 及手动触发时并行运行后端与前端任务。后端使用 Temurin Java 21 和 Maven 缓存，执行 `mvn --batch-mode --no-transfer-progress verify`；前端使用 Node 22 和 npm 缓存，执行 `npm ci` 与 `npm run build`，后者同时覆盖 `vue-tsc --noEmit` 和 Vite 生产构建。现有 `frontend/.gitignore` 已排除 `node_modules` 与 `dist`，无需重复修改根目录规则。本地验证中，CI YAML 解析通过；Maven `verify` 为 **119 项，0 失败、0 错误、2 跳过**；`npm ci` 成功，完整前端类型检查与生产构建通过。Windows 默认系统临时目录仍会触发 esbuild 清理权限错误，本次将 `TEMP`/`TMP` 定向到 `target/ci-tmp` 后构建成功，CI 的 Ubuntu 环境不需要该规避。
+**P0-02 实现批注（2026-11-07）**：新增 `.github/workflows/ci.yml` 与实际远端使用的 `.workflow/ci.yml`，覆盖 `master` 的 PR、push 及手动触发。后端使用 JDK 21 执行 Maven `verify`；前端使用 Node 22 执行 `npm ci` 与 `npm run build`，同时覆盖 `vue-tsc --noEmit` 和 Vite 生产构建。Gitee Go 插件最高只内置 JDK 17 / Node 15，因此两个任务均在独立引导目录下载所需运行时，不污染仓库或依赖管理员配置。
 
-**P0-02 验收边界**：本步未提交、未推送，也未实际创建 PR，因此不宣称 GitHub Actions 或 PR 已全绿；还需在仓库分支保护中将 `Backend compile and test` 与 `Frontend type check and build` 设为必需状态检查，才能强制拦截不合格 PR。本地为 Windows + Node 24，CI 为 Ubuntu + Node 22，目前只完成等价命令验证，runner 与 Node 版本差异待首次真实 CI 运行确认。P0-01 仍未完成，本步不代表 Phase 0 全部收尾。
+**P0-02 完成批注（2026-11-07）**：Gitee Go 已识别 `AgentKey CI`，最新 `master` 前后端流水线已实际运行成功。首次干净环境编译暴露出本地缓存未覆盖的发布版 API 差异：`SpringAiAgentClient` 移除了 Spring AI 2.0.2 已不存在的 `internalToolExecutionEnabled` 配置，并确认模型只解析工具定义、实际执行仍由自研 ReAct 循环负责；`McpToolBridge` 按 MCP SDK 2.1.0 直接传递 `Map` 类型 schema。修复后本地 `clean verify` 为 **119 项，0 失败、0 错误、2 跳过**，随后推送提交 `a07bb0e` 并完成远端验证。用于诊断的 Maven 3.9.16 额外下载已撤销，最终流水线使用 Gitee 内置 Maven，避免无关耗时。
+
+**P0-02 验收边界**：本次以真实 Gitee Go `master` 构建关闭 CI 验证，未额外创建测试 PR；push 与 PR 触发规则已写入流水线，但仓库分支保护中的“必需状态检查”仍需在 Gitee 页面单独配置，才能从平台设置上强制拦截不合格 PR。GitHub Actions 配置保留给 GitHub 镜像使用，本次未在 GitHub runner 实际执行。本步仅关闭 P0-02，不代表 Phase 0 的“新环境按 README 可启动”出口标准已验收。
 
 **P0-01 完成批注（2026-11-07）**：后端、前端、测试、Flyway 迁移、CI、容器配置与交接文档已统一纳入基线提交，`frontend/package-lock.json` 一并入库；`node_modules`、`dist`、`.tmp`、日志、上传文件、运行数据及 dev 密钥配置保持忽略。根目录 `KeyCheck.java`、`ResetPwd.java` 为含本机连接信息的临时调试工具，仅保留本地并与 `*.class` 一起排除，未纳入提交；交接文档中的本地数据库口令已移除。提交后 `git status` 干净，前端不再处于未跟踪状态。代码与构建验证沿用 P0-02 的 Maven 119 项测试及前端完整构建结果，本步仅调整版本管理规则、文档脱敏和提交基线。
 
