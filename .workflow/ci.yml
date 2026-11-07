@@ -21,19 +21,23 @@ stages:
       - step: build@maven
         name: backend_verify
         displayName: 后端 Java 21 编译与测试
-        # Gitee Go 插件最高内置 JDK 17，任务内引导项目要求的 JDK 21。
+        # 插件内置版本过旧，任务内引导与本地一致的 JDK 21 和 Maven 3.9.16。
         jdkVersion: '17'
         mavenVersion: 3.6.3
         commands:
           - |
             set -e
-            mkdir -p .ci/jdk-21
+            mkdir -p .ci/jdk-21 .ci/maven-3.9.16
             wget -q https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz -O .ci/jdk-21.tar.gz
             tar -xzf .ci/jdk-21.tar.gz --strip-components=1 -C .ci/jdk-21
+            wget -q https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/apache-maven-3.9.16-bin.tar.gz -O .ci/maven-3.9.16.tar.gz
+            tar -xzf .ci/maven-3.9.16.tar.gz --strip-components=1 -C .ci/maven-3.9.16
             export JAVA_HOME="$PWD/.ci/jdk-21"
-            export PATH="$JAVA_HOME/bin:$PATH"
+            export MAVEN_HOME="$PWD/.ci/maven-3.9.16"
+            export PATH="$MAVEN_HOME/bin:$JAVA_HOME/bin:$PATH"
             java -version
-            mvn -B --no-transfer-progress verify
+            mvn -version
+            mvn -U -B --no-transfer-progress dependency:tree "-Dincludes=org.springframework.ai:*,io.modelcontextprotocol*:*" verify
 
       - step: build@nodejs
         name: frontend_verify
