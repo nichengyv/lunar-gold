@@ -26,7 +26,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -190,7 +189,9 @@ public class McpToolBridge implements ApplicationRunner {
         if (description.length() > MAX_DESCRIPTION_LENGTH) {
             description = description.substring(0, MAX_DESCRIPTION_LENGTH) + "...";
         }
-        Map<String, Object> schema = toSchemaMap(tool.inputSchema());
+        Map<String, Object> schema = tool.inputSchema() == null
+                ? Map.of("type", "object", "properties", Map.of())
+                : tool.inputSchema();
         String remoteName = tool.name();
         Capability requiredCapability = ToolApprovalRegistry.riskOf(toolName) == null
                 ? Capability.MCP_READ
@@ -356,18 +357,6 @@ public class McpToolBridge implements ApplicationRunner {
         if (value == null || value.isEmpty()) return "tool";
         String cleaned = value.toLowerCase(Locale.ROOT).replaceAll("[^a-zA-Z0-9_-]", "_");
         return cleaned.isEmpty() ? "tool" : cleaned;
-    }
-
-    private Map<String, Object> toSchemaMap(McpSchema.JsonSchema schema) {
-        if (schema == null) return Map.of("type", "object", "properties", Map.of());
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("type", schema.type() == null || schema.type().isBlank() ? "object" : schema.type());
-        map.put("properties", schema.properties() == null ? Map.of() : schema.properties());
-        if (schema.required() != null && !schema.required().isEmpty()) map.put("required", schema.required());
-        if (schema.additionalProperties() != null) map.put("additionalProperties", schema.additionalProperties());
-        if (schema.defs() != null && !schema.defs().isEmpty()) map.put("$defs", schema.defs());
-        if (schema.definitions() != null && !schema.definitions().isEmpty()) map.put("definitions", schema.definitions());
-        return map;
     }
 
     private String truncate(String text) {

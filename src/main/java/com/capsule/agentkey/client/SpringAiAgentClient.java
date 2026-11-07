@@ -259,14 +259,13 @@ public class SpringAiAgentClient {
     }
 
     /**
-     * 第四十五批：工具定义由 BaseTool.toToolCallback 提供（ToolRegistry 完成权限过滤），
-     * Spring AI 负责转换为 OpenAI 协议。
-     * 内部执行保持关闭，工具仍由自研 ToolRegistry.dispatch 执行。
+     * 工具定义由 BaseTool.toToolCallback 提供（ToolRegistry 完成权限过滤），
+     * Spring AI 2 只负责解析定义并转换为 OpenAI 协议，不执行工具；
+     * 实际调用仍由自研 ReAct 循环和 ToolRegistry.dispatch 完成。
      */
     private OpenAiChatOptions buildOptions(String model, List<ToolCallback> toolCallbacks) {
         OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
-                .model(model)
-                .internalToolExecutionEnabled(false);
+                .model(model);
         if (toolCallbacks != null && !toolCallbacks.isEmpty()) {
             builder.toolCallbacks(toolCallbacks).toolChoice("auto");
         }
