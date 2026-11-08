@@ -137,9 +137,11 @@ npm install          # 首次；需要能下载 Electron 二进制
 npm start
 ```
 
-壳的行为：单实例锁 → 在 127.0.0.1 上选空闲端口拉起侧车（`--spring.profiles.active=desktop --server.port=<port>`，日志追加到 `<data-dir>/sidecar.log`）→ 轮询 `/actuator/health` 直到 200 → 加载 `http://127.0.0.1:<port>/` → 退出时 `taskkill /T /F` 终止整棵进程树（含内嵌 PostgreSQL）。首次启动自动生成 `<data-dir>/aes.key` 并复用；`JAVA_HOME`、`DESKTOP_DATA_DIR`、`AES_MASTER_KEY` 均可覆盖。
+壳的行为：单实例锁 → 在 127.0.0.1 上选空闲端口拉起侧车（`--spring.profiles.active=desktop --server.port=<port>`，日志追加到 `<data-dir>/sidecar.log`）→ 轮询 `/actuator/health` 直到 200（期间日志一旦出现 `APPLICATION FAILED TO START` / `already in use` 等典型失败会立即报错并附带日志末尾，不必等满 120 秒）→ 加载 `http://127.0.0.1:<port>/`。首次启动自动生成 `<data-dir>/aes.key` 并复用；`JAVA_HOME`、`DESKTOP_DATA_DIR`、`AES_MASTER_KEY` 均可覆盖。
 
-验证边界：`desktop/sidecar.js` 已用 node 直接驱动真实 jar 验证（动态端口、`/api/meta=DESKTOP`、`/` 返回 SPA、终止后子进程消失）；当前自动化环境无交互桌面会话，Electron 窗口本身无法拉起（最小示例退出码 1），需在本机桌面执行 `npm start` 人工确认窗口渲染与双开时的单实例行为。`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（前端仍靠该接口换取本地令牌），关闭它需要壳侧注入令牌，属于后续任务。
+退出与崩溃：关窗或退出时终止侧车整棵进程树；由于内嵌 PostgreSQL 的 postmaster 由 pg_ctl 分离拉起、不在 java 进程树内，会额外按 `<data-dir>/db/postmaster.pid` 单独终止，避免残留进程把数据目录锁死。运行中侧车意外退出会弹「重启本地服务 / 退出」对话框，重启会先补杀游离的 postmaster 再重新拉起（同一数据目录可直接复用）。
+
+验证边界：`desktop/sidecar.js` 已用 node 直驱真实 jar 验证（动态端口、`/api/meta=DESKTOP`、崩溃检测、原地重启 14 秒就绪、终止后 java 与 postmaster 均无残留）；当前自动化环境无交互桌面会话，Electron 窗口本身无法拉起（最小示例退出码 1），需在本机桌面执行 `npm start` 人工确认窗口渲染与双开时的单实例行为。`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（前端仍靠该接口换取本地令牌），关闭它需要壳侧注入令牌，属于后续任务。
 
 ---
 

@@ -19,6 +19,9 @@ const HEALTH_TIMEOUT_MS = 120000;
 
 let mainWindow = null;
 let sidecar = null;
+// 主动退出期间不触发“崩溃”对话框
+let quitting = false;
+let runtime = null; // { jarPath, env, logPath }，供崩溃后重启复用
 
 if (!app.requestSingleInstanceLock()) {
   // 已有实例：直接退出，由已有实例把窗口拉到前台
@@ -35,10 +38,14 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => app.quit());
-  app.on('before-quit', () => stopSidecar(sidecar));
+  app.on('before-quit', () => {
+    quitting = true;
+    stopSidecar(sidecar);
+  });
   app.on('will-quit', () => stopSidecar(sidecar));
   process.on('exit', () => stopSidecar(sidecar));
   process.on('SIGINT', () => {
+    quitting = true;
     stopSidecar(sidecar);
     app.quit();
   });
@@ -48,26 +55,73 @@ async function bootstrap() {
   const dataDir = process.env.DESKTOP_DATA_DIR || path.join(app.getPath('home'), '.agentkey', 'desktop');
   fs.mkdirSync(dataDir, { recursive: true });
 
-  const jarPath = resolveJar();
-  const env = {
-    ...process.env,
-    AES_MASTER_KEY: process.env.AES_MASTER_KEY || readOrCreateAesKey(dataDir)
+  runtime = {
+    jarPath: resolveJar(),
+    env: {
+      ...process.env,
+      AES_MASTER_KEY: process.env.AES_MASTER_KEY || readOrCreateAesKey(dataDir)
+    },
+    logPath: path.join(dataDir, 'sidecar.log')
   };
 
   mainWindow = createWindow();
   await mainWindow.loadURL(loadingPage());
 
   try {
-    sidecar = await startSidecar({
-      javaCmd: resolveJava(),
-      jarPath,
-      env,
-      logPath: path.join(dataDir, 'sidecar.log'),
-      timeoutMs: HEALTH_TIMEOUT_MS
-    });
+    await launchSidecar();
     await mainWindow.loadURL(sidecar.url);
   } catch (err) {
-    fail('本地服务没有启动成功', err, path.join(dataDir, 'sidecar.log'));
+    fail('本地服务没有启动成功', err, runtime.logPath);
+  }
+}
+
+async function launchSidecar() {
+  sidecar = await startSidecar({
+    javaCmd: resolveJava(),
+    jarPath: runtime.jarPath,
+    env: runtime.env,
+    logPath: runtime.logPath,
+    timeoutMs: HEALTH_TIMEOUT_MS
+  });
+  sidecar.child.once('exit', onSidecarExit);
+}
+
+/** 就绪后进程意外退出：提示重启或退出，不静默留着一个死 UI */
+function onSidecarExit(code, signal) {
+  if (quitting || sidecarRestarting) return;
+  console.error(`[sidecar] 意外退出 code=${code} signal=${signal}`);
+  const choice = dialog.showMessageBoxSync(mainWindow, {
+    type: 'error',
+    title: APP_TITLE,
+    message: '本地服务意外退出',
+    detail: `code=${code} signal=${signal}\n日志：${runtime.logPath}`,
+    buttons: ['重启本地服务', '退出'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (choice === 0) {
+    restartSidecar();
+  } else {
+    app.quit();
+  }
+}
+
+let sidecarRestarting = false;
+async function restartSidecar() {
+  sidecarRestarting = true;
+  try {
+    await mainWindow.loadURL(loadingPage());
+    // 崩溃后内嵌 PostgreSQL 的 postmaster 是游离进程，先按 postmaster.pid 补杀，
+    // 否则重启会被判定「数据库已被其他进程占用」
+    stopSidecar(sidecar);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await launchSidecar();
+    await mainWindow.loadURL(sidecar.url);
+  } catch (err) {
+    fail('本地服务重启失败', err, runtime.logPath);
+  } finally {
+    sidecarRestarting = false;
   }
 }
 

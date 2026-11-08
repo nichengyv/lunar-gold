@@ -358,7 +358,7 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 | P3-00 | **已完成（P3-00）**：前端随 jar 分发 | `pom.xml`、`WebConfig.java`、`SecurityConfig.java` | `mvn -Pwith-frontend package` 后单 jar 直接提供 UI，SPA 深链可用 |
 | P3-00b | **已完成（同批）**：数据库运行时随 jar 分发 | `pom.xml`、`DbLifecycleManager.java`、`scripts/build-pg-runtime.ps1` | `-Pwith-pg-runtime` 打包后无需 `DESKTOP_PG_RUNTIME` 即可启动并完成 V1~V15 |
 | P3-01 | **已完成（骨架）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；窗口渲染需在真机桌面确认 |
-| P3-02 | **部分完成**：侧车生命周期 | `desktop/sidecar.js` | 已做：选空闲端口、健康检查、整树终止；待做：单实例实测、崩溃重启、端口占用提示 |
+| P3-02 | **已完成**：侧车生命周期 | `desktop/sidecar.js`、`desktop/main.js` | 选空闲端口、健康检查、整树终止（含游离 postmaster）、崩溃重启、失败快速诊断；单实例双开待真机确认 |
 | P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
 | P3-04 | 安装包与签名 | 构建脚本、证书配置 | Windows/macOS/Linux 可安装；签名校验通过 |
 | P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
@@ -382,7 +382,11 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 
 **P3-01 / P3-02 实测与边界**：`sidecar.js` 用 node 直接驱动真实 jar 验证通过——动态端口 50299、日志确认使用 jar 内置运行时、`/api/meta` 为 `DESKTOP`、`/` 返回 SPA、调用终止后 java 子进程消失。Electron 窗口未能实际拉起：本自动化环境无交互桌面会话，连最小 Electron 示例也以退出码 1 结束（`--no-sandbox` 下 `--version` 可输出 v43.3.0），因此「窗口显示与单实例锁」需要在真机桌面用 `npm start` 人工确认。另外本机 Electron 二进制需从缓存（v43.3.0）安装，`npm install` 直接下载会被网络拦截。
 
-**P3-02 未完成项**：单实例锁的真实双开验证、侧车异常退出后的自动重启与提示、端口被占用的显式提示、崩溃日志上报。
+**P3-02 收尾批注（2026-11-08，未提交）**：`sidecar.js` 等待健康期间每 500ms 扫描日志，命中 `APPLICATION FAILED TO START`、`Web server failed to start`、`already in use`、`Unable to access jarfile`、`DESKTOP_PG_RUNTIME 指向的文件不存在` 立即失败并把日志末尾 6 行带进错误信息（端口占用、配置错误不再傻等 120 秒）；`main.js` 就绪后监视侧车 `exit`，意外退出弹「重启本地服务 / 退出」对话框，重启走完整启动流程。实测发现一个真实的树终止缺陷：zonky 的 postmaster 由 pg_ctl 分离拉起，不在 java 进程树内，`taskkill /T /F` 杀 java 后 postmaster 仍存活数十秒，立即重启会被后端判定「数据库已被其他进程占用」；修复为 `stopSidecar` 额外读取 `<data-dir>/db/postmaster.pid` 直接终止该 pid（重启路径先补杀再拉起）。
+
+**P3-02 收尾实测（node 直驱 sidecar + 真实 jar）**：jar 缺失场景 112ms 快速失败且错误信息含日志末尾；就绪后强杀 java 树，`exit` 事件触发；补杀 postmaster 后同一数据目录原地重启 14.2 秒就绪，`/api/meta` 为 `DESKTOP`；`stopSidecar` 后 java 与 postmaster 均无残留。排查期间确认本机 5433 的用户自有 PostgreSQL 及其子进程未受影响。
+
+**P3-02 未完成项**：单实例锁的真实双开验证（环境限制，需真机 `npm start` 双开确认）；崩溃日志上报属 P3-06。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 
