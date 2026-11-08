@@ -6,8 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "electron-builder --dir --publish never --config.directories.output=../build/desktop-pack",
+    "dist": "npm run pack && electron-builder --prepackaged ../build/desktop-pack/win-unpacked --publish never"
   },
   "devDependencies": {
     "electron": "^43.3.0",
@@ -16,6 +16,7 @@
   "build": {
     "appId": "com.agentkey.pro",
     "productName": "AgentKey Pro",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "../build/installer"
     },

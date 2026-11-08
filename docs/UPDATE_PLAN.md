@@ -357,42 +357,50 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 |---|---|---|---|
 | P3-00 | **已完成（P3-00）**：前端随 jar 分发 | `pom.xml`、`WebConfig.java`、`SecurityConfig.java` | `mvn -Pwith-frontend package` 后单 jar 直接提供 UI，SPA 深链可用 |
 | P3-00b | **已完成（同批）**：数据库运行时随 jar 分发 | `pom.xml`、`DbLifecycleManager.java`、`scripts/build-pg-runtime.ps1` | `-Pwith-pg-runtime` 打包后无需 `DESKTOP_PG_RUNTIME` 即可启动并完成 V1~V15 |
-| P3-01 | **已完成（骨架）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；窗口渲染需在真机桌面确认 |
-| P3-02 | **已完成**：侧车生命周期 | `desktop/sidecar.js`、`desktop/main.js` | 选空闲端口、健康检查、整树终止（含游离 postmaster）、崩溃重启、失败快速诊断；单实例双开待真机确认 |
+| P3-01 | **已完成（Windows x64 冒烟）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；真实窗口与双开已验证 |
+| P3-02 | **已完成**：侧车生命周期 | `desktop/sidecar.js`、`desktop/main.js` | 选空闲端口、健康检查、整树终止（含游离 postmaster）、崩溃重启、失败快速诊断；单实例双开已验证 |
 | P3-03 | **已完成**：JRE 裁剪与打包 | `scripts/build-desktop-runtime.ps1`、`desktop/main.js` | `jlink` 定制运行时（19 个模块、约 49 MiB），裁剪 JRE 无头冒烟全链路通过 |
-| P3-04 | 安装包与签名 | 构建脚本、证书配置 | Windows/macOS/Linux 可安装；签名校验通过 |
+| P3-04 | **进行中（Windows 未签名包已生成）**：安装包与签名 | `desktop/package.json`、`scripts/build-desktop-installer.ps1`、证书配置 | Windows 安装/卸载、三平台与签名仍待验收 |
 | P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
 | P3-06 | 崩溃上报 | 壳与后端接入 Sentry 或等价方案 | 崩溃可上报；默认脱敏；可关闭 |
 | P3-07 | 冒烟流水线 | CI 三平台任务 | 静默安装 → 启动 → `/health` → 运行脚本任务 → 卸载 |
 | P3-08 | 发布合规 | 隐私政策、服务条款、遥测开关、第三方许可 | 文档可从网页端与桌面端访问；遥测默认脱敏且可关闭；安装包内含第三方许可 |
 
-**P3-00 完成批注（2026-11-08，未提交）**：为让桌面壳只需加载一个 URL，先做了「前端随 jar 分发」。`pom.xml` 新增 `with-frontend` profile，在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`；[WebConfig.java](../src/main/java/com/capsule/agentkey/config/WebConfig.java) 注册 `/**` 静态处理器与 `SpaFallbackResolver`：真实文件照常返回，无扩展名的前端路由回 `index.html`，`api/`、`actuator/`、`v3/`、`swagger-ui`、`error` 前缀与带扩展名的缺失资源仍按原语义 404；[SecurityConfig.java](../src/main/java/com/capsule/agentkey/config/SecurityConfig.java) 放行 `/assets/**` 与 7 条 SPA 路由（`/chat`、`/knowledge`、`/keys`、`/profile`、`/settings`、`/login`、`/download`），接口鉴权不变。
+**P3-00 完成批注（2026-11-08）**：为让桌面壳只需加载一个 URL，先做了「前端随 jar 分发」。`pom.xml` 新增 `with-frontend` profile，在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`；[WebConfig.java](../src/main/java/com/capsule/agentkey/config/WebConfig.java) 注册 `/**` 静态处理器与 `SpaFallbackResolver`：真实文件照常返回，无扩展名的前端路由回 `index.html`，`api/`、`actuator/`、`v3/`、`swagger-ui`、`error` 前缀与带扩展名的缺失资源仍按原语义 404；[SecurityConfig.java](../src/main/java/com/capsule/agentkey/config/SecurityConfig.java) 放行 `/assets/**` 与 7 条 SPA 路由（`/chat`、`/knowledge`、`/keys`、`/profile`、`/settings`、`/login`、`/download`），接口鉴权不变。
 
 **P3-00 实测（Windows x64，真实执行）**：`mvn -Pwith-frontend -DskipTests package` 产出 220.1 MB 单 jar，`BOOT-INF/classes/static/` 内含 index.html 与 assets；以 desktop profile 直接 `java -jar` 启动 11.7 秒就绪，`/`、`/chat`、`/settings`、`/login` 均为 200 且返回 SPA 页面，`/assets/index-*.js` 200，`/api/meta` 为 `DESKTOP`，无令牌访问 `/api/projects` 401、用 `/api/desktop/token` 换取令牌后 200，缺失静态资源 404。真实浏览器打开 `http://127.0.0.1:8080/` 自动跳转 `/chat`，侧栏与输入框渲染正常，控制台无报错、无 CSP 拦截，`ProjectController`/`SettingsController`/`FileReviewController` 均收到带令牌的成功请求。`mvn test` 为 **156 项，0 失败、0 错误、5 项跳过**，与上一轮一致。
 
 **P3-00 验收边界**：pgvector 运行时尚未随 jar 分发（已由下一项 P3-00b 补齐）；未做 JRE 裁剪，jar 220 MB 中大部分是依赖与未裁剪的静态资源；未引入桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（壳接管后应置 `false` 并改为读取令牌文件）。
 
-**P3-00b 完成批注（2026-11-08，未提交）**：`pom.xml` 新增 `with-pg-runtime` profile，把 `build/pg-runtime/pg-runtime.txz` 拷进 `classpath:/desktop/`；`scripts/build-pg-runtime.ps1` 在产出带版本号文件的同时复制一份固定名 `pg-runtime.txz`，避免运行时按版本号猜文件名；[DbLifecycleManager.java](../src/main/java/com/capsule/agentkey/service/desktop/DbLifecycleManager.java) 增加内置运行时回退：显式 `DESKTOP_PG_RUNTIME` 优先于内置副本，两者都没有时打印明确告警（说明 pgvector 不可用、V3 会失败）而不是只在迁移阶段报错。内置流每次调用重新打开，满足 zonky 的多次读取。
+**P3-00b 完成批注（2026-11-08）**：`pom.xml` 新增 `with-pg-runtime` profile，把 `build/pg-runtime/pg-runtime.txz` 拷进 `classpath:/desktop/`；`scripts/build-pg-runtime.ps1` 在产出带版本号文件的同时复制一份固定名 `pg-runtime.txz`，避免运行时按版本号猜文件名；[DbLifecycleManager.java](../src/main/java/com/capsule/agentkey/service/desktop/DbLifecycleManager.java) 增加内置运行时回退：显式 `DESKTOP_PG_RUNTIME` 优先于内置副本，两者都没有时打印明确告警（说明 pgvector 不可用、V3 会失败）而不是只在迁移阶段报错。内置流每次调用重新打开，满足 zonky 的多次读取。
 
 **P3-00b 实测（Windows x64，真实执行）**：`mvn -q -Pwith-frontend,with-pg-runtime -DskipTests package` 产出 242.1 MB jar，含 `BOOT-INF/classes/static/` 与 `BOOT-INF/classes/desktop/pg-runtime.txz`；清空 `DESKTOP_PG_RUNTIME`、使用全新数据目录直接 `java -jar`，日志为「使用 jar 内置 PostgreSQL 运行时」，12 秒就绪，Flyway `Successfully applied 15 migrations ... now at version v15`（V3 的 `CREATE EXTENSION vector` 成功即证明 pgvector 可用），`/api/meta` 返回 `DESKTOP`，无令牌 401。`mvn test` 仍为 **156 项，0 失败、0 错误、5 项跳过**。
 
-**P3-00b 边界**：内置运行时只对应构建平台（当前仅 Windows x64），macOS/Linux 需各自构建；`with-pg-runtime` 在 `build/pg-runtime/pg-runtime.txz` 缺失时不会让构建失败，只是产出一个不含运行时的 jar（启动时打告警），发布流水线应显式校验产物中存在该条目。
+**P3-00b 边界**：内置运行时只对应构建平台（当前仅 Windows x64），macOS/Linux 需各自构建；`with-pg-runtime` 在 `build/pg-runtime/pg-runtime.txz` 缺失时不会让 Maven 构建失败，P3-04 的统一桌面发布脚本已强制校验 jar 条目，其他发布流水线也应显式校验。
 
-**P3-01 / P3-02 完成批注（2026-11-08，未提交）**：选定 Electron（本机无 Rust，Node 侧工具链已就绪）。新增 `desktop/`：`main.js` 负责单实例锁、启动画面、错误对话框、AES 主密钥首次生成与持久化、退出时终止侧车；`sidecar.js` 与 Electron 解耦，负责选空闲端口、以 `--spring.profiles.active=desktop --server.port=<port>` 拉起 jar、轮询 `/actuator/health`（只认 200，DOWN 为 503）、日志追加到 `<data-dir>/sidecar.log`，并用 `taskkill /T /F`（POSIX 用进程组）终止整棵树，避免 Spring Boot 拉起的 PostgreSQL 变成孤儿。侧车崩溃或超时会把 sidecar.log 路径显示在错误框里。
+**P3-01 / P3-02 完成批注（2026-11-08）**：选定 Electron（本机无 Rust，Node 侧工具链已就绪）。新增 `desktop/`：`main.js` 负责单实例锁、启动画面、错误对话框、AES 主密钥首次生成与持久化、退出时终止侧车；`sidecar.js` 与 Electron 解耦，负责选空闲端口、以 `--spring.profiles.active=desktop --server.port=<port>` 拉起 jar、轮询 `/actuator/health`（只认 200，DOWN 为 503）、日志追加到 `<data-dir>/sidecar.log`，并用 `taskkill /T /F`（POSIX 用进程组）终止整棵树，避免 Spring Boot 拉起的 PostgreSQL 变成孤儿。侧车崩溃或超时会把 sidecar.log 路径显示在错误框里。
 
-**P3-01 / P3-02 实测与边界**：`sidecar.js` 用 node 直接驱动真实 jar 验证通过——动态端口 50299、日志确认使用 jar 内置运行时、`/api/meta` 为 `DESKTOP`、`/` 返回 SPA、调用终止后 java 子进程消失。Electron 窗口未能实际拉起：本自动化环境无交互桌面会话，连最小 Electron 示例也以退出码 1 结束（`--no-sandbox` 下 `--version` 可输出 v43.3.0），因此「窗口显示与单实例锁」需要在真机桌面用 `npm start` 人工确认。另外本机 Electron 二进制需从缓存（v43.3.0）安装，`npm install` 直接下载会被网络拦截。
+**P3-01 / P3-02 实测与边界**：`sidecar.js` 用 node 直接驱动真实 jar 验证通过——动态端口 50299、日志确认使用 jar 内置运行时、`/api/meta` 为 `DESKTOP`、`/` 返回 SPA、调用终止后 java 子进程消失。当时自动化环境未能拉起 Electron 窗口；后续 P3-04 已用真实 unpacked Electron 壳补齐窗口和单实例双开验证，见下方最新批注。本机 Electron 二进制需从缓存（v43.3.0）安装，直接下载可能受网络限制。
 
-**P3-02 收尾批注（2026-11-08，未提交）**：`sidecar.js` 等待健康期间每 500ms 扫描日志，命中 `APPLICATION FAILED TO START`、`Web server failed to start`、`already in use`、`Unable to access jarfile`、`DESKTOP_PG_RUNTIME 指向的文件不存在` 立即失败并把日志末尾 6 行带进错误信息（端口占用、配置错误不再傻等 120 秒）；`main.js` 就绪后监视侧车 `exit`，意外退出弹「重启本地服务 / 退出」对话框，重启走完整启动流程。实测发现一个真实的树终止缺陷：zonky 的 postmaster 由 pg_ctl 分离拉起，不在 java 进程树内，`taskkill /T /F` 杀 java 后 postmaster 仍存活数十秒，立即重启会被后端判定「数据库已被其他进程占用」；修复为 `stopSidecar` 额外读取 `<data-dir>/db/postmaster.pid` 直接终止该 pid（重启路径先补杀再拉起）。
+**P3-02 收尾批注（2026-11-08）**：`sidecar.js` 等待健康期间每 500ms 扫描日志，命中 `APPLICATION FAILED TO START`、`Web server failed to start`、`already in use`、`Unable to access jarfile`、`DESKTOP_PG_RUNTIME 指向的文件不存在` 立即失败并把日志末尾 6 行带进错误信息（端口占用、配置错误不再傻等 120 秒）；`main.js` 就绪后监视侧车 `exit`，意外退出弹「重启本地服务 / 退出」对话框，重启走完整启动流程。实测发现一个真实的树终止缺陷：zonky 的 postmaster 由 pg_ctl 分离拉起，不在 java 进程树内，`taskkill /T /F` 杀 java 后 postmaster 仍存活数十秒，立即重启会被后端判定「数据库已被其他进程占用」；修复为 `stopSidecar` 额外读取 `<data-dir>/db/postmaster.pid` 直接终止该 pid（重启路径先补杀再拉起）。
 
 **P3-02 收尾实测（node 直驱 sidecar + 真实 jar）**：jar 缺失场景 112ms 快速失败且错误信息含日志末尾；就绪后强杀 java 树，`exit` 事件触发；补杀 postmaster 后同一数据目录原地重启 14.2 秒就绪，`/api/meta` 为 `DESKTOP`；`stopSidecar` 后 java 与 postmaster 均无残留。排查期间确认本机 5433 的用户自有 PostgreSQL 及其子进程未受影响。
 
-**P3-02 未完成项**：单实例锁的真实双开验证（环境限制，需真机 `npm start` 双开确认）；崩溃日志上报属 P3-06。
+**P3-02 后续闭环**：真实 unpacked Electron 壳的单实例双开已在 P3-04 冒烟中通过；崩溃日志上报仍属 P3-06。
 
 **P3-03 完成批注（2026-11-08）**：新增 `scripts/build-desktop-runtime.ps1`，用 jlink 从本机 JDK 21 裁剪桌面端私有 JRE 到 `build/desktop-runtime/jre`（19 个模块：`java.base/compiler/desktop/instrument/management/naming/net.http/prefs/rmi/scripting/security.jgss/sql/sql.rowset/transaction.xa/xml` + `jdk.crypto.ec/unsupported/zipfs/localedata`，`--include-locales=zh,en --strip-debug --compress=2`，产出约 49 MiB，未裁剪 JDK 21 约 300 MiB）。脚本自动跳过非 21 的 JAVA_HOME（本机指向 JDK 24，回退到 `C:\Users\16680\.jdks\ms-21.0.11`）。`desktop/main.js` 的 `resolveJava` 改为打包态优先 `resources/jre/bin/java.exe`（由 P3-04 的 electron-builder extraResources 复制），开发态仍走 JAVA_HOME/PATH。
 
 **P3-03 实测（Windows x64，真实执行）**：裁剪 JRE `java -version` 正常、含 java.sql / jdk.crypto.ec / jdk.localedata 等关键模块；以该 JRE 无头 `java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop` 完整启动 12.0 秒就绪：内嵌 PostgreSQL 16.11 从 jar 内置 txz 解压启动、Flyway 校验至 V15「up to date」、`/actuator/health` UP、`/` 返回 SPA（200）。模块清单无缺口。
 
-**P3-03 边界与环境发现**：冒烟期间发现本机当前无法执行 `initdb`（bootstrap 阶段必现 `could not create lock file "postmaster.pid": File exists`，残留 pid 为负数的垃圾值，工作区内外、沙箱内外均复现，而同日早些时候 P3-02 曾成功初始化 `build\dev-desktop-data\db`），怀疑杀软/文件过滤驱动干扰，与裁剪 JRE 无关（initdb.exe 被子进程直接拉起，全程不经 JVM）。本次冒烟改为复制已初始化的 dev 数据目录完成全链路验证；全新机器的 initdb 首启路径需在真机复核。安装包体积预算待 P3-04 用真实 NSIS 产物复核。
+**P3-03 边界与环境发现**：当时本机 `initdb` 曾在 bootstrap 阶段出现 `could not create lock file "postmaster.pid": File exists`，因此该轮只复制已初始化的 dev 数据目录完成验证。后续 P3-04 使用另一个全新隔离目录已连续完成两次 `initdb` 和真实 Electron 首启，该历史故障当前不再复现，但不同机器的杀软/文件过滤环境仍需保留首启验收。安装包体积预算已由 P3-04 的真实 NSIS 产物复核。
+
+**P3-04 进展批注（2026-11-08）**：`desktop/package.json` 固定使用 `npm ci` 已安装的 Electron（`electronDist=node_modules/electron/dist`），所有 electron-builder 命令显式 `--publish never`，避免重复下载和 CI 环境隐式发布；unpacked 与 NSIS 使用两阶段构建。新增 [build-desktop-installer.ps1](../scripts/build-desktop-installer.ps1) 作为统一入口：依次执行前端构建、`with-frontend,with-pg-runtime` 后端构建、jlink 裁剪和 NSIS 打包，默认运行 Maven `verify`；强制检查 jar 中的 SPA 首页与 `desktop/pg-runtime.txz`，并检查安装包、app.asar、包内 JRE/jar 及 Maven/包内 jar 的 SHA-256 一致性，缺少 PG 运行时不再只告警。使用方式为 `powershell -ExecutionPolicy Bypass -File scripts\build-desktop-installer.ps1 -JavaHome <JDK21> -MavenCmd <mvn.cmd>`，依赖已就绪时可加 `-SkipInstall`。
+
+**P3-04 构建实测（Windows x64）**：统一脚本先通过 PowerShell 语法检查，再以 `-SkipInstall -SkipTests` 连续执行完整构建；最终一轮前端 1836 个模块构建成功、Maven package 成功、私有 JRE 为 49.43 MiB，NSIS 为 **353.37 MiB**，unpacked 为 **638.97 MiB**，所有产物预检和 jar 哈希比较通过。本轮跳过重复测试，回归依据仍为当前继承代码的 **156 项、0 失败、0 错误、5 跳过**。重复构建曾持续在 `default_app.asar` 报 `EBUSY`；Restart Manager 定位到占用者是 Trae 扩展宿主而非 AgentKey 进程，因此统一脚本把 unpacked 固定暂存到 `<系统临时目录>/agentkey-desktop-pack`，最终安装包仍写入 `build/installer`。调整后同一 unpacked 路径被成功覆盖并重新生成 NSIS，证明入口可重复执行，同时避免在工作区累积多份约 639 MiB 的中间产物。
+
+**P3-04 全新首启与 Electron 实测**：使用 unpacked 内的裁剪 JRE 和自包含 jar，不设置 `DESKTOP_PG_RUNTIME`，在系统临时目录创建全新数据目录；`initdb` 15.9 秒成功，日志确认使用 jar 内置 PG 运行时，Flyway 一次应用 V1~V15，`/actuator/health` 200/UP、`/api/meta` 200 且返回 `DESKTOP`/`LOCAL_SINGLE_USER`、`/` 200 且为 SPA。随后直接启动真实 `AgentKey Pro.exe`：另一全新目录再次完成 `initdb` 和 V15，健康检查 200，窗口标题为 `AgentKey Pro` 且存在可见窗口句柄；第二次启动的进程退出码 0、主实例保持存活；主窗口关闭后退出码 0，postmaster 无残留。以上验证了全新数据目录、壳内 Java 解析、窗口和单实例，但未人工检查每个页面的视觉效果与完整业务任务。
+
+**P3-04 验收边界（仍进行中）**：真实 NSIS 静默安装在沙箱内外及显式 `/currentuser`、不同目标目录下均只返回退出码 0，未创建安装目录或卸载注册项，原因尚未定位；因此真实安装、安装后启动和卸载 **未通过**，不能把该退出码当作安装成功。`Get-AuthenticodeSignature` 为 `NotSigned`，仍使用默认 Electron 图标；代码签名、macOS/Linux 构建、陌生 Windows 机器的交互式安装/卸载与首个任务、长稳和升级均未完成，P3-04 不能标记全部完成。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 
