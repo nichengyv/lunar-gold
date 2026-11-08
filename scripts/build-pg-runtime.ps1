@@ -149,8 +149,15 @@ if ($LASTEXITCODE -ne 0) { throw "打包失败 (tar exit=$LASTEXITCODE)" }
 $txzHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
 $sizeMb = [math]::Round((Get-Item -LiteralPath $outputPath).Length / 1MB, 2)
 
+# 固定名副本：Maven profile with-pg-runtime 按固定名打进 jar（classpath:desktop/pg-runtime.txz），
+# 运行时无需按版本号猜文件名
+$bundlePath = Join-Path $OutputDir 'pg-runtime.txz'
+Copy-Item -LiteralPath $outputPath -Destination $bundlePath -Force
+
 Write-Host ''
 Write-Step "产物: $outputPath"
+Write-Step "打包用: $bundlePath"
 Write-Step "大小: $sizeMb MiB"
 Write-Step "SHA-256: $txzHash"
-Write-Step "使用: `$env:DESKTOP_PG_RUNTIME = '$outputPath'"
+Write-Step "开发环境使用: `$env:DESKTOP_PG_RUNTIME = '$outputPath'"
+Write-Step "打进 jar: mvn -Pwith-frontend,with-pg-runtime package"

@@ -277,5 +277,42 @@
                 </plugins>
             </build>
         </profile>
+
+        <!-- 把含 pgvector 的 PostgreSQL 运行时打进 jar（P3-00 之后的自包含打包）：
+             先执行 scripts/build-pg-runtime.ps1 产出 build/pg-runtime/pg-runtime.txz，
+             再 mvn -Pwith-frontend,with-pg-runtime package。
+             运行时按固定名读取 classpath:desktop/pg-runtime.txz，不再依赖 DESKTOP_PG_RUNTIME。 -->
+        <profile>
+            <id>with-pg-runtime</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-pg-runtime</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/desktop</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}/build/pg-runtime</directory>
+                                            <includes>
+                                                <include>pg-runtime.txz</include>
+                                            </includes>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

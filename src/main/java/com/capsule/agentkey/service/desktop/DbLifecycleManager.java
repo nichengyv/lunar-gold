@@ -6,6 +6,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -44,8 +45,12 @@ public class DbLifecycleManager {
     private static final String PID_FILE = "postmaster.pid";
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(30);
 
+    /** 随 jar 分发的运行时（Maven profile with-pg-runtime 拷入），优先级低于显式配置的路径 */
+    private static final String BUNDLED_RUNTIME = "desktop/pg-runtime.txz";
+
     private final Path dataDir;
     private final Path pgRuntime;
+    private final boolean bundledRuntime;
     private final int configuredPort;
 
     private EmbeddedPostgres postgres;
@@ -58,6 +63,7 @@ public class DbLifecycleManager {
         this.pgRuntime = StringUtils.hasText(pgRuntime)
                 ? Path.of(pgRuntime).toAbsolutePath().normalize()
                 : null;
+        this.bundledRuntime = this.pgRuntime == null && new ClassPathResource(BUNDLED_RUNTIME).exists();
         this.configuredPort = dbPort;
     }
 
@@ -94,10 +100,14 @@ public class DbLifecycleManager {
                                 + "（需要包含 pgvector 的 PostgreSQL 运行时压缩包）");
             }
             builder.setPgBinaryResolver(this::openRuntime);
+        } else if (bundledRuntime) {
+            // 优先使用随 jar 分发的运行时，无需任何环境变量
+            builder.setPgBinaryResolver(this::openBundledRuntime);
         } else {
             // 依赖内置二进制不含 pgvector，V3 迁移会失败；开发期要么配 DESKTOP_PG_RUNTIME，
-            // 要么确认自定义打包已替换内置运行时
-            log.warn("未配置 DESKTOP_PG_RUNTIME，使用依赖内置的 PostgreSQL 二进制，pgvector 扩展可能不可用");
+            // 要么用 -Pwith-pg-runtime 打包含运行时的 jar
+            log.warn("未配置 DESKTOP_PG_RUNTIME 且 jar 内没有内置运行时（{}），"
+                    + "将使用依赖内置的 PostgreSQL 二进制，pgvector 扩展不可用，V3 迁移会失败", BUNDLED_RUNTIME);
         }
         return builder;
     }
@@ -106,6 +116,13 @@ public class DbLifecycleManager {
     private InputStream openRuntime(String system, String architecture) throws IOException {
         log.info("加载桌面端 PostgreSQL 运行时 [system={}, arch={}, path={}]", system, architecture, pgRuntime);
         return Files.newInputStream(pgRuntime);
+    }
+
+    /** 从 jar 内读取运行时；每次重新打开流，同样满足 zonky 的多次读取要求 */
+    private InputStream openBundledRuntime(String system, String architecture) throws IOException {
+        log.info("使用 jar 内置 PostgreSQL 运行时 [system={}, arch={}, resource={}]",
+                system, architecture, BUNDLED_RUNTIME);
+        return new ClassPathResource(BUNDLED_RUNTIME).getInputStream();
     }
 
     /**

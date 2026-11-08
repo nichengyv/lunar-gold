@@ -90,34 +90,42 @@ $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空�
 
 验证：`GET /api/meta` 应返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`，能力集中不含 `DOWNLOAD`；`GET /actuator/health` 为 `UP`；不带令牌访问 `/api/projects` 返回 401；`POST /api/auth/register` 返回 404（桌面端关闭注册）。日志中不应出现任何 Redis 连接记录。
 
-边界：桌面端账号 UI 已隐藏（`mode=DESKTOP` 时不显示账号与安全 tab、用户名和退出入口，`/profile` 重定向到对话），登录/改密接口仍留在路由上但本地用户密码是一次性随机值，实际不可用。一键启动（P2-06）与工作区加固（P2-07）已完成。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，但未打进 jar 或安装包，未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
+边界：桌面端账号 UI 已隐藏（`mode=DESKTOP` 时不显示账号与安全 tab、用户名和退出入口，`/profile` 重定向到对话），登录/改密接口仍留在路由上但本地用户密码是一次性随机值，实际不可用。一键启动（P2-06）与工作区加固（P2-07）已完成。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，用 `-Pwith-pg-runtime` 打包时会内置到 jar（见 1.5）；既未内置又未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
 
-### 1.5 打包成单 jar 运行（P3-00）
+### 1.5 打包成自包含单 jar（P3-00）
 
-前端构建产物可随 jar 分发，启动后由后端直接托管，不需要另起静态服务器：
+前端与含 pgvector 的数据库运行时都能打进同一个 jar，运行时不依赖 `DESKTOP_PG_RUNTIME`：
 
 ```powershell
+# 1) 构建含 pgvector 的运行时（同时产出固定名 build\pg-runtime\pg-runtime.txz 供打包使用）
+powershell -ExecutionPolicy Bypass -File scripts\build-pg-runtime.ps1
+
+# 2) 构建前端
 cd d:\test-code\agent-gateway-v3\frontend
 npm run build                       # 产出 frontend/dist
 
+# 3) 打包（两个 profile 可分开使用）
 cd ..
 $env:JAVA_HOME = 'C:\Users\16680\.jdks\ms-21.0.11'
-& 'D:\IDEA\IntelliJ IDEA 2024.1\plugins\maven\lib\maven3\bin\mvn.cmd' -Pwith-frontend -DskipTests package
-# 产物：target\agent-gateway-1.0.0.jar（BOOT-INF/classes/static 内含 index.html 与 assets）
+& 'D:\IDEA\IntelliJ IDEA 2024.1\plugins\maven\lib\maven3\bin\mvn.cmd' -q '-Pwith-frontend,with-pg-runtime' -DskipTests package
+# 产物：target\agent-gateway-1.0.0.jar（约 242 MB）
+#   BOOT-INF/classes/static/            前端页面与 assets
+#   BOOT-INF/classes/desktop/pg-runtime.txz   PostgreSQL 16.11 + pgvector 0.8.7
 ```
 
-运行方式与 1.4 一致（仍需 `AES_MASTER_KEY` 与 `DESKTOP_PG_RUNTIME`）：
+运行只需要 AES 主密钥：
 
 ```powershell
+$env:AES_MASTER_KEY = '<Base64 编码的 16/24/32 字节随机密钥>'
 java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop
 # 浏览器打开 http://127.0.0.1:8080/ ，路由守卫会自动跳到 /chat
 ```
 
-`with-frontend` 只在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`，不激活时行为不变（dev 用 Vite、cloud 用 Nginx）。后端对无扩展名的非接口路径回 `index.html`（SPA 深链），`/api/**`、`/actuator/**`、`/v3/**`、`/swagger-ui/**` 保持原语义；`/chat`、`/settings` 等 7 条前端路由在安全链中放行，页面权限仍由前端守卫与接口鉴权决定。
+`with-frontend` 在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`；`with-pg-runtime` 把 `build/pg-runtime/pg-runtime.txz` 拷进 `classpath:/desktop/`。两者都不激活时行为不变（dev 用 Vite、cloud 用 Nginx、桌面端仍可用 `DESKTOP_PG_RUNTIME` 指定外部运行时，且该变量优先级高于内置副本）。后端对无扩展名的非接口路径回 `index.html`（SPA 深链），`/api/**`、`/actuator/**`、`/v3/**`、`/swagger-ui/**` 保持原语义；`/chat`、`/settings` 等 7 条前端路由在安全链中放行，页面权限仍由前端守卫与接口鉴权决定。
 
-实测（Windows x64）：单 jar 以 desktop profile 启动 11.7 秒就绪；`/`、`/chat`、`/settings`、`/login` 返回 200 的 SPA 页面，`/assets/*.js` 200，缺失静态资源 404，`/api/meta` 为 `DESKTOP`，无令牌 401、本地令牌 200；真实浏览器打开后自动进入 `/chat` 且会话/设置接口正常。
+实测（Windows x64）：单 jar 以 desktop profile 启动 12 秒就绪，日志为「使用 jar 内置 PostgreSQL 运行时」；全新数据目录执行 V1~V15（`Successfully applied 15 migrations ... now at version v15`，其中 V3 的 `CREATE EXTENSION vector` 成功即证明扩展可用）；`/`、`/chat`、`/settings`、`/login` 返回 200 的 SPA 页面，`/assets/*.js` 200，缺失静态资源 404，`/api/meta` 返回 `DESKTOP`，无令牌 401、本地令牌 200；真实浏览器打开后自动进入 `/chat` 且会话/设置接口正常。
 
-边界：pgvector 运行时压缩包尚未打进 jar，仍需 `DESKTOP_PG_RUNTIME`；未做 `jlink` 裁剪，jar 约 220 MB；尚无桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`，接入壳后应置 `false` 并改由壳读取令牌文件。
+边界：内置运行时只对应构建时的平台（当前仅 Windows x64），跨平台需为每个平台构建各自的 jar；未做 `jlink` 裁剪（依赖直接打进 fat jar）；尚无桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`，接入壳后应置 `false` 并改由壳读取令牌文件。
 
 ---
 

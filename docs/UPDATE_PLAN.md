@@ -356,6 +356,7 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 | ID | 任务 | 涉及文件 | 验收 |
 |---|---|---|---|
 | P3-00 | **已完成（P3-00）**：前端随 jar 分发 | `pom.xml`、`WebConfig.java`、`SecurityConfig.java` | `mvn -Pwith-frontend package` 后单 jar 直接提供 UI，SPA 深链可用 |
+| P3-00b | **已完成（同批）**：数据库运行时随 jar 分发 | `pom.xml`、`DbLifecycleManager.java`、`scripts/build-pg-runtime.ps1` | `-Pwith-pg-runtime` 打包后无需 `DESKTOP_PG_RUNTIME` 即可启动并完成 V1~V15 |
 | P3-01 | 桌面壳骨架 | 新增 `desktop/`（Electron 或 Tauri） | 启动后拉起侧车并加载 UI |
 | P3-02 | 侧车生命周期 | `desktop/*/sidecar` | 选空闲端口、健康检查、退出时杀掉进程树、单实例锁 |
 | P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
@@ -369,7 +370,13 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 
 **P3-00 实测（Windows x64，真实执行）**：`mvn -Pwith-frontend -DskipTests package` 产出 220.1 MB 单 jar，`BOOT-INF/classes/static/` 内含 index.html 与 assets；以 desktop profile 直接 `java -jar` 启动 11.7 秒就绪，`/`、`/chat`、`/settings`、`/login` 均为 200 且返回 SPA 页面，`/assets/index-*.js` 200，`/api/meta` 为 `DESKTOP`，无令牌访问 `/api/projects` 401、用 `/api/desktop/token` 换取令牌后 200，缺失静态资源 404。真实浏览器打开 `http://127.0.0.1:8080/` 自动跳转 `/chat`，侧栏与输入框渲染正常，控制台无报错、无 CSP 拦截，`ProjectController`/`SettingsController`/`FileReviewController` 均收到带令牌的成功请求。`mvn test` 为 **156 项，0 失败、0 错误、5 项跳过**，与上一轮一致。
 
-**P3-00 验收边界**：pgvector 运行时压缩包仍未随 jar 分发，运行仍需 `DESKTOP_PG_RUNTIME` 或由后续打包流程注入；未做 JRE 裁剪，jar 220 MB 中大部分是依赖与未裁剪的静态资源；未引入桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（壳接管后应置 `false` 并改为读取令牌文件）。
+**P3-00 验收边界**：pgvector 运行时尚未随 jar 分发（已由下一项 P3-00b 补齐）；未做 JRE 裁剪，jar 220 MB 中大部分是依赖与未裁剪的静态资源；未引入桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（壳接管后应置 `false` 并改为读取令牌文件）。
+
+**P3-00b 完成批注（2026-11-08，未提交）**：`pom.xml` 新增 `with-pg-runtime` profile，把 `build/pg-runtime/pg-runtime.txz` 拷进 `classpath:/desktop/`；`scripts/build-pg-runtime.ps1` 在产出带版本号文件的同时复制一份固定名 `pg-runtime.txz`，避免运行时按版本号猜文件名；[DbLifecycleManager.java](../src/main/java/com/capsule/agentkey/service/desktop/DbLifecycleManager.java) 增加内置运行时回退：显式 `DESKTOP_PG_RUNTIME` 优先于内置副本，两者都没有时打印明确告警（说明 pgvector 不可用、V3 会失败）而不是只在迁移阶段报错。内置流每次调用重新打开，满足 zonky 的多次读取。
+
+**P3-00b 实测（Windows x64，真实执行）**：`mvn -q -Pwith-frontend,with-pg-runtime -DskipTests package` 产出 242.1 MB jar，含 `BOOT-INF/classes/static/` 与 `BOOT-INF/classes/desktop/pg-runtime.txz`；清空 `DESKTOP_PG_RUNTIME`、使用全新数据目录直接 `java -jar`，日志为「使用 jar 内置 PostgreSQL 运行时」，12 秒就绪，Flyway `Successfully applied 15 migrations ... now at version v15`（V3 的 `CREATE EXTENSION vector` 成功即证明 pgvector 可用），`/api/meta` 返回 `DESKTOP`，无令牌 401。`mvn test` 仍为 **156 项，0 失败、0 错误、5 项跳过**。
+
+**P3-00b 边界**：内置运行时只对应构建平台（当前仅 Windows x64），macOS/Linux 需各自构建；`with-pg-runtime` 在 `build/pg-runtime/pg-runtime.txz` 缺失时不会让构建失败，只是产出一个不含运行时的 jar（启动时打告警），发布流水线应显式校验产物中存在该条目。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 

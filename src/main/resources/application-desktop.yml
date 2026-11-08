@@ -34,7 +34,8 @@ app:
     # 本地数据根目录：数据库在 <data-dir>/db，删除该目录等于重置桌面端数据
     data-dir: ${DESKTOP_DATA_DIR:${user.home}/.agentkey/desktop}
     # 含 pgvector 的 PostgreSQL 运行时压缩包（P2-08 按平台产出）；
-    # 留空时用依赖内置二进制，pgvector 扩展可能不可用，V3 迁移会报错
+    # 留空时优先使用 jar 内置的 classpath:desktop/pg-runtime.txz（-Pwith-pg-runtime 打包），
+    # 两者都没有才退回依赖内置二进制，此时 pgvector 不可用、V3 迁移会报错
     pg-runtime: ${DESKTOP_PG_RUNTIME:}
     # 0 = 每次启动自动挑选空闲端口；固定端口便于反复调试时接外部工具
     db-port: ${DESKTOP_DB_PORT:0}
