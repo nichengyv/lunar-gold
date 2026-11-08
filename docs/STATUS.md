@@ -1,7 +1,7 @@
 # AgentKey Pro · 项目状态速查
 
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-06、P2-07、P2-08、P3-00、P3-00b、P3-01、PR-12。
+> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-06、P2-07、P2-08、P3-00、P3-00b、P3-01、P3-02、P3-03、PR-12。
 
 ---
 
@@ -112,7 +112,7 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
 | 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
 | 测试覆盖 | ⚠️ | 当前 156 项回归，0 失败、0 错误、5 项跳过（2 项既有环境相关 + 3 项未设置 `DESKTOP_PG_RUNTIME` 的桌面集成测试）；覆盖桌面数据库 V1~V15 与 pgvector 1024 维余弦检索、命令超时与进程树终止；desktop profile 已在 Windows x64 完成启动冒烟，SSE 端到端与前端自动化仍待补 |
-| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；仍缺桌面壳、macOS/Linux 运行时、把运行时打进安装包与桌面端端到端冒烟 |
+| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；Electron 壳与侧车生命周期已有（P3-01/P3-02），jlink 裁剪 JRE 已有（P3-03，约 49 MiB）；仍缺 macOS/Linux 运行时、安装包与签名（P3-04）与桌面端窗口端到端冒烟 |
 
 ### Level 5 ⏳ 尚未实施
 桌面外壳与分发见 `UPDATE_PLAN.md` Phase 3；当前仍以浏览器作为 desktop 开发环境。

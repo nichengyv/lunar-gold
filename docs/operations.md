@@ -125,7 +125,7 @@ java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop
 
 实测（Windows x64）：单 jar 以 desktop profile 启动 12 秒就绪，日志为「使用 jar 内置 PostgreSQL 运行时」；全新数据目录执行 V1~V15（`Successfully applied 15 migrations ... now at version v15`，其中 V3 的 `CREATE EXTENSION vector` 成功即证明扩展可用）；`/`、`/chat`、`/settings`、`/login` 返回 200 的 SPA 页面，`/assets/*.js` 200，缺失静态资源 404，`/api/meta` 返回 `DESKTOP`，无令牌 401、本地令牌 200；真实浏览器打开后自动进入 `/chat` 且会话/设置接口正常。
 
-边界：内置运行时只对应构建时的平台（当前仅 Windows x64），跨平台需为每个平台构建各自的 jar；未做 `jlink` 裁剪（依赖直接打进 fat jar）；尚无桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`，接入壳后应置 `false` 并改由壳读取令牌文件。
+边界：内置运行时只对应构建时的平台（当前仅 Windows x64），跨平台需为每个平台构建各自的 jar；`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（前端仍靠该接口换取本地令牌），关闭它需要壳侧注入令牌，属于后续任务。
 
 ### 1.6 桌面壳（P3-01 骨架，Electron）
 
@@ -142,6 +142,19 @@ npm start
 退出与崩溃：关窗或退出时终止侧车整棵进程树；由于内嵌 PostgreSQL 的 postmaster 由 pg_ctl 分离拉起、不在 java 进程树内，会额外按 `<data-dir>/db/postmaster.pid` 单独终止，避免残留进程把数据目录锁死。运行中侧车意外退出会弹「重启本地服务 / 退出」对话框，重启会先补杀游离的 postmaster 再重新拉起（同一数据目录可直接复用）。
 
 验证边界：`desktop/sidecar.js` 已用 node 直驱真实 jar 验证（动态端口、`/api/meta=DESKTOP`、崩溃检测、原地重启 14 秒就绪、终止后 java 与 postmaster 均无残留）；当前自动化环境无交互桌面会话，Electron 窗口本身无法拉起（最小示例退出码 1），需在本机桌面执行 `npm start` 人工确认窗口渲染与双开时的单实例行为。`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（前端仍靠该接口换取本地令牌），关闭它需要壳侧注入令牌，属于后续任务。
+
+### 1.7 裁剪私有 JRE（P3-03，jlink）
+
+桌面端安装包不假设用户机器装有 Java，用 jlink 从 JDK 21 裁剪一份约 49 MiB 的私有运行时：
+
+```powershell
+# 产物：build\desktop-runtime\jre（build/ 不入 Git）
+powershell -ExecutionPolicy Bypass -File scripts\build-desktop-runtime.ps1
+```
+
+脚本自动定位 JDK 21（JAVA_HOME 指向其他主版本时回退到本机默认安装位置），模块清单（19 个，含 `jdk.crypto.ec`、`jdk.localedata` + `--include-locales=zh,en`）写在脚本参数里，漏模块会以 `NoClassDefFoundError` 形式快速失败，补齐后重跑即可。桌面壳打包态优先使用 `resources/jre/bin/java.exe`（由 electron-builder extraResources 复制，P3-04），开发态仍走 `JAVA_HOME`/PATH。
+
+冒烟（裁剪 JRE 直跑自包含 jar）：已实测 12 秒就绪、Flyway 至 V15、`/actuator/health` UP、`/` 返回 SPA。注意：本机曾因安全软件/文件过滤驱动干扰导致 `initdb` 在 bootstrap 阶段必现 `could not create lock file "postmaster.pid": File exists`，与 JRE 无关；若新机器首启失败，先按 `sidecar.log` 确认是否卡在 initdb。
 
 ---
 

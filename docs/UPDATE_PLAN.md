@@ -359,7 +359,7 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 | P3-00b | **已完成（同批）**：数据库运行时随 jar 分发 | `pom.xml`、`DbLifecycleManager.java`、`scripts/build-pg-runtime.ps1` | `-Pwith-pg-runtime` 打包后无需 `DESKTOP_PG_RUNTIME` 即可启动并完成 V1~V15 |
 | P3-01 | **已完成（骨架）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；窗口渲染需在真机桌面确认 |
 | P3-02 | **已完成**：侧车生命周期 | `desktop/sidecar.js`、`desktop/main.js` | 选空闲端口、健康检查、整树终止（含游离 postmaster）、崩溃重启、失败快速诊断；单实例双开待真机确认 |
-| P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
+| P3-03 | **已完成**：JRE 裁剪与打包 | `scripts/build-desktop-runtime.ps1`、`desktop/main.js` | `jlink` 定制运行时（19 个模块、约 49 MiB），裁剪 JRE 无头冒烟全链路通过 |
 | P3-04 | 安装包与签名 | 构建脚本、证书配置 | Windows/macOS/Linux 可安装；签名校验通过 |
 | P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
 | P3-06 | 崩溃上报 | 壳与后端接入 Sentry 或等价方案 | 崩溃可上报；默认脱敏；可关闭 |
@@ -387,6 +387,12 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 **P3-02 收尾实测（node 直驱 sidecar + 真实 jar）**：jar 缺失场景 112ms 快速失败且错误信息含日志末尾；就绪后强杀 java 树，`exit` 事件触发；补杀 postmaster 后同一数据目录原地重启 14.2 秒就绪，`/api/meta` 为 `DESKTOP`；`stopSidecar` 后 java 与 postmaster 均无残留。排查期间确认本机 5433 的用户自有 PostgreSQL 及其子进程未受影响。
 
 **P3-02 未完成项**：单实例锁的真实双开验证（环境限制，需真机 `npm start` 双开确认）；崩溃日志上报属 P3-06。
+
+**P3-03 完成批注（2026-11-08）**：新增 `scripts/build-desktop-runtime.ps1`，用 jlink 从本机 JDK 21 裁剪桌面端私有 JRE 到 `build/desktop-runtime/jre`（19 个模块：`java.base/compiler/desktop/instrument/management/naming/net.http/prefs/rmi/scripting/security.jgss/sql/sql.rowset/transaction.xa/xml` + `jdk.crypto.ec/unsupported/zipfs/localedata`，`--include-locales=zh,en --strip-debug --compress=2`，产出约 49 MiB，未裁剪 JDK 21 约 300 MiB）。脚本自动跳过非 21 的 JAVA_HOME（本机指向 JDK 24，回退到 `C:\Users\16680\.jdks\ms-21.0.11`）。`desktop/main.js` 的 `resolveJava` 改为打包态优先 `resources/jre/bin/java.exe`（由 P3-04 的 electron-builder extraResources 复制），开发态仍走 JAVA_HOME/PATH。
+
+**P3-03 实测（Windows x64，真实执行）**：裁剪 JRE `java -version` 正常、含 java.sql / jdk.crypto.ec / jdk.localedata 等关键模块；以该 JRE 无头 `java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop` 完整启动 12.0 秒就绪：内嵌 PostgreSQL 16.11 从 jar 内置 txz 解压启动、Flyway 校验至 V15「up to date」、`/actuator/health` UP、`/` 返回 SPA（200）。模块清单无缺口。
+
+**P3-03 边界与环境发现**：冒烟期间发现本机当前无法执行 `initdb`（bootstrap 阶段必现 `could not create lock file "postmaster.pid": File exists`，残留 pid 为负数的垃圾值，工作区内外、沙箱内外均复现，而同日早些时候 P3-02 曾成功初始化 `build\dev-desktop-data\db`），怀疑杀软/文件过滤驱动干扰，与裁剪 JRE 无关（initdb.exe 被子进程直接拉起，全程不经 JVM）。本次冒烟改为复制已初始化的 dev 数据目录完成全链路验证；全新机器的 initdb 首启路径需在真机复核。安装包体积预算待 P3-04 用真实 NSIS 产物复核。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 

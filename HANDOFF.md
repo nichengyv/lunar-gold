@@ -124,7 +124,7 @@ cd frontend; npx vue-tsc --noEmit   # 退出码 0
 | MCP filesystem 写入不入审批 | 中 | 审批只覆盖内置工具 |
 | MCP 熔断 5 分钟内不降级 | 中 | 冷却期体验差 |
 | 审批状态存进程内存 | 低 | 重启丢正在等待的卡；120s 超时兜底 |
-| 桌面端尚无安装包 | 中 | 前端与 pgvector 运行时都可随 jar 分发（P3-00/P3-00b）；Electron 壳与侧车生命周期已有 `desktop/`（P3-01/P3-02，含崩溃重启与游离 postmaster 终止），窗口与单实例双开需真机确认；JRE 未裁剪（jar 约 242 MB）、`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 true；安装包/签名/更新（P3-03~P3-05）未做 |
+| 桌面端尚无安装包 | 中 | 前端与 pgvector 运行时都可随 jar 分发（P3-00/P3-00b）；Electron 壳与侧车生命周期已有 `desktop/`（P3-01/P3-02，含崩溃重启与游离 postmaster 终止），窗口与单实例双开需真机确认；jlink 裁剪 JRE 已有（P3-03，19 个模块约 49 MiB，打包态由 `resources/jre` 提供）、`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 true；安装包/签名/更新（P3-04~P3-05）未做 |
 | 桌面端 pgvector 运行时仅 Windows x64 | 中 | 由 `scripts/build-pg-runtime.ps1` 产出（PG 16.11.0 + pgvector 0.8.7，SHA-256 锁定的社区二进制），可用 `-Pwith-pg-runtime` 内置进 jar，也可用 `DESKTOP_PG_RUNTIME` 覆盖；macOS/Linux 与安装包内布局未做（P2-08/P3-00b 边界） |
 | 桌面端本地令牌存文件而非 OS 凭据库 | 低 | `<data-dir>/local-token`，POSIX 收紧为 600；Windows 依赖用户目录 ACL（PR-07 记录的差异） |
 | 桌面端登录/改密接口未显式关闭 | 低 | 账号 UI 已隐藏（无账号 tab、用户名与登出入口，`/profile` 重定向到对话）；本地用户密码为一次性随机值，正常路径只走本地令牌 |

@@ -194,6 +194,11 @@ function resolveJar() {
 }
 
 function resolveJava() {
+  // 打包态优先用随安装包分发的裁剪 JRE（P3-03，由 extraResources 复制为 resources/jre）
+  if (app.isPackaged) {
+    const bundled = path.join(process.resourcesPath, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+    if (fs.existsSync(bundled)) return bundled;
+  }
   const javaHome = process.env.JAVA_HOME;
   if (javaHome) {
     const exe = path.join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
