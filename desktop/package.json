@@ -1,0 +1,13 @@
+{
+  "name": "agentkey-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentKey Pro 桌面壳（Electron）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.3.0"
+  }
+}

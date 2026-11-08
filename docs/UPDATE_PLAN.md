@@ -357,8 +357,8 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 |---|---|---|---|
 | P3-00 | **已完成（P3-00）**：前端随 jar 分发 | `pom.xml`、`WebConfig.java`、`SecurityConfig.java` | `mvn -Pwith-frontend package` 后单 jar 直接提供 UI，SPA 深链可用 |
 | P3-00b | **已完成（同批）**：数据库运行时随 jar 分发 | `pom.xml`、`DbLifecycleManager.java`、`scripts/build-pg-runtime.ps1` | `-Pwith-pg-runtime` 打包后无需 `DESKTOP_PG_RUNTIME` 即可启动并完成 V1~V15 |
-| P3-01 | 桌面壳骨架 | 新增 `desktop/`（Electron 或 Tauri） | 启动后拉起侧车并加载 UI |
-| P3-02 | 侧车生命周期 | `desktop/*/sidecar` | 选空闲端口、健康检查、退出时杀掉进程树、单实例锁 |
+| P3-01 | **已完成（骨架）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；窗口渲染需在真机桌面确认 |
+| P3-02 | **部分完成**：侧车生命周期 | `desktop/sidecar.js` | 已做：选空闲端口、健康检查、整树终止；待做：单实例实测、崩溃重启、端口占用提示 |
 | P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
 | P3-04 | 安装包与签名 | 构建脚本、证书配置 | Windows/macOS/Linux 可安装；签名校验通过 |
 | P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
@@ -377,6 +377,12 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 **P3-00b 实测（Windows x64，真实执行）**：`mvn -q -Pwith-frontend,with-pg-runtime -DskipTests package` 产出 242.1 MB jar，含 `BOOT-INF/classes/static/` 与 `BOOT-INF/classes/desktop/pg-runtime.txz`；清空 `DESKTOP_PG_RUNTIME`、使用全新数据目录直接 `java -jar`，日志为「使用 jar 内置 PostgreSQL 运行时」，12 秒就绪，Flyway `Successfully applied 15 migrations ... now at version v15`（V3 的 `CREATE EXTENSION vector` 成功即证明 pgvector 可用），`/api/meta` 返回 `DESKTOP`，无令牌 401。`mvn test` 仍为 **156 项，0 失败、0 错误、5 项跳过**。
 
 **P3-00b 边界**：内置运行时只对应构建平台（当前仅 Windows x64），macOS/Linux 需各自构建；`with-pg-runtime` 在 `build/pg-runtime/pg-runtime.txz` 缺失时不会让构建失败，只是产出一个不含运行时的 jar（启动时打告警），发布流水线应显式校验产物中存在该条目。
+
+**P3-01 / P3-02 完成批注（2026-11-08，未提交）**：选定 Electron（本机无 Rust，Node 侧工具链已就绪）。新增 `desktop/`：`main.js` 负责单实例锁、启动画面、错误对话框、AES 主密钥首次生成与持久化、退出时终止侧车；`sidecar.js` 与 Electron 解耦，负责选空闲端口、以 `--spring.profiles.active=desktop --server.port=<port>` 拉起 jar、轮询 `/actuator/health`（只认 200，DOWN 为 503）、日志追加到 `<data-dir>/sidecar.log`，并用 `taskkill /T /F`（POSIX 用进程组）终止整棵树，避免 Spring Boot 拉起的 PostgreSQL 变成孤儿。侧车崩溃或超时会把 sidecar.log 路径显示在错误框里。
+
+**P3-01 / P3-02 实测与边界**：`sidecar.js` 用 node 直接驱动真实 jar 验证通过——动态端口 50299、日志确认使用 jar 内置运行时、`/api/meta` 为 `DESKTOP`、`/` 返回 SPA、调用终止后 java 子进程消失。Electron 窗口未能实际拉起：本自动化环境无交互桌面会话，连最小 Electron 示例也以退出码 1 结束（`--no-sandbox` 下 `--version` 可输出 v43.3.0），因此「窗口显示与单实例锁」需要在真机桌面用 `npm start` 人工确认。另外本机 Electron 二进制需从缓存（v43.3.0）安装，`npm install` 直接下载会被网络拦截。
+
+**P3-02 未完成项**：单实例锁的真实双开验证、侧车异常退出后的自动重启与提示、端口被占用的显式提示、崩溃日志上报。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 

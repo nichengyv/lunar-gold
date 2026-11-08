@@ -127,6 +127,20 @@ java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop
 
 边界：内置运行时只对应构建时的平台（当前仅 Windows x64），跨平台需为每个平台构建各自的 jar；未做 `jlink` 裁剪（依赖直接打进 fat jar）；尚无桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`，接入壳后应置 `false` 并改由壳读取令牌文件。
 
+### 1.6 桌面壳（P3-01 骨架，Electron）
+
+前置：先按 1.5 产出 `target\agent-gateway-1.0.0.jar`（壳查找顺序：`AGENTKEY_JAR` → 打包后的 `resources/sidecar` → 仓库内 `target/`）。
+
+```powershell
+cd d:\test-code\agent-gateway-v3\desktop
+npm install          # 首次；需要能下载 Electron 二进制
+npm start
+```
+
+壳的行为：单实例锁 → 在 127.0.0.1 上选空闲端口拉起侧车（`--spring.profiles.active=desktop --server.port=<port>`，日志追加到 `<data-dir>/sidecar.log`）→ 轮询 `/actuator/health` 直到 200 → 加载 `http://127.0.0.1:<port>/` → 退出时 `taskkill /T /F` 终止整棵进程树（含内嵌 PostgreSQL）。首次启动自动生成 `<data-dir>/aes.key` 并复用；`JAVA_HOME`、`DESKTOP_DATA_DIR`、`AES_MASTER_KEY` 均可覆盖。
+
+验证边界：`desktop/sidecar.js` 已用 node 直接驱动真实 jar 验证（动态端口、`/api/meta=DESKTOP`、`/` 返回 SPA、终止后子进程消失）；当前自动化环境无交互桌面会话，Electron 窗口本身无法拉起（最小示例退出码 1），需在本机桌面执行 `npm start` 人工确认窗口渲染与双开时的单实例行为。`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（前端仍靠该接口换取本地令牌），关闭它需要壳侧注入令牌，属于后续任务。
+
 ---
 
 ## 2. 环境变量完整清单
