@@ -20,6 +20,7 @@
             <span v-if="docCount" class="chat-tool-count">{{ docCount }}</span>
           </button>
           <button
+            v-if="hasLocalWorkspace"
             class="chat-tool-btn"
             :class="{ active: chat.dockOpen && chat.dockTab === 'changes' }"
             title="查看文件变更"
@@ -95,10 +96,11 @@
             <Icon name="arrow-down" :size="16" />
           </button>
 
-          <PendingChangesCard />
+          <!-- 待审查改动：仅桌面端有文件写入，网页端不展示审查流 -->
+          <PendingChangesCard v-if="hasLocalWorkspace" />
 
           <!-- 第六十八批 A2：危险工具审批卡片，批准/拒绝后 Agent 继续或换方案 -->
-          <ApprovalCard v-if="currentApproval" :key="currentApproval.approvalId" :approval="currentApproval" />
+          <ApprovalCard v-if="currentApproval && hasApproval" :key="currentApproval.approvalId" :approval="currentApproval" />
 
           <!-- 计划条：Agent 处理多步任务时显示，可折叠；点「详情」打开工作台的计划面板 -->
           <div v-if="currentPlan && !planHidden" class="plan-strip" :class="{ collapsed: planCollapsed }">
@@ -285,6 +287,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useChatStore } from '../stores/chat';
+import { useMetaStore } from '../stores/meta';
 import { useProjectStore } from '../stores/project';
 import * as workspaceApi from '../api/workspace';
 import * as knowledgeApi from '../api/knowledge';
@@ -297,7 +300,11 @@ import type { DocumentInfo } from '../types/api';
 import type { PermissionLevel, PlanSnapshot, ReasoningLevel } from '../types/chat';
 
 const chat = useChatStore();
+const meta = useMetaStore();
 const project = useProjectStore();
+/** 文件变更、审查流与工作台里的本地文件只在桌面端可用 */
+const hasLocalWorkspace = computed(() => meta.has('LOCAL_WORKSPACE'));
+const hasApproval = computed(() => meta.has('APPROVAL'));
 const inputText = ref('');
 const messagesEl = ref<HTMLElement>();
 const inputEl = ref<HTMLTextAreaElement>();

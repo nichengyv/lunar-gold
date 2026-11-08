@@ -2,7 +2,9 @@ package com.capsule.agentkey.config;
 
 import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.filter.JwtAuthenticationFilter;
+import com.capsule.agentkey.filter.LocalTokenFilter;
 import com.capsule.agentkey.util.ResponseWriter;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,7 +27,9 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    // 云端用 JWT、桌面端用本地令牌：两个过滤器都带 @Profile，用 ObjectProvider 取实际装配的那个
+    private final ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider;
+    private final ObjectProvider<LocalTokenFilter> localTokenFilterProvider;
 
     @Value("${app.cors.allowed-origins:http://localhost:8080,http://127.0.0.1:8080}")
     private String allowedOrigins;
@@ -34,8 +38,10 @@ public class SecurityConfig {
     @Value("${app.security.csp-connect-src:http://localhost:8080 http://127.0.0.1:8080}")
     private String cspConnectSrc;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
-        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+    public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider,
+                          ObjectProvider<LocalTokenFilter> localTokenFilterProvider) {
+        this.jwtFilterProvider = jwtFilterProvider;
+        this.localTokenFilterProvider = localTokenFilterProvider;
     }
 
     //BCryptPasswordEncoder()，密码哈希加密工具
@@ -64,6 +70,8 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/public-key",
                                 "/api/meta",
+                                // 桌面端本地令牌引导接口：仅回环地址 + 来源白名单，见 DesktopTokenController
+                                "/api/desktop/token",
                                 "/",
                                 "/index.html",
                                 "/static/**",
@@ -101,9 +109,17 @@ public class SecurityConfig {
                                         "connect-src 'self' " + cspConnectSrc + " https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
                                         "img-src 'self' data: https:;"
                         ))
-                )
-                //把自己写的jwtAuthenticationFilter插到Spring内置过滤器之前
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                );
+        // 只装配当前 profile 对应的认证过滤器：
+        // 云端 = JWT（含 Redis 撤销白名单），桌面端 = 本地令牌，二者不会同时存在
+        JwtAuthenticationFilter jwtFilter = jwtFilterProvider.getIfAvailable();
+        if (jwtFilter != null) {
+            http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+        }
+        LocalTokenFilter localTokenFilter = localTokenFilterProvider.getIfAvailable();
+        if (localTokenFilter != null) {
+            http.addFilterBefore(localTokenFilter, UsernamePasswordAuthenticationFilter.class);
+        }
         //构建并返回完整的安全过滤链
         return http.build();
     }

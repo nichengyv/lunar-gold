@@ -16,6 +16,11 @@ public class RegisterRequest {
     @NotBlank(message = "密码不能为空")
     private String encryptedPassword;
 
+    //注册必须绑定邮箱：邮箱是找回密码的唯一凭证，也用于发送注册验证码
+    @NotBlank(message = "邮箱不能为空")
     @Email(message = "邮箱格式不正确")//自动校验字符串是否符合标准的电子邮件格式
     private String email;
+
+    @NotBlank(message = "邮箱验证码不能为空")
+    private String emailCode;
 }

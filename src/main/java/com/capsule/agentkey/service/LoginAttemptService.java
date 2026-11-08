@@ -2,6 +2,7 @@ package com.capsule.agentkey.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -35,13 +36,20 @@ public class LoginAttemptService {
 
     private final Map<String, Attempt> fallbackAttempts = new ConcurrentHashMap<>();
 
-    public LoginAttemptService(StringRedisTemplate redis) {
+    /**
+     * @param redis 桌面端排除了 Redis 自动配置，此时注入 null，全部读写走进程内降级
+     */
+    public LoginAttemptService(@Nullable StringRedisTemplate redis) {
         this.redis = redis;
     }
 
     /** 登录失败时调用，累计失败次数，达到阈值则启动锁定 */
     public void onFailure(String username) {
         if (username == null) return;
+        if (redis == null) {
+            onFailureInMemory(username);
+            return;
+        }
         try {
             String failKey = FAIL_KEY_PREFIX + username;
             Long count = redis.opsForValue().increment(failKey);
@@ -66,11 +74,13 @@ public class LoginAttemptService {
     /** 登录成功时调用，清除该用户的失败记录与锁标记 */
     public void onSuccess(String username) {
         if (username == null) return;
-        try {
-            redis.delete(FAIL_KEY_PREFIX + username);
-            redis.delete(LOCK_KEY_PREFIX + username);
-        } catch (Exception e) {
-            log.warn("清理 Redis 登录计数失败: {}", e.getMessage());
+        if (redis != null) {
+            try {
+                redis.delete(FAIL_KEY_PREFIX + username);
+                redis.delete(LOCK_KEY_PREFIX + username);
+            } catch (Exception e) {
+                log.warn("清理 Redis 登录计数失败: {}", e.getMessage());
+            }
         }
         fallbackAttempts.remove(username);
     }
@@ -78,6 +88,7 @@ public class LoginAttemptService {
     /** 锁定期间返回 true，此时应直接拒绝登录而不校验密码 */
     public boolean isLocked(String username) {
         if (username == null) return false;
+        if (redis == null) return isLockedInMemory(username);
         try {
             Boolean locked = redis.hasKey(LOCK_KEY_PREFIX + username);
             return Boolean.TRUE.equals(locked);

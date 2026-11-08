@@ -26,11 +26,15 @@ public class UserService {
     }
 
     public User register(String username, String rawPassword, String email) {
-        if (!PASSWORD_PATTERN.matcher(rawPassword).matches()) {
-            throw new BusinessException("密码至少8位，需包含大小写字母、数字和特殊字符");
-        }
+        validatePassword(rawPassword, "密码");
         if (userRepo.findByUsername(username).isPresent()) {
             throw new BusinessException("用户名已存在");
+        }
+        if (email == null || email.isBlank()) {
+            throw new BusinessException("邮箱不能为空");
+        }
+        if (userRepo.findByEmail(email).isPresent()) {
+            throw new BusinessException("邮箱已被使用");
         }
         User user = new User();
         user.setUsername(username);
@@ -44,6 +48,13 @@ public class UserService {
 
     public Optional<User> findByUsername(String username) {
         return userRepo.findByUsername(username);
+    }
+
+    public Optional<User> findByEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return Optional.empty();
+        }
+        return userRepo.findByEmail(email);
     }
 
     public Optional<User> findById(Long id) {
@@ -60,11 +71,28 @@ public class UserService {
         if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
             throw new BusinessException("原密码错误");
         }
-        if (!PASSWORD_PATTERN.matcher(newPassword).matches()) {
-            throw new BusinessException("新密码至少8位，需包含大小写字母、数字和特殊字符");
-        }
+        validatePassword(newPassword, "新密码");
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepo.save(user);
         log.info("用户修改密码成功: {}", user.getUsername());
+    }
+
+    /**
+     * 邮箱验证码找回密码：已经过验证码校验，不再要求原密码。
+     * 密码强度规则与注册/改密保持一致。
+     */
+    public void resetPassword(Long userId, String newPassword) {
+        User user = userRepo.findById(userId)
+                .orElseThrow(() -> new BusinessException("用户不存在"));
+        validatePassword(newPassword, "新密码");
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepo.save(user);
+        log.info("用户通过邮箱验证码重置密码成功: {}", user.getUsername());
+    }
+
+    private void validatePassword(String rawPassword, String label) {
+        if (rawPassword == null || !PASSWORD_PATTERN.matcher(rawPassword).matches()) {
+            throw new BusinessException(label + "至少8位，需包含大小写字母、数字和特殊字符");
+        }
     }
 }

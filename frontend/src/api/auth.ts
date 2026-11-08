@@ -14,8 +14,17 @@ export function login(body: { username: string; encryptedPassword: string }): Pr
   return http.post<never, ApiResponse<{ token: string }>>('/api/auth/login', body);
 }
 
-export function register(body: { username: string; encryptedPassword: string; email: string }): Promise<ApiResponse<void>> {
+export function register(body: { username: string; encryptedPassword: string; email: string; emailCode: string }): Promise<ApiResponse<void>> {
   return http.post<never, ApiResponse<void>>('/api/auth/register', body);
+}
+
+/** 发送邮箱验证码：scene=REGISTER 注册，RESET 找回密码 */
+export function sendEmailCode(body: { email: string; scene: 'REGISTER' | 'RESET' }): Promise<ApiResponse<void>> {
+  return http.post<never, ApiResponse<void>>('/api/auth/email-code', body);
+}
+
+export function resetPassword(body: { email: string; emailCode: string; encryptedPassword: string }): Promise<ApiResponse<void>> {
+  return http.post<never, ApiResponse<void>>('/api/auth/reset-password', body);
 }
 
 export function logout(): Promise<ApiResponse<void>> {

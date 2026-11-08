@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.lang.Nullable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -49,7 +50,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     /** Redis 故障时的进程内降级计数 */
     private final ConcurrentHashMap<String, Window> fallbackWindows = new ConcurrentHashMap<>();
 
-    public RateLimitInterceptor(StringRedisTemplate redis,
+    /** @param redis 桌面端排除了 Redis 自动配置，此时为 null，直接走进程内计数 */
+    public RateLimitInterceptor(@Nullable StringRedisTemplate redis,
                                 @Value("${app.rate-limit.chat-requests-per-minute:10}") int maxRequests) {
         this.redis = redis;
         this.maxRequests = maxRequests;
@@ -98,6 +100,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
      * @return true=放行 false=超限 null=Redis 不可用（交由调用方降级）
      */
     private Boolean tryConsumeInRedis(String key) {
+        if (redis == null) {
+            return null;
+        }
         try {
             Long count = redis.opsForValue().increment(key);
             if (count == null) {

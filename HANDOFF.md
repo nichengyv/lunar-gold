@@ -124,7 +124,9 @@ cd frontend; npx vue-tsc --noEmit   # 退出码 0
 | MCP filesystem 写入不入审批 | 中 | 审批只覆盖内置工具 |
 | MCP 熔断 5 分钟内不降级 | 中 | 冷却期体验差 |
 | 审批状态存进程内存 | 低 | 重启丢正在等待的卡；120s 超时兜底 |
-| Flyway 缺 `pending_file_change` 建表脚本 | 中 | 生产全新部署会缺表 |
+| 桌面端内置 pgvector 运行时未随包 | 中 | 需用 `DESKTOP_PG_RUNTIME` 指定；目前仅 Windows x64 验证（P2-08） |
+| 桌面端本地令牌存文件而非 OS 凭据库 | 低 | `<data-dir>/local-token`，POSIX 收紧为 600；Windows 依赖用户目录 ACL（PR-07 记录的差异） |
+| 桌面端登录/改密接口未显式关闭 | 低 | 本地用户密码为一次性随机值，实际不可用；正常路径只走本地令牌 |
 | ReAct / SSE / 审批阻塞 无集成测试 | 低 | 纯编译验证无法覆盖行为回归 |
 | `edit_file` 只替换第一处匹配 | 低 | 多处相同片段时可能改错位置；提示词要求用最小唯一锚点缓解 |
 | 删除大目录时审查流只记录前 200 个文件 | 低 | 超出部分不可撤回，工具结果已明确告知 |
@@ -139,7 +141,7 @@ cd frontend; npx vue-tsc --noEmit   # 退出码 0
    - `CommandRiskTest`：破坏性/非破坏性命令矩阵
    - `AgentPolicyTest`：MANUAL / AUTO / FULL × WRITE / EXECUTE / DESTRUCTIVE
    - `DeleteFileToolTest`：根目录拒绝、`.git` 拒绝、非空目录无 recursive、文件删除与审查记录
-2. **Flyway V14**：`pending_file_change` + `agent_mcp_server_status` 建表
+2. **Flyway V14（已完成）**：`pending_file_change` + `agent_mcp_server_status` 建表；PR-06 另加 `beforeMigrate` 幂等预检，修复 V13 在全新库先于 V14 执行 ALTER 的顺序缺陷
 3. **MCP 写入工具接入审批**：`McpToolAdapter` 桥接 `ToolApprovalRegistry`
 4. **MCP 熔断 → 内置 fallback**：熔断期间自动切到等价内置工具
 

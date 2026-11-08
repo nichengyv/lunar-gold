@@ -33,6 +33,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- Boot 4 的 JSON 自动配置默认是 Jackson 3（tools.jackson），只提供 Jackson 3 的 ObjectMapper。
+             业务代码、jjwt 0.11、MCP SDK 都还在用 Jackson 2（com.fasterxml），
+             不引这个模块时 ChatService 注入 ObjectMapper 会直接启动失败 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
@@ -49,13 +56,21 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!-- 邮件：注册验证码 / 找回密码。未配置 spring.mail.host 时降级为日志输出（见 MailConfig） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
+        <!-- Boot 4 把 Flyway 自动配置拆到了独立模块：只引 flyway-core 时
+             FlywayAutoConfiguration 根本不加载，prod/desktop 启动会直接做 JPA 校验并报
+             missing table。starter 会带上 spring-boot-flyway 自动配置与 flyway-core -->
         <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
         </dependency>
         <!-- Flyway 10 起数据库支持按厂商拆分到独立模块，只引 flyway-core 时
              prod 启动会报 Unsupported Database: PostgreSQL（dev 因为关闭了 Flyway 从未暴露） -->
@@ -90,6 +105,34 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <!-- 桌面端内嵌 PostgreSQL：由 DbLifecycleManager 在 desktop profile 下拉起本地库。
+             PR-02 实测结论是内嵌 PG + pgvector，而不是 SQLite。
+             只保留当前已验证的 Windows x64 二进制，排除 zonky 默认带入的 darwin/linux/alpine
+             运行时；其他平台在 P2-08 按 OS/arch 补齐，不能直接把 Windows 结果外推。 -->
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <version>2.2.2</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.zonky.test.postgres</groupId>
+                    <artifactId>embedded-postgres-binaries-darwin-amd64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.zonky.test.postgres</groupId>
+                    <artifactId>embedded-postgres-binaries-linux-amd64</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.zonky.test.postgres</groupId>
+                    <artifactId>embedded-postgres-binaries-linux-amd64-alpine</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-windows-amd64</artifactId>
+            <version>16.11.0</version>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

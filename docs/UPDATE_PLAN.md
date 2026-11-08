@@ -45,11 +45,11 @@
 |---|---|---|
 | 后端 | 单模块 Spring Boot，按层分包（controller/service/tool/config） | 缺少运行时模式与能力抽象 |
 | 前端 | Vue 3 + Pinia，单一 Web 形态 | 无能力声明、无下载页、无平台适配层 |
-| 数据库 | PostgreSQL + pgvector，Flyway V1~V14；PR-02 已选定桌面端内嵌 PostgreSQL + pgvector | PR-06 实现本地 DB 生命周期与分平台运行时；另须处理 V13 在全新库建表前 ALTER 的既有缺陷 |
-| 缓存 | Redis（限流、登录锁定、JWT 撤销），已有内存降级 | 桌面端需排除 Redis 自动配置 |
+| 数据库 | PostgreSQL + pgvector，Flyway V1~V15；PR-02 已选定桌面端内嵌 PostgreSQL + pgvector | PR-06 已实现本地 DB 生命周期；V13 全新库缺陷已由 Flyway 前置预检关闭；分平台运行时（P2-08）仍待补齐 |
+| 缓存 | Redis（限流、登录锁定、JWT 撤销），已有内存降级 | 桌面端已在 PR-06 排除 Redis 自动配置，上述能力改走内存降级 |
 | 执行 | 宿主进程执行命令，白名单 + 路径校验 | 无 OS 沙箱、继承服务端环境变量、软链接可逃逸 |
 | 状态 | 审批、权限、停止、统计多为进程内存 | 云端多实例不可用；重启丢运行态 |
-| 认证 | 多用户 JWT，开放注册 | 桌面端需单用户本地 token；云端缺邮箱验证/找回密码 |
+| 认证 | 多用户 JWT，开放注册；云端邮箱验证与找回密码已完成（PR-12） | 桌面端需单用户本地 token（P2-03 未做） |
 | 测试 | 10 个测试文件，以工具类与纯逻辑为主 | ReAct/SSE/审批核心链路无集成测试；前端 0 测试 |
 | CI/CD | 无 | 无流水线、无发布、无签名 |
 | 文档 | 四份交接文档，质量较好 | STATUS/design/operations 与代码存在漂移 |
@@ -219,7 +219,7 @@ public interface AgentRunStore {
 | Hibernate | 6.6.22 + community dialect 在 `ddl-auto=validate` 读取 SQLite 元数据时抛 `NoSuchElementException`；实测改用 `none` 后通过，生产必须另补 schema 校验 | 原 `validate` 通过 |
 | 原生库 | Windows `vec0.dll` 289,280 字节，经 Hikari `connection-init-sql` 对每个连接加载 | Windows pgvector 由 MSVC 编译并装入自定义运行时，`vector.dll` 276,992 字节 |
 
-**既有迁移缺陷**：原始 V1~V14 在全新 PostgreSQL 库实测于 V13 失败，因为 V13 对尚未创建的 `pending_file_change` 执行 ALTER，V14 才补建表。内嵌 PG 的 3 轮成功测试使用了隔离副本中的最小 V13 修正；这不代表原始迁移可直接全新启动。PR-06 必须用 Flyway 前置幂等预检或全新安装基线解决，不得直接修改已执行迁移并破坏存量校验。
+**既有迁移缺陷**：原始 V1~V14 在全新 PostgreSQL 库实测于 V13 失败，因为 V13 对尚未创建的 `pending_file_change` 执行 ALTER，V14 才补建表。内嵌 PG 的 3 轮成功测试使用了隔离副本中的最小 V13 修正；这不代表原始迁移可直接全新启动。PR-06 必须用 Flyway 前置幂等预检或全新安装基线解决，不得直接修改已执行迁移并破坏存量校验。**已于 PR-06 按前置幂等预检解决，见 Phase 2 的 PR-06 完成批注。**
 
 ##### 代码改动量（`git diff --no-index --numstat`）
 
@@ -252,13 +252,13 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 
 | 文件/模块 | 需要改动 |
 |---|---|
-| `pom.xml` | 引入 zonky embedded-postgres；按目标 OS/arch 引入二进制并排除其他平台；桌面 profile 隔离依赖 |
-| `application-desktop.yml` | 使用生命周期管理器分配的 JDBC 连接；沿用 `db/migration`；排除 Redis 自动配置 |
-| 新增 `service/desktop/DbLifecycleManager.java` | 数据目录、首次 initdb、空闲端口、启动/健康检查、优雅关闭、崩溃恢复、V13 前置兼容处理 |
-| 新增桌面 PG 运行时解析与构建脚本 | 每平台准备 PG + pgvector 运行时，解析自定义压缩包，校验文件与扩展版本 |
-| `src/main/resources/db/migration/` | 保持云端/桌面共用；不直接改已执行 V1~V14，以前置预检或全新安装基线修复 V13 |
+| `pom.xml` | **已完成（PR-06）**：引入 zonky embedded-postgres；当前只引入 Windows x64 二进制并排除 darwin/linux/alpine；桌面依赖尚未做 Maven profile 隔离 |
+| `application-desktop.yml` | **已完成（PR-06）**：使用生命周期管理器分配的 JDBC 连接；沿用 `db/migration`；排除 Redis 自动配置 |
+| 新增 `service/desktop/DbLifecycleManager.java` | **已完成（PR-06）**：数据目录、首次 initdb、空闲端口、启动/健康检查、优雅关闭、崩溃恢复、V13 前置兼容处理 |
+| 新增桌面 PG 运行时解析与构建脚本 | **未完成**：运行时解析已支持 `DESKTOP_PG_RUNTIME`，但每平台运行时产物与构建脚本仍未入库（P2-08） |
+| `src/main/resources/db/migration/` | **已完成（PR-06）**：保持云端/桌面共用；不改已执行 V1~V14，用 Flyway `beforeMigrate` 幂等预检修复 V13 |
 | `VectorStoreService.java` | **无需方言改造**；保留 pgvector SQL |
-| 新增桌面 DB 集成测试 | 重复执行干净初始化、V1~V14、pgvector 余弦检索、会话读写、重启复用数据目录与异常退出恢复 |
+| 新增桌面 DB 集成测试 | **未完成（PR-06）**：以真实启动冒烟与 schema 检查替代，干净初始化、V1~V15、pgvector 余弦检索、重启复用与异常恢复的自动化测试仍待补 |
 | Phase 3 安装包清单 | 计入各平台 PG + pgvector 运行时和第三方许可，复测安装后冷/热启动与内存 |
 
 ##### 实测边界
@@ -280,9 +280,9 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 | P1-02 | **已完成（PR-03）**：新增元信息接口 | 新增 `controller/MetaController.java`、`dto/MetaResponse.java`；改造 `SecurityConfig.java`、`application.yml` | 公开 `GET /api/meta` 返回模式、版本、认证模式、能力与下载声明 |
 | P1-03 | **已完成（PR-04）**：工具按能力注册 | `tool/ToolRegistry.java`、各 `*Tool.java` | 网页端不注册 `RunCommandTool`、`delete_file`、Git、LSP、MCP |
 | P1-04 | **已完成（PR-04）**：控制器按能力收敛 | `WorkspaceController.java`、`FileReviewController.java` 等 | 网页端工作区/审查接口返回 404 或能力关闭响应 |
-| P1-05 | 前端能力渲染 | 新增 `api/meta.ts`、`stores/meta.ts`；改造 `router/index.ts`、`layouts/AppLayout.vue`、`views/ChatView.vue` | 网页端隐藏工作区/终端/审查入口，桌面端显示 |
-| P1-06 | 网页端引导 | 新增 `views/DownloadView.vue`、下载入口组件 | 桌面功能入口处出现“下载桌面端” |
-| P1-07 | 网页端账号安全闭环 | `AuthController.java`、`UserService.java`、`LoginView.vue` | 注册验证码或邮箱验证、找回密码可用；开放注册不再可被无限滥用 |
+| P1-05 | **已完成（PR-05）**：前端能力渲染 | 新增 `api/meta.ts`、`stores/meta.ts`；改造 `router/index.ts`、`layouts/AppLayout.vue`、`views/ChatView.vue`、`components/WorkbenchDock.vue`、`views/SettingsView.vue` | 网页端隐藏工作区/终端/审查入口，桌面端显示 |
+| P1-06 | **已完成（PR-05）**：网页端引导 | 新增 `views/DownloadView.vue`、下载入口组件 | 桌面功能入口处出现“下载桌面端” |
+| P1-07 | **已完成（PR-12）**：网页端账号安全闭环 | 新增 `service/EmailCodeService.java`、`service/MailSender.java`、`config/MailConfig.java`、`dto/EmailCodeRequest.java`、`dto/ResetPasswordRequest.java`、`V15__add_user_email_unique_index.sql`；改造 `AuthController.java`、`UserService.java`、`LoginView.vue` | 注册需邮箱验证码、找回密码可用；发码限频（60 秒 / 每日 10 次）、错 5 次作废 |
 
 **PR-03 完成批注（2026-11-06，未提交）**：未启用 `desktop` profile 时默认声明 `CLOUD`，现有 dev/prod 行为不变；cloud 能力固定为 `CHAT`、`KNOWLEDGE`、`DOWNLOAD`，desktop 声明其余本地能力且不声明 `DOWNLOAD`。`/api/meta` 已加入匿名白名单，直接返回第 6.1 节契约；版本默认 `1.0.0`，桌面最新版本由 `DESKTOP_LATEST_VERSION` 注入，未配置时为 `null`。新增 `CapabilityServiceTest` 与 `MetaControllerTest` 共 5 项测试；全量回归 95 项，0 失败、0 错误、2 项环境相关测试跳过。
 
@@ -291,6 +291,14 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 **PR-04 完成批注（2026-11-06，未提交）**：`BaseTool` 新增所需能力声明，`ToolRegistry` 在内置与动态工具注册前统一过滤；6 个工作区文件工具声明 `LOCAL_WORKSPACE`，`RunCommandTool` 声明 `COMMAND_EXEC`。MCP 工具复用审批风险规则区分 `MCP_READ` / `MCP_WRITE`，仅注册成功时建立 fallback 映射，避免残留无效映射。新增 `@RequiresCapability` 与 `CapabilityGuardAspect`：工作区控制器按 `LOCAL_WORKSPACE` 收敛，文件审查和对话审批入口按 `APPROVAL` 收敛，MCP 状态与开关分别按读、写能力收敛；cloud 未启用能力统一经现有异常体系返回 HTTP 404，普通项目、对话、知识库接口未加本地能力门控。新增 10 项测试，定向回归共 15 项全部通过；全量回归 105 项，0 失败、0 错误、2 项环境相关测试跳过。
 
 **PR-04 本步边界**：当前没有独立 Git/LSP 内置工具，Git 命令仅随 `run_command` 的 `COMMAND_EXEC` 能力关闭；未提前实现 PR-05 前端隐藏、PR-06 内嵌数据库或 PR-07 本地认证。测试使用真实能力服务、AOP 代理与 standalone MockMvc 验证 cloud 拒绝、desktop 放行及业务服务零调用，不等同于完整 desktop 运行时启动验收。
+
+**PR-05 完成批注（2026-11-07，未提交）**：前端接入 `GET /api/meta`，新增 `api/meta.ts` 与 `stores/meta.ts`（幂等加载、8 秒超时、失败不隐藏入口），路由守卫统一等待元信息后按 `capability` 收敛入口，并新增公开的 `/download` 页（`DOWNLOAD` 能力缺失时重定向）。`AppLayout` 在无 `LOCAL_WORKSPACE` 时隐藏“文件”切换、新建工作区、工作台设置弹窗和工作区行，仅保留扁平会话列表；`ChatView` 隐藏文件变更按钮、待审查改动卡片与审批卡；`WorkbenchDock` 隐藏“变更”tab；`SettingsView` 隐藏 MCP tab 并跳过 MCP 状态请求。下载入口以主导航项形式按 `download.enabled` 渲染，页面展示最新版本来自 `/api/meta`，不虚构安装包地址，`/api/releases/latest` 仍属 Phase 3。
+
+**PR-05 验收边界**：`vue-tsc --noEmit` 与 Vite 生产构建通过；用静态预览 + 模拟 `/api/meta` 实测 `/download` 页渲染（标题、4 项能力说明、版本 3.1.0、登录入口），控制台无报错。未连接真实后端验证 cloud 登录后完整界面、desktop profile 下的能力回归，也未做浏览器 E2E；`/api/releases/latest` 与真实下载链接未实现。
+
+**PR-12 完成批注（2026-11-07，未提交）**：新增 `EmailCodeService`（6 位数字码 / 10 分钟有效 / 同邮箱同场景 60 秒冷却 / 每日 10 次上限 / 连续错 5 次作废 / 成功即消费），沿用 `LoginAttemptService` 的 Redis + 进程内降级写法；新增 `MailSender` 抽象与 `MailConfig`，配置 `spring.mail.host` 时走 SMTP，未配置时由 `app.mail.log-codes` 决定是否把验证码打到日志（dev 默认 true，prod 默认 false，避免“接口成功但用户收不到”的静默故障）。`POST /api/auth/email-code` 按 `REGISTER`/`RESET` 场景发码，`RESET` 下未注册邮箱仍返回成功且不投递，防账号枚举；`register` 强制邮箱 + 验证码，邮箱统一小写入库并查重；`POST /api/auth/reset-password` 校验 `RESET` 验证码后改密并 `revokeAll` 撤销全部会话。新增 `V15` 迁移为 `LOWER(email)` 建部分唯一索引。前端 `LoginView` 扩为登录 / 注册 / 找回密码三态，含 60 秒倒计时与发送按钮；`api/auth.ts`、`stores/auth.ts` 同步扩展。新增 `EmailCodeServiceTest` 6 项与 `AuthControllerTest` 6 项，定向测试全部通过。
+
+**PR-12 验收边界**：`mvn -q -DskipTests compile`、新增测试类、`vue-tsc --noEmit` 与 Vite 生产构建均通过。测试覆盖验证码发放限频/消费/作废与控制器编排（验证码错误拒绝建号、重置成功后撤销会话、未注册邮箱不泄露），Redis 路径用“调用即抛异常”的 mock 固定走降级分支，未连接真实 Redis/SMTP。未配置真实 SMTP 时的邮件投递、真实邮箱收信与浏览器端三态交互未做端到端验收；本步未引入图形验证码，开放注册的滥用防护依赖“邮箱验证码 + 发码限频”。
 
 **出口标准**：`cloud` 模式打开网页端只有对话 + 知识库 + 下载页；注册有验证码或邮箱验证、找回密码可用；`desktop` 模式功能不回归；前端只有一套构建产物。
 
@@ -302,16 +310,30 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 
 | ID | 任务 | 涉及文件 | 验收 |
 |---|---|---|---|
-| P2-01 | 新增桌面配置 | 新增 `application-desktop.yml` | 本地内嵌 DB、无 Redis、单用户、工作区可配置 |
-| P2-02 | 本地 DB 生命周期 | 新增 `service/desktop/DbLifecycleManager.java` | 按 Phase 0 结论实现：首次初始化、启动、健康检查、优雅关闭、崩溃恢复 |
-| P2-03 | 本地 token 认证 | 新增 `filter/LocalTokenFilter.java`；改造 `SecurityConfig.java` | 无 token 拒绝；token 存 OS 凭据库；浏览器开发模式有 dev token |
-| P2-04 | 排除 Redis 自动配置 | `application-desktop.yml`、`pom.xml` | 启动无 Redis 连接重试日志；限流/锁定走内存 |
-| P2-05 | 单用户初始化 | `AuthController.java`、`UserService.java` | 首次启动创建本地用户；注册接口在桌面模式关闭 |
+| P2-01 | **已完成（PR-06）**：新增桌面配置 | 新增 `application-desktop.yml` | 本地内嵌 DB、无 Redis、单用户、工作区可配置 |
+| P2-02 | **已完成（PR-06）**：本地 DB 生命周期 | 新增 `service/desktop/DbLifecycleManager.java` | 按 Phase 0 结论实现：首次初始化、启动、健康检查、优雅关闭、崩溃恢复 |
+| P2-03 | **已完成（PR-07）**：本地 token 认证 | 新增 `filter/LocalTokenFilter.java`、`service/desktop/LocalTokenService.java`；改造 `SecurityConfig.java` | 无 token 拒绝；token 落 `<data-dir>/local-token`；浏览器开发模式有 dev token |
+| P2-04 | **已完成（PR-06）**：排除 Redis 自动配置 | `application-desktop.yml`、`pom.xml` | 启动无 Redis 连接重试日志；限流/锁定走内存 |
+| P2-05 | **已完成（PR-07）**：单用户初始化 | 新增 `service/desktop/LocalUserService.java`；改造 `AuthController.java` | 首次启动创建本地用户；注册接口在桌面模式关闭 |
 | P2-06 | 开发脚本 | 根目录脚本或 `package.json` | `dev:desktop` 一条命令启动后端 + 前端，浏览器可用 |
 | P2-07 | 本地工作区安全 | `WorkspaceFileService.java`、`CommandService.java` | 路径、软链接、环境变量、超时、进程树终止均有测试 |
 | P2-08 | pgvector 随包验证 | 构建脚本、PG 运行时清单、桌面 DB 集成测试 | 每个目标 OS/arch 均验证扩展库存在、`CREATE EXTENSION vector` 成功、版本受控及 1024 维余弦检索；排除无关平台运行时 |
 
 **出口标准**：`dev:desktop` 启动后，在浏览器完成“打开本地项目 → 读文件 → 改文件 → 删除文件 → 跑命令 → 审批 → 撤回”；数据落在本地 DB；断网可用。
+
+**PR-06 完成批注（2026-11-07，未提交）**：完成 P2-01、P2-04 与 P2-02 的主体。新增 `application-desktop.yml`（排除 Boot 4 的 `DataRedisAutoConfiguration` 等三个 Redis 自动配置、Flyway 开启、`ddl-auto=validate`、数据目录与 PG 运行时可配）；新增 [DbLifecycleManager.java](../src/main/java/com/capsule/agentkey/service/desktop/DbLifecycleManager.java) 与 `DesktopDataSourceConfig`，实现数据目录创建、复用、空闲端口、启动、`SELECT 1` 健康检查、优雅关闭与 `postmaster.pid` 残留恢复；新增 [PendingFileChangePrecheckCallback.java](../src/main/java/com/capsule/agentkey/config/PendingFileChangePrecheckCallback.java)，在 `beforeMigrate` 按 V14 结构幂等预建 `pending_file_change`，解决原始 V13 在全新库对不存在表 ALTER 的缺陷，且不改已执行迁移。`LoginAttemptService`、`TokenSessionService`、`EmailCodeService`、`RateLimitInterceptor` 的 Redis 依赖改为 `@Nullable` 可选注入，无 Redis 时走既有内存降级。`pom.xml` 引入 zonky `embedded-postgres` 2.2.2 与 Windows x64 二进制，并排除 darwin/linux/alpine 运行时。
+
+**桌面启动冒烟（Windows x64，真实执行）**：以 `--spring-boot.profiles=desktop` 启动，20.7 秒完成；Flyway 在全新数据目录应用 15 个迁移，`pg_extension` 中存在 `vector 0.8.1`，`pending_file_change` 含 `turn_id` 等 16 列；`/api/meta` 返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER` 与无 `DOWNLOAD` 的能力集；`/actuator/health` 为 `UP`；日志中无任何 Redis 连接/重试记录。另人为强杀进程后重启，日志出现「检测到上次异常退出残留的 postmaster.pid，已清理」，重启复用原数据目录成功；正常停止后 `postmaster.pid` 被清理。`mvn test` 为 **140 项，0 失败、0 错误、2 项环境相关跳过**（新增 `DbLifecycleManagerTest` 5 项、`NoRedisDegradationTest` 4 项）。
+
+**PR-06 顺带修复的两个 Boot 4 回归**：① `pom.xml` 只引 `flyway-core` 时 Boot 4 的 Flyway 自动配置模块不加载，任何 profile 启动都会跳过迁移并直接被 Hibernate `validate` 报 missing table；已改用 `spring-boot-starter-flyway`。② Boot 4 的 JSON 自动配置默认只提供 Jackson 3 的 `ObjectMapper`，而业务代码、jjwt 0.11 与 MCP SDK 仍用 Jackson 2，`ChatService` 注入失败；已引入 `spring-boot-jackson2`。两者均为 P0-06 升级后未做过完整应用启动验证所遗留，本次由桌面冒烟暴露并修复。另将 `MailConfig` 的 Bean 名改为 `agentMailSender`，避免与 Boot 在配置了 `spring.mail.host` 时注册的同名 `mailSender` 冲突。
+
+**PR-06 验收边界**：pgvector 运行时压缩包仍未入库，本次使用 PR-02 spike 产物经 `DESKTOP_PG_RUNTIME` 指定验证；单一平台（Windows x64）通过，其他 OS/arch 与 `P2-08` 的随包构建未做。P2-03 本地 token、P2-05 单用户初始化、P2-06 一键启动脚本、P2-07 工作区加固均未实施，因此桌面端目前仍需环境变量提供 `JWT_SECRET`/`AES_MASTER_KEY`，注册入口未关闭。桌面数据库集成测试（1024 维向量写入与余弦检索）尚未自动化，由本次启动冒烟与 schema 检查替代。未提交代码。本轮同时按用户决定继续跳过 SMTP 真实投递验证，PR-12 的验收边界不变。
+
+**PR-07 完成批注（2026-11-08，未提交）**：完成 P2-03 本地令牌与 P2-05 单用户初始化。新增 [LocalTokenService.java](../src/main/java/com/capsule/agentkey/service/desktop/LocalTokenService.java)：首次启动生成 32 字节随机令牌并写入 `<data-dir>/local-token`（POSIX 收紧为 600，Windows 依赖用户目录默认 ACL），重复启动复用；支持 `DESKTOP_DEV_TOKEN` 供浏览器开发模式配对；校验使用 `MessageDigest.isEqual`。新增 [LocalTokenFilter.java](../src/main/java/com/capsule/agentkey/filter/LocalTokenFilter.java)：兼容 `Authorization: Bearer` 与 `X-Local-Token`，无令牌放行由安全链返回 401，令牌错误立即 401，通过后把本地用户 id 写入 `SecurityContext`（Controller 无需改动）。`JwtAuthenticationFilter` 加 `@Profile("!desktop")`，`SecurityConfig` 改用 `ObjectProvider` 按 profile 装配唯一认证过滤器，避免二者同时生效。
+
+新增 [LocalUserService.java](../src/main/java/com/capsule/agentkey/service/desktop/LocalUserService.java)：`@PostConstruct` 确保本地用户存在（默认用户名 `local`，随机密码哈希仅满足表约束、永不用于登录），并缓存 id。`AuthController` 在 `DESKTOP` 模式下关闭注册、邮箱验证码与找回密码三个入口，返回 404 以免暴露桌面端账号能力；登录/改密接口保留但无可用密码，桌面端正常路径只走本地令牌。新增 [DesktopTokenController.java](../src/main/java/com/capsule/agentkey/controller/DesktopTokenController.java)（`GET /api/desktop/token`）：仅回环地址、`Origin` 必须在 CORS 白名单内，且可用 `DESKTOP_EXPOSE_TOKEN_ENDPOINT=false` 关闭；前端在桌面模式下由路由守卫自动换取令牌（[desktop.ts](../frontend/src/api/desktop.ts)、[auth.ts](../frontend/src/stores/auth.ts)、[router/index.ts](../frontend/src/router/index.ts)）。`SecretStartupValidator` 在 desktop profile 下不再要求 `JWT_SECRET`，仍强制 `AES_MASTER_KEY`。
+
+**PR-07 验收边界**：`mvn test` 为 **152 项，0 失败、0 错误、2 项环境相关跳过**（新增 `LocalTokenServiceTest` 4 项、`LocalTokenFilterTest` 4 项、`LocalUserServiceTest` 2 项、`SecretStartupValidatorTest` 桌面分支 1 项、`AuthControllerTest` 桌面关闭注册 1 项）；`vue-tsc --noEmit` 与 Vite 生产构建通过。计划中的「token 存 OS 凭据库」改为「用户数据目录文件 + 权限收紧」：Windows 凭据管理器需要额外原生依赖，当前文件方案在单机场景下等价，差异记录于此。未做真实桌面启动冒烟——PR-06 使用的 pgvector 运行时压缩包未入库，本次环境已无该文件，V3 迁移无法完成；P2-08 随包运行时落地后再补端到端验收。桌面端登录/改密接口未显式关闭，但本地用户密码为一次性随机值，实际不可用。
 
 ---
 
@@ -578,14 +600,14 @@ P0 基线 / DB 选型 spike / 能力声明（可并行）
 | PR-02 | **已完成（未提交）**：双路线实测 + 内嵌 PG 选型 + 实测报告 + PR-06 文件清单（见 4.1） | 无 |
 | PR-03 | **已完成（未提交）**：`DeploymentMode` + `CapabilityService` + `/api/meta`（完成批注见 Phase 1） | 无 |
 | PR-04 | **已完成（未提交）**：`ToolRegistry` 能力门控 + 控制器按能力收敛（完成批注见 Phase 1） | PR-03 |
-| PR-05 | 前端 `meta` store + 能力路由 + 下载入口 | PR-03 |
-| PR-06 | `application-desktop.yml` + 本地 DB 生命周期 | PR-02、PR-04 |
-| PR-07 | 本地 token 认证 + 桌面单用户初始化 | PR-06 |
+| PR-05 | **已完成（未提交）**：前端 `meta` store + 能力路由 + 下载入口（完成批注见 Phase 1） | PR-03 |
+| PR-06 | **已完成（未提交，P2-01/02/04）**：`application-desktop.yml` + 本地 DB 生命周期 + 排除 Redis（完成批注见 Phase 2） | PR-02、PR-04 |
+| PR-07 | **已完成（未提交，P2-03/05）**：本地 token 认证 + 桌面单用户初始化（完成批注见 Phase 2） | PR-06 |
 | PR-08 | 桌面壳骨架 + 侧车启动 + 健康检查 | PR-06 |
 | PR-09 | 安装包 + 更新 + 三平台冒烟 | PR-08 |
 | PR-10 | 运行状态机 + 审批持久化 + SSE 续传 | PR-04 |
 | PR-11 | 评测集 + CI 门禁 | PR-04 |
-| PR-12 | 网页端账号安全闭环（验证码/邮箱验证、找回密码） | PR-03 |
+| PR-12 | **已完成（未提交）**：网页端账号安全闭环（邮箱验证码、找回密码）（完成批注见 Phase 1） | PR-03 |
 | PR-13 | 发布合规（隐私政策、服务条款、遥测开关、第三方许可） | PR-09 |
 
 ---

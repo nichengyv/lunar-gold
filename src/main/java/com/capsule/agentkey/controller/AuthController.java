@@ -1,10 +1,15 @@
 package com.capsule.agentkey.controller;
 
+import com.capsule.agentkey.config.DeploymentMode;
 import com.capsule.agentkey.dto.ApiResponse;
+import com.capsule.agentkey.dto.EmailCodeRequest;
 import com.capsule.agentkey.dto.LoginRequest;
 import com.capsule.agentkey.dto.RegisterRequest;
+import com.capsule.agentkey.dto.ResetPasswordRequest;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.service.CapabilityService;
+import com.capsule.agentkey.service.EmailCodeService;
 import com.capsule.agentkey.service.LoginAttemptService;
 import com.capsule.agentkey.service.UserService;
 import com.capsule.agentkey.util.JwtUtil;
@@ -16,6 +21,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -28,15 +34,21 @@ public class AuthController {
     private final RsaUtil rsaUtil;
     private final LoginAttemptService loginAttemptService;
     private final com.capsule.agentkey.service.TokenSessionService tokenSessionService;
+    private final EmailCodeService emailCodeService;
+    private final CapabilityService capabilityService;
 
     public AuthController(UserService userService, JwtUtil jwtUtil, RsaUtil rsaUtil,
                           LoginAttemptService loginAttemptService,
-                          com.capsule.agentkey.service.TokenSessionService tokenSessionService) {
+                          com.capsule.agentkey.service.TokenSessionService tokenSessionService,
+                          EmailCodeService emailCodeService,
+                          CapabilityService capabilityService) {
         this.userService = userService;
         this.jwtUtil = jwtUtil;
         this.rsaUtil = rsaUtil;
         this.loginAttemptService = loginAttemptService;
         this.tokenSessionService = tokenSessionService;
+        this.emailCodeService = emailCodeService;
+        this.capabilityService = capabilityService;
     }
 
     //接口1：获取公钥
@@ -48,11 +60,62 @@ public class AuthController {
     //接口2：注册
     @PostMapping("/register")
     public ApiResponse<Void> register(@Valid @RequestBody RegisterRequest req) throws Exception {
+        requireCloudAccount();
+        //先校验邮箱验证码：未通过则根本不进入建号流程，避免开放注册被机器人刷量
+        String email = normalizeEmail(req.getEmail());
+        emailCodeService.verify(email, EmailCodeService.Scene.REGISTER, req.getEmailCode());
         //解密
         String realPassword = decryptPassword(req.getEncryptedPassword(), req.getUsername());
-        userService.register(req.getUsername(), realPassword, req.getEmail());
+        userService.register(req.getUsername(), realPassword, email);
         return ApiResponse.success(null);
     }
+
+    /**
+     * 发送邮箱验证码（公开接口）。
+     *
+     * 防账号枚举：RESET 场景下邮箱未注册也返回成功，只是不真正投递；
+     * 限频由 EmailCodeService 统一处理，避免被用来轰炸任意邮箱。
+     */
+    @PostMapping("/email-code")
+    public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest req) {
+        requireCloudAccount();
+        String email = normalizeEmail(req.getEmail());
+        EmailCodeService.Scene scene = parseScene(req.getScene());
+        boolean deliver;
+        if (scene == EmailCodeService.Scene.REGISTER) {
+            if (userService.findByEmail(email).isPresent()) {
+                throw new BusinessException("该邮箱已被注册");
+            }
+            deliver = true;
+        } else {
+            // 不泄露邮箱是否存在：不存在时也走完限频和生成流程，仅不投递
+            deliver = userService.findByEmail(email).isPresent();
+        }
+        emailCodeService.sendCode(email, scene, deliver);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 邮箱验证码找回密码（公开接口）。
+     * 邮箱不存在时仍返回成功，避免被用来探测注册账号；改密成功后撤销该用户全部 token。
+     */
+    @PostMapping("/reset-password")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest req) throws Exception {
+        requireCloudAccount();
+        String email = normalizeEmail(req.getEmail());
+        var userOpt = userService.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            log.info("找回密码请求：邮箱未注册，按成功处理");
+            return ApiResponse.success(null);
+        }
+        emailCodeService.verify(email, EmailCodeService.Scene.RESET, req.getEmailCode());
+        String newPassword = decryptPassword(req.getEncryptedPassword(), "email=" + email);
+        userService.resetPassword(userOpt.get().getId(), newPassword);
+        //改密即视为安全风险事件：撤销该用户所有会话，强制全端重新登录
+        tokenSessionService.revokeAll(userOpt.get().getId());
+        return ApiResponse.success(null);
+    }
+
     //登录
     @PostMapping("/login")
     //RequestBody注解，自动读取body，根据字段名，在自动把它转换为LoginRequest对象
@@ -145,6 +208,29 @@ public class AuthController {
         } catch (Exception e) {
             log.warn("密码密文解密失败 [{}]: {}", accountLabel, e.getMessage());
             throw new BusinessException(ErrorCode.PARAM_INVALID, "密码格式不合法，请刷新页面后重试");
+        }
+    }
+
+    /** 邮箱规范化：统一小写去空格，保证注册查重与验证码键一致 */
+    private String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private EmailCodeService.Scene parseScene(String scene) {
+        try {
+            return EmailCodeService.Scene.valueOf(scene.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的验证码场景");
+        }
+    }
+
+    /**
+     * 桌面端是本地单用户（authMode=LOCAL_SINGLE_USER）：没有注册、也没有邮件通道，
+     * 这几个公开账号入口必须关闭，否则会出现「建了第二个账号但永远登不进去」的死路。
+     */
+    private void requireCloudAccount() {
+        if (capabilityService.mode() == DeploymentMode.DESKTOP) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "桌面端为单用户模式，不提供注册与邮箱账号功能");
         }
     }
 

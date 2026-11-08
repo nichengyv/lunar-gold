@@ -249,12 +249,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useChatStore } from '../stores/chat';
 import { useThemeStore } from '../stores/theme';
 import { useAuthStore } from '../stores/auth';
+import { useMetaStore } from '../stores/meta';
 import * as authApi from '../api/auth';
 import * as settingsApi from '../api/settings';
 import * as mcpApi from '../api/mcp';
@@ -269,10 +270,11 @@ const router = useRouter();
 const chat = useChatStore();
 const theme = useThemeStore();
 const auth = useAuthStore();
+const meta = useMetaStore();
 
 const version = '1.0.0';
 
-const tabs = [
+const BASE_TABS = [
   { id: 'chat', label: '对话默认', icon: 'cpu' },
   { id: 'models', label: '模型服务', icon: 'key' },
   { id: 'rules', label: 'Agent 指令', icon: 'file-text' },
@@ -281,7 +283,10 @@ const tabs = [
   { id: 'account', label: '账号安全', icon: 'user' },
 ] as const;
 
-type TabId = typeof tabs[number]['id'];
+/** MCP 只在桌面端注册，网页端不展示该 tab */
+const tabs = computed(() => BASE_TABS.filter((tab) => tab.id !== 'mcp' || meta.has('MCP_READ')));
+
+type TabId = typeof BASE_TABS[number]['id'];
 const activeTab = ref<TabId>('chat');
 
 // 对话默认 —— 本地副本避免写一半错乱
@@ -365,7 +370,7 @@ const mcpLoading = ref(false);
 const health = ref<HealthInfo | null>(null);
 
 onMounted(async () => {
-  loadMcp();
+  if (meta.has('MCP_READ')) loadMcp();
   loadHealth();
   await loadAccount();
   loadDefaults();

@@ -2,6 +2,7 @@ package com.capsule.agentkey.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -31,13 +32,17 @@ public class TokenSessionService {
 
     private final StringRedisTemplate redis;
 
-    public TokenSessionService(StringRedisTemplate redis) {
+    /**
+     * @param redis 桌面端排除了 Redis 自动配置，此时注入 null：登记/撤销静默跳过，校验放行
+     */
+    public TokenSessionService(@Nullable StringRedisTemplate redis) {
         this.redis = redis;
     }
 
     /** 登录成功后登记会话：jti → userId，同时挂到用户的会话集合上 */
     public void register(Long userId, String jti, long ttlMillis) {
         if (userId == null || jti == null) return;
+        if (redis == null) return;
         try {
             redis.opsForValue().set(SESSION_KEY_PREFIX + jti, String.valueOf(userId),
                     Duration.ofMillis(ttlMillis));
@@ -50,6 +55,8 @@ public class TokenSessionService {
     /** 过滤器校验：jti 仍在白名单则有效。Redis 故障时放行（可用性优先）。 */
     public boolean isActive(String jti) {
         if (jti == null) return false;
+        // 无 Redis 时没有白名单可查，按「可用性优先」放行
+        if (redis == null) return true;
         try {
             return Boolean.TRUE.equals(redis.hasKey(SESSION_KEY_PREFIX + jti));
         } catch (Exception e) {
@@ -61,6 +68,7 @@ public class TokenSessionService {
     /** 登出：仅撤销当前 token */
     public void revoke(Long userId, String jti) {
         if (jti == null) return;
+        if (redis == null) return;
         try {
             redis.delete(SESSION_KEY_PREFIX + jti);
             if (userId != null) {
@@ -74,6 +82,7 @@ public class TokenSessionService {
     /** 改密码 / 账号被封 / 手机丢失：撤销该用户所有 token */
     public void revokeAll(Long userId) {
         if (userId == null) return;
+        if (redis == null) return;
         try {
             String setKey = userSessionsKey(userId);
             Set<String> jtis = redis.opsForSet().members(setKey);

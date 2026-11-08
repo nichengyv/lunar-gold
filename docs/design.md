@@ -53,12 +53,17 @@
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  外部依赖                                                        │
-│  ├─ PostgreSQL（dev JPA update；prod Flyway + validate）       │
+│  ├─ PostgreSQL（dev JPA update；prod/desktop Flyway + validate）│
+│  │    desktop 由 DbLifecycleManager 拉起内嵌 PG + pgvector      │
 │  ├─ Spring AI ChatModel（多 provider 兼容，当前 deepseek 默认） │
 │  ├─ 固定版本 MCP filesystem（stdio，默认关闭）                 │
 │  └─ Tavily（web_search，可选）                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**运行模式（PR-06）**：`cloud`/`dev` 使用外部 PostgreSQL，Redis 只在云端提供限流、登录锁定、JWT 撤销与验证码存储；`desktop` 由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据目录默认 `~/.agentkey/desktop/db`（`DESKTOP_DATA_DIR` 可改），排除 Redis 自动配置后上述能力全部走进程内存降级，`/api/meta` 返回 `DESKTOP` 能力集。
+
+**本地身份（PR-07）**：`desktop` 下由 `LocalUserService` 首次启动创建单用户（默认 `local`），`LocalTokenService` 在 `<data-dir>/local-token` 生成并持久化随机令牌，`LocalTokenFilter` 校验通过后把用户 id 写入 `SecurityContext`；`JwtAuthenticationFilter` 标注 `@Profile("!desktop")` 与前者互斥，`SecurityConfig` 用 `ObjectProvider` 只装配当前 profile 的认证过滤器。因此桌面端不需要 `JWT_SECRET`，注册、邮箱验证码与找回密码入口在 `DESKTOP` 模式下直接返回 404。浏览器开发模式可由路由守卫调用 `GET /api/desktop/token` 自动换取令牌（仅回环地址 + `Origin` 白名单，可用 `DESKTOP_EXPOSE_TOKEN_ENDPOINT=false` 关闭）。
 
 ---
 
@@ -204,7 +209,7 @@ public class McpToolBridge implements ApplicationRunner {
 
 ## 4. 数据库主要表
 
-Flyway 当前到 V14。V13 为 `pending_file_change` 增加 `turn_id`，V14 补建该表；但全新库按版本顺序执行时 V13 会先于建表语句执行 ALTER，该缺陷尚未修复，由 PR-06 通过前置幂等预检或全新安装基线处理。dev 关闭 Flyway、使用 `ddl-auto=update`，prod 启用 Flyway 并使用 `validate`。
+Flyway 当前到 V15（V15 为邮箱唯一索引）。V13 为 `pending_file_change` 增加 `turn_id`，V14 补建该表，原始顺序下全新库会在 V13 失败；PR-06 已用 Flyway `beforeMigrate` 回调做幂等预检（表不存在则按 V14 结构预建），V13/V14 在存量库与全新库上都变成空操作，未修改已执行迁移。dev 关闭 Flyway、使用 `ddl-auto=update`，prod 与 desktop 启用 Flyway 并使用 `validate`。注意 Boot 4 下必须依赖 `spring-boot-starter-flyway`，只引 `flyway-core` 时自动配置不会加载。
 
 | 表 | 关键列 | 用途 |
 |---|---|---|
@@ -224,6 +229,7 @@ Flyway 当前到 V14。V13 为 `pending_file_change` 增加 `turn_id`，V14 补�
 |---|---|---|
 | `chat` | sessions[], currentSessionId, dockTab('changes'\|'docs'\|'file'\|'trace'\|'plan'\|'metrics'), pendingChanges[], pendingApprovals[], model, permission, reasoningLevel, isProcessing | sendStream(), openFile(), openDock(), fetchPendingChanges(), revertChange(), acceptAll(), dismissApproval() |
 | `project` | projects[], currentProjectId, currentRootPath | load(), switchProject(), createProject() |
+| `meta` | info(mode / version / authMode / capabilities / download), loaded | load()（幂等，8s 超时）, has(capability) — 前端只按能力渲染入口，不判断部署模式 |
 | `theme` | isDark | toggle() |
 
 ### 审批显示逻辑（已修复）

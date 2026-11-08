@@ -1,0 +1,60 @@
+# 桌面端（本地单机）运行配置：以 --spring.profiles.active=desktop 激活。
+# 与 cloud/dev 的差异：
+#   1. 数据库由进程内嵌 PostgreSQL（含 pgvector）提供，数据落在用户数据目录；
+#   2. 不连接 Redis，限流 / 登录锁定 / 验证码走代码里的进程内降级；
+#   3. 邮件不投递；注册/验证码/找回密码入口在 desktop 模式下直接关闭（P2-05）。
+spring:
+  # 【P2-04】排除 Redis 自动配置：桌面端没有 Redis，排除后不会再有连接重试与 2 秒超时日志。
+  # 注意类名来自 Boot 4 的 spring-boot-data-redis 模块，Boot 3 的
+  # org.springframework.boot.autoconfigure.data.redis.* 在 Boot 4 已不存在。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+      - org.springframework.boot.data.redis.autoconfigure.DataRedisRepositoriesAutoConfiguration
+  # 连接由 DesktopDataSourceConfig 依据 DbLifecycleManager 分配的端口创建，
+  # 这里不写 url：端口在启动时才确定，写死 localhost:5433 会连到云端库或直接连接失败。
+  jpa:
+    hibernate:
+      # 与 prod 一致：用实体校验 schema，避免桌面端静默改表结构
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  # 这里不写 spring.mail.host：Boot 只要看到该属性存在就会创建 JavaMailSender，
+  # 进而注册 mail 健康检查，桌面端没配 SMTP 时 /actuator/health 会一直 503。
+  # 不配置时 MailConfig 自动装配 LogMailSender。
+
+app:
+  mail:
+    # 桌面端不存在邮箱账号流程（注册/找回密码已关闭），无需把验证码写入日志
+    log-codes: false
+  desktop:
+    # 本地数据根目录：数据库在 <data-dir>/db，删除该目录等于重置桌面端数据
+    data-dir: ${DESKTOP_DATA_DIR:${user.home}/.agentkey/desktop}
+    # 含 pgvector 的 PostgreSQL 运行时压缩包（P2-08 按平台产出）；
+    # 留空时用依赖内置二进制，pgvector 扩展可能不可用，V3 迁移会报错
+    pg-runtime: ${DESKTOP_PG_RUNTIME:}
+    # 0 = 每次启动自动挑选空闲端口；固定端口便于反复调试时接外部工具
+    db-port: ${DESKTOP_DB_PORT:0}
+    # 【P2-05】本地单用户：首次启动自动创建，桌面端不开放注册
+    local-username: ${DESKTOP_LOCAL_USERNAME:local}
+    # 【P2-03】本地令牌：首次启动生成到 <data-dir>/local-token，之后长期复用
+    # 固定开发令牌便于浏览器开发模式直接配对，留空则只用随机令牌
+    dev-token: ${DESKTOP_DEV_TOKEN:}
+    # 是否在启动日志打印本地令牌（仅本机调试；正式发布可置 false）
+    log-token: ${DESKTOP_LOG_TOKEN:true}
+    # 是否允许 GET /api/desktop/token 引导接口（仅回环地址 + 来源白名单）；
+    # 桌面壳会自己读令牌文件，打包发布时应置 false
+    expose-token-endpoint: ${DESKTOP_EXPOSE_TOKEN_ENDPOINT:true}
+
+server:
+  port: ${DESKTOP_SERVER_PORT:8080}
+
+management:
+  health:
+    # 基础配置里始终存在 spring.mail.host（默认空串），Boot 会据此创建 JavaMailSender 与 mail 健康检查；
+    # 桌面端不发邮件，这个检查必然 DOWN 并把 /actuator/health 拉成 503，故单独关闭
+    mail:
+      enabled: false

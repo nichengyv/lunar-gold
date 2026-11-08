@@ -2,6 +2,8 @@ package com.capsule.agentkey.config;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -14,21 +16,28 @@ public class SecretStartupValidator {
 
     private final String jwtSecret;
     private final String aesMasterKey;
+    private final Environment environment;
 
     public SecretStartupValidator(@Value("${app.jwt.secret:}") String jwtSecret,
-                                  @Value("${app.crypto.master-key:}") String aesMasterKey) {
+                                  @Value("${app.crypto.master-key:}") String aesMasterKey,
+                                  Environment environment) {
         this.jwtSecret = jwtSecret;
         this.aesMasterKey = aesMasterKey;
+        this.environment = environment;
     }
 
     @PostConstruct
     void validate() {
-        if (!StringUtils.hasText(jwtSecret)) {
-            throw new IllegalStateException(
-                    "JWT_SECRET 未配置。请生成至少 32 字节的随机密钥，例如：openssl rand -base64 48");
-        }
-        if (jwtSecret.getBytes(StandardCharsets.UTF_8).length < 32) {
-            throw new IllegalStateException("JWT_SECRET 强度不足：UTF-8 编码后至少需要 32 字节");
+        // 桌面端用本地令牌替代 JWT（LocalTokenFilter），JwtUtil 不参与认证；
+        // 仍要求 AES 主密钥，因为用户保存的模型 API Key 需要落盘加密。
+        if (!environment.acceptsProfiles(Profiles.of("desktop"))) {
+            if (!StringUtils.hasText(jwtSecret)) {
+                throw new IllegalStateException(
+                        "JWT_SECRET 未配置。请生成至少 32 字节的随机密钥，例如：openssl rand -base64 48");
+            }
+            if (jwtSecret.getBytes(StandardCharsets.UTF_8).length < 32) {
+                throw new IllegalStateException("JWT_SECRET 强度不足：UTF-8 编码后至少需要 32 字节");
+            }
         }
 
         if (!StringUtils.hasText(aesMasterKey)) {

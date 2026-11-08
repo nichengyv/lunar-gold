@@ -83,6 +83,27 @@ spring:
                 # 真正的可访问范围由会话开始时 McpToolBridge.bindWorkspacePath() 通过 MCP Roots 动态追加，
                 # 这样每个项目的 workspacePath 自动进白名单，用户不用手动改任何配置
                 - ${MCP_FS_TMPDIR:${java.io.tmpdir}}
+  # 邮件（注册验证码 / 找回密码）。MAIL_HOST 为空时 MailConfig 会降级为日志模式，
+  # 生产必须配置真实 SMTP，否则发送验证码会返回「邮件服务未配置」
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          # 465 端口走 SMTPS；改用 587 时把 MAIL_SMTP_SSL 设为 false、MAIL_SMTP_STARTTLS 设为 true
+          ssl:
+            enabled: ${MAIL_SMTP_SSL:true}
+          starttls:
+            enabled: ${MAIL_SMTP_STARTTLS:false}
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   servlet:
     multipart:
       max-file-size: 50MB      # 单个文件最大 50MB
@@ -190,6 +211,10 @@ workspace:
 
 app:
   version: ${APP_VERSION:1.0.0}
+  mail:
+    # 未配置 SMTP 时是否把验证码打到日志。仅开发环境可开，生产保持 false：
+    # 否则会出现「接口成功、用户却收不到邮件」的静默故障
+    log-codes: ${MAIL_LOG_CODES:false}
   download:
     # 发布桌面端后由发布环境注入；未配置时仅声明下载能力，不虚构版本号
     latest-version: ${DESKTOP_LATEST_VERSION:}

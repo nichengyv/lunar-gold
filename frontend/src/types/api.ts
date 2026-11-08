@@ -14,6 +14,34 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
+/** 部署模式：与后端 DeploymentMode 一致 */
+export type DeploymentMode = 'CLOUD' | 'DESKTOP';
+
+/** 能力声明：与后端 Capability 一致，前端只按能力渲染，不判断模式 */
+export type Capability =
+  | 'CHAT'
+  | 'KNOWLEDGE'
+  | 'LOCAL_WORKSPACE'
+  | 'COMMAND_EXEC'
+  | 'GIT'
+  | 'MCP_READ'
+  | 'MCP_WRITE'
+  | 'LSP'
+  | 'APPROVAL'
+  | 'DOWNLOAD';
+
+/** GET /api/meta 的公开契约（裸对象，不套 ApiResponse 信封） */
+export interface MetaInfo {
+  mode: DeploymentMode;
+  version: string;
+  authMode: 'MULTI_USER' | 'LOCAL_SINGLE_USER';
+  capabilities: Capability[];
+  download: {
+    enabled: boolean;
+    latestVersion: string | null;
+  };
+}
+
 export interface SessionInfo {
   id: number;
   title?: string;

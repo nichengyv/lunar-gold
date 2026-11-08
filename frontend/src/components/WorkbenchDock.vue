@@ -10,7 +10,7 @@
           资料
           <span v-if="attachments.length" class="wb-tab-count">{{ attachments.length }}</span>
         </button>
-        <button class="wb-tab" :class="{ active: chat.dockTab === 'changes' }" @click="select('changes')">
+        <button v-if="hasLocalWorkspace" class="wb-tab" :class="{ active: chat.dockTab === 'changes' }" @click="select('changes')">
           变更
           <span v-if="changes.length" class="wb-tab-count">{{ changes.length }}</span>
         </button>
@@ -439,6 +439,7 @@
 import { computed, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 import { useChatStore } from '../stores/chat';
+import { useMetaStore } from '../stores/meta';
 import * as agentApi from '../api/agent';
 import * as mcpApi from '../api/mcp';
 import type { McpStatusResponse } from '../api/mcp';
@@ -459,6 +460,9 @@ defineEmits<{
 }>();
 
 const chat = useChatStore();
+const meta = useMetaStore();
+/** 网页端没有本地文件改动，工作台不展示「变更」页 */
+const hasLocalWorkspace = computed(() => meta.has('LOCAL_WORKSPACE'));
 
 // ——— 第五十四批：追踪面板状态 ———
 const traceLoading = ref(false);

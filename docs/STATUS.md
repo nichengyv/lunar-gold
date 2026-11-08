@@ -1,7 +1,7 @@
 # AgentKey Pro · 项目状态速查
 
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04。
+> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07。
 
 ---
 
@@ -33,12 +33,13 @@
 
 | 路由 | 组件 | 说明 |
 |---|---|---|
-| `/login` | `LoginView` | RSA 加密密码、JWT |
+| `/login` | `LoginView` | RSA 加密密码、JWT；桌面端由路由守卫自动换取本地令牌，不走登录页 |
 | `/chat` | `ChatView` | SSE 流式、计划条、审批卡、工作台（变更/资料/文件/追踪/计划/**监控**）、@引用、斜杠命令、草稿持久化 |
 | `/knowledge` | `KnowledgeView` | 资料上传 / 重试 / 删除 |
 | `/settings` | `SettingsView` | 6 tab：对话默认 / 模型服务 / Agent 指令 / MCP 工具 / 外观 / 账号安全 |
+| `/download` | `DownloadView` | 公开页：桌面端能力介绍与最新版本，`DOWNLOAD` 能力缺失时重定向 |
 
-Pinia stores 4 个：`auth`、`chat`（最大，含 sessions/messages/pendingChanges/pendingApprovals/drafts/openFiles）、`project`、`theme`。
+Pinia stores 5 个：`auth`、`chat`（最大，含 sessions/messages/pendingChanges/pendingApprovals/drafts/openFiles）、`project`、`meta`（部署能力，驱动入口显隐）、`theme`。
 
 ### SSE 事件（13 种）
 
@@ -46,7 +47,7 @@ Pinia stores 4 个：`auth`、`chat`（最大，含 sessions/messages/pendingCha
 
 ### 数据库（PostgreSQL，dev `ddl-auto=update`）
 
-业务表 11 张 + `vector_record`（pgvector）。Flyway 到 V14；V14 补建 `pending_file_change`，但 V13 仍先于 V14 执行 ALTER，全新库顺序缺陷留给 PR-06 修复。
+业务表 11 张 + `vector_record`（pgvector）。Flyway 到 V15（V15 为邮箱唯一索引）；V13 先于 V14 对 `pending_file_change` 执行 ALTER 的全新库顺序缺陷，已由 PR-06 的 Flyway `beforeMigrate` 幂等预检解决（预建表，V13/V14 变为空操作，不改已执行迁移）。
 
 ---
 
@@ -89,7 +90,7 @@ node node_modules/vue-tsc/bin/vue-tsc.js --noEmit     # 类型检查
 - **Batch D**（批 71~74）：D1 范围约束 / D2 模型 fallback / D3 可观测面板 / D4 diff 打磨
 - **Batch E**（批 75）：权限三档重定义（手动审批 / 自动审批 / 完全权限）+ 审批卡可读化（不再展示入参 JSON）
 - **Batch F**（批 76）：自动审批只拦破坏性命令（`CommandRisk` + `DESTRUCTIVE` 风险）+ 内置 `delete_file`（沙箱/审查流/撤回）+ 计划卡串台与流式省略号修复
-- **双端改造**：PR-01 安全红线、PR-03 运行模式与 `/api/meta`、PR-04 工具注册和控制器能力门控已完成；PR-05/06/07 尚未实施
+- **双端改造**：PR-01 安全红线、PR-03 运行模式与 `/api/meta`、PR-04 工具注册和控制器能力门控、PR-05 前端能力渲染与下载页、PR-06 desktop 运行时（内嵌 PG + pgvector、无 Redis、`DbLifecycleManager`）、PR-07 桌面本地令牌 + 单用户初始化、PR-12 网页端账号安全闭环（邮箱验证码 + 找回密码）已完成
 
 ---
 
@@ -110,8 +111,8 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | 设置中心产品化 | 🟡 | 默认值持久化、6 tab 完善 |
 | 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
 | 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
-| 测试覆盖 | ⚠️ | 当前 119 项回归，0 失败、0 错误、2 项环境相关测试跳过；完整 desktop 启动与 SSE 端到端仍需专项验收 |
-| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷待 PR-06 修复；desktop 内嵌 DB 与本地认证尚未实施 |
+| 测试覆盖 | ⚠️ | 当前 152 项回归，0 失败、0 错误、2 项环境相关测试跳过；PR-07 新增本地令牌/单用户初始化 12 项；desktop profile 已在 Windows x64 完成启动冒烟（内嵌 PG + pgvector、`/api/meta`、`/actuator/health`），SSE 端到端与桌面 DB 向量检索自动化仍待补 |
+| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB 与本地令牌认证、单用户初始化已可用；仍缺桌面壳、pgvector 运行时随包与桌面端端到端冒烟 |
 
 ### Level 5 ⏳ 尚未实施
 桌面外壳与分发见 `UPDATE_PLAN.md` Phase 3；当前仍以浏览器作为 desktop 开发环境。
@@ -127,7 +128,6 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | scope 拦截只覆盖文件类工具 | run_command 有自己的沙箱 | 设计如此，不在此处拦截 |
 | 撤回本轮只回滚 PENDING | 已 accept 或编辑器保存过的不回滚 | 文档说明 |
 | MCP 熔断冷却 5 分钟硬编码 | 期间不降级到内置等价工具 | 体验差，需补 |
-| V13 先于 V14 执行 ALTER | prod 全新库可能在 V13 因表不存在而失败 | PR-06 增加前置幂等预检或全新安装基线 |
 | aggregateStats 全量 parse trace JSON | 长会话慢 | 可考虑物化视图 |
 | deepseek 硬编码改了但旧 profile 可能残留 | 模型通用性 | 前端 SettingsView 已切通用配置 |
 

@@ -34,7 +34,7 @@
       <!-- 工作区区域：会话列表 / 资源管理器，同一层级切换 -->
       <div class="ws-section">
         <div class="ws-section-header">
-          <div class="side-switch">
+          <div v-if="hasLocalWorkspace" class="side-switch">
             <button
               class="side-switch-btn"
               :class="{ active: sideTab === 'sessions' }"
@@ -46,11 +46,12 @@
               @click="sideTab = 'files'"
             >文件</button>
           </div>
+          <span v-else class="ws-section-plain">会话</span>
           <div v-if="sideTab === 'sessions'" class="ws-section-actions">
             <button class="ws-action" title="搜索工作区/会话" @click="wsSearchOpen = !wsSearchOpen">
               <Icon name="search" :size="14" />
             </button>
-            <button class="ws-action" title="新建工作区" @click="onCreateWorkspace">
+            <button v-if="hasLocalWorkspace" class="ws-action" title="新建工作区" @click="onCreateWorkspace">
               <Icon name="plus" :size="14" />
             </button>
           </div>
@@ -96,6 +97,7 @@
         <div class="ws-list">
           <div v-for="p in filteredProjects" :key="p.id" class="ws-group">
             <div
+              v-if="hasLocalWorkspace"
               class="ws-row"
               :class="{ active: p.id === project.currentProjectId, open: isExpanded(p.id) }"
               @click="onWorkspaceClick(p)"
@@ -121,7 +123,11 @@
               </button>
             </div>
 
-            <div v-if="isExpanded(p.id)" class="ws-sessions">
+            <div
+              v-if="isExpanded(p.id) || !hasLocalWorkspace"
+              class="ws-sessions"
+              :class="{ flat: !hasLocalWorkspace }"
+            >
               <div
                 v-for="s in matchedSessions(p.id)"
                 :key="s.id"
@@ -164,7 +170,7 @@
         </template>
 
         <!-- 资源管理器：与「会话」同级，点文件在右侧专用页面打开编辑 -->
-        <template v-else-if="sideTab === 'files'">
+        <template v-else-if="sideTab === 'files' && hasLocalWorkspace">
           <WorkspaceFileTree
             v-if="project.currentProject?.workspacePath"
             :project-id="project.currentProjectId"
@@ -207,7 +213,7 @@
       </div>
 
       <!-- 工作区设置弹窗：文件夹 + 自定义指令 -->
-      <el-dialog v-model="instructionDialogVisible" title="工作区设置" width="560px" destroy-on-close>
+      <el-dialog v-if="hasLocalWorkspace" v-model="instructionDialogVisible" title="工作区设置" width="560px" destroy-on-close>
         <template #header>
           <div class="dialog-title">
             <span>工作区设置 · {{ project.currentProject?.name || '当前工作区' }}</span>
@@ -269,7 +275,7 @@
       </el-dialog>
 
       <!-- 新建工作区弹窗：名称 + 选择磁盘文件夹 -->
-      <el-dialog v-model="wsDialogVisible" title="新建工作区" width="560px" destroy-on-close>
+      <el-dialog v-if="hasLocalWorkspace" v-model="wsDialogVisible" title="新建工作区" width="560px" destroy-on-close>
         <div class="ws-form">
           <div class="ws-field">
             <label>工作区名称</label>
@@ -304,6 +310,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
+import { useMetaStore } from '../stores/meta';
 import { useProjectStore } from '../stores/project';
 import { useThemeStore } from '../stores/theme';
 import { formatDateTime } from '../utils/format';
@@ -317,8 +324,12 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const chat = useChatStore();
+const meta = useMetaStore();
 const project = useProjectStore();
 const theme = useThemeStore();
+
+/** 网页端（cloud）不提供本地工作区，文件树、工作区管理与文件类入口全部隐藏 */
+const hasLocalWorkspace = computed(() => meta.has('LOCAL_WORKSPACE'));
 
 const sidebarOpen = ref(false);
 
@@ -415,12 +426,16 @@ async function saveInstruction() {
   }
 }
 
-// 个人助手定位：主导航只保留「对话 / 资料 / 设置」，账号与密钥收进设置页
-const navItems = [
-  { page: 'chat', icon: 'chat', title: '对话' },
-  { page: 'knowledge', icon: 'book', title: '我的资料' },
-  { page: 'settings', icon: 'settings', title: '设置' }
-];
+// 个人助手定位：主导航只保留「对话 / 资料 / 下载 / 设置」，账号与密钥收进设置页
+const navItems = computed(() => {
+  const items = [
+    { page: 'chat', icon: 'chat', title: '对话' },
+    { page: 'knowledge', icon: 'book', title: '我的资料' }
+  ];
+  if (meta.downloadEnabled) items.push({ page: 'download', icon: 'download', title: '下载桌面端' });
+  items.push({ page: 'settings', icon: 'settings', title: '设置' });
+  return items;
+});
 
 const pageTitle = computed(() => (route.meta.title as string) || 'AgentKey');
 
@@ -558,8 +573,8 @@ onMounted(async () => {
   await chat.loadAllSessions();
   // C2: 拉用户设置的默认值（默认模型/推理档位/权限），否则前端硬编码值不会同步后端
   chat.fetchDefaults();
-  // 刷新/首屏：拉审查流，避免待审查的文件变更卡片消失
-  if (project.currentProjectId != null) {
+  // 刷新/首屏：拉审查流，避免待审查的文件变更卡片消失（仅桌面端有文件审查）
+  if (hasLocalWorkspace.value && project.currentProjectId != null) {
     await chat.fetchPendingChanges(project.currentProjectId);
   }
   // 首屏新会话的会话头权限要对齐工作区默认值（否则显示可执行、后端按项目默认执行）
@@ -891,6 +906,16 @@ async function onLogout() {
     font-weight: 600;
     box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.06));
 }
+
+/* 网页端没有工作区切换：只保留「会话」标题，外观对齐切换条高度 */
+.ws-section-plain {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    padding: 4px 12px;
+}
+
+/* 网页端不展示工作区行，会话列表去掉缩进 */
+.ws-sessions.flat { padding-left: 0; }
 
 .ws-file-empty {
     padding: 24px 12px;
