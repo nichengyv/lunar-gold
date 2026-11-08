@@ -185,7 +185,8 @@
           </div>
         </template>
       </div>
-      <div class="sidebar-footer">
+      <!-- 桌面端本地单用户，没有账号与登出概念，不展示用户信息 -->
+      <div v-if="meta.mode !== 'DESKTOP'" class="sidebar-footer">
         <span class="sidebar-user" :title="auth.username || '未登录'">
           <Icon name="user" :size="14" /> <span class="footer-text">{{ auth.username || '未登录' }}</span>
         </span>

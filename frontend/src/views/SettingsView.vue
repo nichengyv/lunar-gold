@@ -283,11 +283,28 @@ const BASE_TABS = [
   { id: 'account', label: '账号安全', icon: 'user' },
 ] as const;
 
-/** MCP 只在桌面端注册，网页端不展示该 tab */
-const tabs = computed(() => BASE_TABS.filter((tab) => tab.id !== 'mcp' || meta.has('MCP_READ')));
+/**
+ * 能力决定 tab 可见性：
+ * - MCP 只在桌面端注册，网页端不展示；
+ * - 桌面端是本地单用户，没有账号/密码概念，隐藏账号安全。
+ */
+const tabs = computed(() =>
+  BASE_TABS.filter((tab) => {
+    if (tab.id === 'mcp') return meta.has('MCP_READ');
+    if (tab.id === 'account') return meta.mode !== 'DESKTOP';
+    return true;
+  })
+);
 
 type TabId = typeof BASE_TABS[number]['id'];
 const activeTab = ref<TabId>('chat');
+
+// meta 晚于首次渲染返回时 tab 会变少，避免停在被隐藏的 tab 上出现空白
+watch(tabs, (list) => {
+  if (!list.some((tab) => tab.id === activeTab.value)) {
+    activeTab.value = 'chat';
+  }
+});
 
 // 对话默认 —— 本地副本避免写一半错乱
 const local = reactive<{

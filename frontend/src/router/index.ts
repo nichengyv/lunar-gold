@@ -60,6 +60,10 @@ router.beforeEach(async (to) => {
   if (to.name === 'login' && auth.isLoggedIn) {
     return { name: 'chat' };
   }
+  // 桌面端本地单用户没有账号体系，账号页不可达
+  if (to.name === 'profile' && meta.mode === 'DESKTOP') {
+    return { name: 'chat' };
+  }
   const required = to.meta.capability as Capability | undefined;
   if (required && !meta.has(required)) {
     return auth.isLoggedIn ? { name: 'chat' } : { name: 'login' };

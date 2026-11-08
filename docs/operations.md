@@ -58,6 +58,17 @@ powershell -ExecutionPolicy Bypass -File scripts\build-pg-runtime.ps1
 
 脚本会校验内置包结构（`bin/`、`lib/`、`share/` 必须直接位于压缩包根目录，符合 zonky 解压约定），把 `vector.dll` 放进 `lib/`、`vector.control` 与升级脚本放进 `share/extension/`，重新打包并打印 SHA-256。升级 pgvector 时同步修改脚本中的版本、URL 与哈希，三者不一致会直接中止。
 
+**一键启动（P2-06，推荐）**：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev-desktop.ps1
+# 可选参数：-JavaHome <JDK21>、-MavenCmd <mvn.cmd>、-NoOpen、-SkipInstall
+```
+
+脚本会自动定位 JDK/Maven（PATH → `MAVEN_HOME` → IDEA 自带）、运行时缺失时先构建、把开发用 AES 密钥持久化到 `build\dev-desktop-data\aes.key`、在独立窗口启动后端并等 `/actuator/health` 就绪，再启动 Vite（5173 已监听则复用）。启动失败会打印 `build\dev-desktop-data\backend.log` 末尾，便于定位端口占用或运行时缺失。
+
+**手工启动（与脚本等价）**：
+
 ```powershell
 $env:JAVA_HOME = 'C:\Users\16680\.jdks\ms-21.0.11'
 # 桌面端用本地令牌替代 JWT，不再需要 JWT_SECRET；API Key 落盘加密仍需要 AES 主密钥
@@ -79,7 +90,7 @@ $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空�
 
 验证：`GET /api/meta` 应返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`，能力集中不含 `DOWNLOAD`；`GET /actuator/health` 为 `UP`；不带令牌访问 `/api/projects` 返回 401；`POST /api/auth/register` 返回 404（桌面端关闭注册）。日志中不应出现任何 Redis 连接记录。
 
-边界：桌面端登录/改密接口仍在路由上，但本地用户密码是一次性随机值，实际不可用；一键启动脚本（P2-06）与工作区加固（P2-07）尚未实施。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，但未打进 jar 或安装包，未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
+边界：桌面端账号 UI 已隐藏（`mode=DESKTOP` 时不显示账号与安全 tab、用户名和退出入口，`/profile` 重定向到对话），登录/改密接口仍留在路由上但本地用户密码是一次性随机值，实际不可用。一键启动（P2-06）与工作区加固（P2-07）已完成。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，但未打进 jar 或安装包，未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
 
 ---
 

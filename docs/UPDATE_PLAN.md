@@ -315,8 +315,8 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 | P2-03 | **已完成（PR-07）**：本地 token 认证 | 新增 `filter/LocalTokenFilter.java`、`service/desktop/LocalTokenService.java`；改造 `SecurityConfig.java` | 无 token 拒绝；token 落 `<data-dir>/local-token`；浏览器开发模式有 dev token |
 | P2-04 | **已完成（PR-06）**：排除 Redis 自动配置 | `application-desktop.yml`、`pom.xml` | 启动无 Redis 连接重试日志；限流/锁定走内存 |
 | P2-05 | **已完成（PR-07）**：单用户初始化 | 新增 `service/desktop/LocalUserService.java`；改造 `AuthController.java` | 首次启动创建本地用户；注册接口在桌面模式关闭 |
-| P2-06 | 开发脚本 | 根目录脚本或 `package.json` | `dev:desktop` 一条命令启动后端 + 前端，浏览器可用 |
-| P2-07 | 本地工作区安全 | `WorkspaceFileService.java`、`CommandService.java` | 路径、软链接、环境变量、超时、进程树终止均有测试 |
+| P2-06 | **已完成（P2-06）**：开发脚本 | 新增 `scripts/dev-desktop.ps1` | 一条命令启动后端 + 前端，浏览器可用；脚本实跑验证通过 |
+| P2-07 | **已完成（P2-07）**：本地工作区安全 | `WorkspaceFileService.java`、`CommandService.java`；新增 `CommandServiceTimeoutTest` | 路径、软链接、环境变量、超时、进程树终止均有测试 |
 | P2-08 | **已完成（仅 Windows x64）**：pgvector 随包验证 | 新增 `scripts/build-pg-runtime.ps1`；新增 `DesktopPgVectorIntegrationTest`；`docs/operations.md` 补运行时清单 | 扩展库随包存在、`CREATE EXTENSION vector` 成功、版本受控（0.8.7）、1024 维余弦检索通过；排除无关平台运行时 |
 
 **出口标准**：`dev:desktop` 启动后，在浏览器完成“打开本地项目 → 读文件 → 改文件 → 删除文件 → 跑命令 → 审批 → 撤回”；数据落在本地 DB；断网可用。
@@ -340,6 +340,12 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 **桌面端到端冒烟（Windows x64，真实执行）**：以 P2-08 产物作为 `DESKTOP_PG_RUNTIME` 用 desktop profile 启动，Flyway 在全新数据目录 0.7 秒完成 V1~V15，`pg_extension` 为 `vector 0.8.7`，`/actuator/health` 为 `UP`，`/api/meta` 返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`；无令牌访问 `/api/projects` 返回 401，带本地令牌返回 200；桌面端注册接口返回 404。`mvn test` 为 **155 项，0 失败、0 错误、2 项环境相关跳过**（新增集成测试 3 项，仅在设置 `DESKTOP_PG_RUNTIME` 时执行）。
 
 **P2-08 验收边界**：仅 Windows x64。pgvector 的 Windows 二进制取自社区仓库（pgvector 官方不发布 Windows 构建），脚本以固定 SHA-256 锁定；正式发布前应在可控构建环境自行编译并替换来源与哈希。macOS/Linux 运行时未构建、未验证；运行时压缩包未打进 jar 或安装包，仍需 `DESKTOP_PG_RUNTIME` 指定或由 Phase 3 打包流程注入；未覆盖代码签名、安装后冷/热启动与长稳。
+
+**P2-06 / P2-07 完成批注（2026-11-08，未提交）**：新增 [dev-desktop.ps1](../scripts/dev-desktop.ps1)：解析 JDK/Maven（PATH → MAVEN_HOME → IDEA 自带），运行时缺失时自动调用 `build-pg-runtime.ps1`，把开发用 AES 密钥持久化到 `build/dev-desktop-data/aes.key`（避免每次换密钥导致已存 API Key 无法解密），在独立窗口启动后端并把日志同时写入 `backend.log`，等 `/actuator/health` 返回 200 后再启动 Vite；5173 已监听时复用现有前端，启动失败时打印日志末尾。实跑验证：脚本在已有数据目录上 8.5 秒拉起后端、输出「后端已就绪」，桌面端 `/api/meta` 与令牌鉴权行为不变。
+
+P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/test/java/com/capsule/agentkey/service/CommandServiceTimeoutTest.java)，用 JDK 自带编译器现场编译一个父子两代长睡进程，3 秒超时后断言 `timedOut=true`、子进程确实启动过（`child.started`）、超时后子进程 pid 已不可见，证明 `killTree` 覆盖整棵进程树而非只杀直接子进程。路径逃逸、软链接逃逸、环境变量清洗此前已有测试，本次未改动实现。
+
+**桌面端账号入口收敛（同批）**：按「免费桌面版不需要登录」的结论，只关闭 UI 与账号体系，保留本地令牌作为本机接口保护。`SettingsView` 在 `mode=DESKTOP` 时隐藏「账号与安全」tab（并回落到「对话」），`AppLayout` 隐藏用户名与退出入口，路由守卫把 `/profile` 重定向到对话；`vue-tsc --noEmit` 与 Vite 生产构建通过。`mvn test` 为 **156 项，0 失败、0 错误、5 项跳过**（新增超时测试 1 项；跳过为 2 项既有环境相关 + 3 项未设置 `DESKTOP_PG_RUNTIME` 的集成测试）。
 
 ---
 
