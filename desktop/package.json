@@ -5,9 +5,44 @@
   "description": "AgentKey Pro 桌面壳（Electron）",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^43.3.0"
+    "electron": "^43.3.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.agentkey.pro",
+    "productName": "AgentKey Pro",
+    "directories": {
+      "output": "../build/installer"
+    },
+    "files": [
+      "main.js",
+      "sidecar.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../target/agent-gateway-1.0.0.jar",
+        "to": "sidecar/agent-gateway-1.0.0.jar"
+      },
+      {
+        "from": "../build/desktop-runtime/jre",
+        "to": "jre"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "AgentKey Pro",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
