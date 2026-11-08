@@ -45,11 +45,11 @@
 |---|---|---|
 | 后端 | 单模块 Spring Boot，按层分包（controller/service/tool/config） | 缺少运行时模式与能力抽象 |
 | 前端 | Vue 3 + Pinia，单一 Web 形态 | 无能力声明、无下载页、无平台适配层 |
-| 数据库 | PostgreSQL + pgvector，Flyway V1~V15；PR-02 已选定桌面端内嵌 PostgreSQL + pgvector | PR-06 已实现本地 DB 生命周期；V13 全新库缺陷已由 Flyway 前置预检关闭；分平台运行时（P2-08）仍待补齐 |
+| 数据库 | PostgreSQL + pgvector，Flyway V1~V15；PR-02 已选定桌面端内嵌 PostgreSQL + pgvector | PR-06 已实现本地 DB 生命周期与 V13 前置预检；P2-08 已补齐 Windows x64 含 pgvector 的运行时构建脚本与自动化集成测试，macOS/Linux 运行时仍待补 |
 | 缓存 | Redis（限流、登录锁定、JWT 撤销），已有内存降级 | 桌面端已在 PR-06 排除 Redis 自动配置，上述能力改走内存降级 |
 | 执行 | 宿主进程执行命令，白名单 + 路径校验 | 无 OS 沙箱、继承服务端环境变量、软链接可逃逸 |
 | 状态 | 审批、权限、停止、统计多为进程内存 | 云端多实例不可用；重启丢运行态 |
-| 认证 | 多用户 JWT，开放注册；云端邮箱验证与找回密码已完成（PR-12） | 桌面端需单用户本地 token（P2-03 未做） |
+| 认证 | 多用户 JWT，开放注册；云端邮箱验证与找回密码已完成（PR-12） | 桌面端本地令牌与单用户初始化已完成（PR-07）；凭证存数据目录文件而非 OS 凭据库 |
 | 测试 | 10 个测试文件，以工具类与纯逻辑为主 | ReAct/SSE/审批核心链路无集成测试；前端 0 测试 |
 | CI/CD | 无 | 无流水线、无发布、无签名 |
 | 文档 | 四份交接文档，质量较好 | STATUS/design/operations 与代码存在漂移 |
@@ -255,10 +255,10 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 | `pom.xml` | **已完成（PR-06）**：引入 zonky embedded-postgres；当前只引入 Windows x64 二进制并排除 darwin/linux/alpine；桌面依赖尚未做 Maven profile 隔离 |
 | `application-desktop.yml` | **已完成（PR-06）**：使用生命周期管理器分配的 JDBC 连接；沿用 `db/migration`；排除 Redis 自动配置 |
 | 新增 `service/desktop/DbLifecycleManager.java` | **已完成（PR-06）**：数据目录、首次 initdb、空闲端口、启动/健康检查、优雅关闭、崩溃恢复、V13 前置兼容处理 |
-| 新增桌面 PG 运行时解析与构建脚本 | **未完成**：运行时解析已支持 `DESKTOP_PG_RUNTIME`，但每平台运行时产物与构建脚本仍未入库（P2-08） |
+| 新增桌面 PG 运行时解析与构建脚本 | **已完成（P2-08）**：新增 [build-pg-runtime.ps1](../scripts/build-pg-runtime.ps1)，从本地 Maven 仓库取出 zonky 内置 txz，注入 pgvector 的 `vector.dll` 与 `share/extension` 元数据后重打包；产物不入 Git，按 SHA-256 校验上游二进制（Windows x64） |
 | `src/main/resources/db/migration/` | **已完成（PR-06）**：保持云端/桌面共用；不改已执行 V1~V14，用 Flyway `beforeMigrate` 幂等预检修复 V13 |
 | `VectorStoreService.java` | **无需方言改造**；保留 pgvector SQL |
-| 新增桌面 DB 集成测试 | **未完成（PR-06）**：以真实启动冒烟与 schema 检查替代，干净初始化、V1~V15、pgvector 余弦检索、重启复用与异常恢复的自动化测试仍待补 |
+| 新增桌面 DB 集成测试 | **已完成（P2-08）**：[DesktopPgVectorIntegrationTest.java](../src/test/java/com/capsule/agentkey/service/desktop/DesktopPgVectorIntegrationTest.java) 在真实内嵌库上跑 V1~V15、校验 `pg_extension` 含 vector、1024 维写入与余弦排序、维度不符被拒绝；未配置 `DESKTOP_PG_RUNTIME` 时整类跳过 |
 | Phase 3 安装包清单 | 计入各平台 PG + pgvector 运行时和第三方许可，复测安装后冷/热启动与内存 |
 
 ##### 实测边界
@@ -317,7 +317,7 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 | P2-05 | **已完成（PR-07）**：单用户初始化 | 新增 `service/desktop/LocalUserService.java`；改造 `AuthController.java` | 首次启动创建本地用户；注册接口在桌面模式关闭 |
 | P2-06 | 开发脚本 | 根目录脚本或 `package.json` | `dev:desktop` 一条命令启动后端 + 前端，浏览器可用 |
 | P2-07 | 本地工作区安全 | `WorkspaceFileService.java`、`CommandService.java` | 路径、软链接、环境变量、超时、进程树终止均有测试 |
-| P2-08 | pgvector 随包验证 | 构建脚本、PG 运行时清单、桌面 DB 集成测试 | 每个目标 OS/arch 均验证扩展库存在、`CREATE EXTENSION vector` 成功、版本受控及 1024 维余弦检索；排除无关平台运行时 |
+| P2-08 | **已完成（仅 Windows x64）**：pgvector 随包验证 | 新增 `scripts/build-pg-runtime.ps1`；新增 `DesktopPgVectorIntegrationTest`；`docs/operations.md` 补运行时清单 | 扩展库随包存在、`CREATE EXTENSION vector` 成功、版本受控（0.8.7）、1024 维余弦检索通过；排除无关平台运行时 |
 
 **出口标准**：`dev:desktop` 启动后，在浏览器完成“打开本地项目 → 读文件 → 改文件 → 删除文件 → 跑命令 → 审批 → 撤回”；数据落在本地 DB；断网可用。
 
@@ -334,6 +334,12 @@ PG 发布构成比 SQLite 多 33,520,788 字节（31.968 MiB，+25.8%）。整�
 新增 [LocalUserService.java](../src/main/java/com/capsule/agentkey/service/desktop/LocalUserService.java)：`@PostConstruct` 确保本地用户存在（默认用户名 `local`，随机密码哈希仅满足表约束、永不用于登录），并缓存 id。`AuthController` 在 `DESKTOP` 模式下关闭注册、邮箱验证码与找回密码三个入口，返回 404 以免暴露桌面端账号能力；登录/改密接口保留但无可用密码，桌面端正常路径只走本地令牌。新增 [DesktopTokenController.java](../src/main/java/com/capsule/agentkey/controller/DesktopTokenController.java)（`GET /api/desktop/token`）：仅回环地址、`Origin` 必须在 CORS 白名单内，且可用 `DESKTOP_EXPOSE_TOKEN_ENDPOINT=false` 关闭；前端在桌面模式下由路由守卫自动换取令牌（[desktop.ts](../frontend/src/api/desktop.ts)、[auth.ts](../frontend/src/stores/auth.ts)、[router/index.ts](../frontend/src/router/index.ts)）。`SecretStartupValidator` 在 desktop profile 下不再要求 `JWT_SECRET`，仍强制 `AES_MASTER_KEY`。
 
 **PR-07 验收边界**：`mvn test` 为 **152 项，0 失败、0 错误、2 项环境相关跳过**（新增 `LocalTokenServiceTest` 4 项、`LocalTokenFilterTest` 4 项、`LocalUserServiceTest` 2 项、`SecretStartupValidatorTest` 桌面分支 1 项、`AuthControllerTest` 桌面关闭注册 1 项）；`vue-tsc --noEmit` 与 Vite 生产构建通过。计划中的「token 存 OS 凭据库」改为「用户数据目录文件 + 权限收紧」：Windows 凭据管理器需要额外原生依赖，当前文件方案在单机场景下等价，差异记录于此。未做真实桌面启动冒烟——PR-06 使用的 pgvector 运行时压缩包未入库，本次环境已无该文件，V3 迁移无法完成；P2-08 随包运行时落地后再补端到端验收。桌面端登录/改密接口未显式关闭，但本地用户密码为一次性随机值，实际不可用。
+
+**P2-08 完成批注（2026-11-08，未提交）**：完成 P2-08 的 Windows x64 部分。新增 [build-pg-runtime.ps1](../scripts/build-pg-runtime.ps1)：默认从本地 Maven 仓库解析 zonky `embedded-postgres-binaries-windows-amd64`，取出内置 `postgres-windows-x86_64.txz`，解压后注入 pgvector 的 `lib/vector.dll` 与 `share/extension/vector*`，再以 `bin/lib/share` 为根重打包为 `build/pg-runtime/pg-runtime-windows-x64-pg16.11.0-vector0.8.7.txz`（22 MiB）；pgvector 二进制固定版本并校验 SHA-256，产物目录已被 `.gitignore` 覆盖。新增 [DesktopPgVectorIntegrationTest.java](../src/test/java/com/capsule/agentkey/service/desktop/DesktopPgVectorIntegrationTest.java)：设置 `DESKTOP_PG_RUNTIME` 时启动真实内嵌库、执行 V1~V15、断言 `pg_extension` 中 vector 为 0.8.x、`vector_record.embedding` 列类型为 vector、1024 维 one-hot 写入与余弦排序（1.0 / 0.0）、1023 维写入被拒绝；未设置环境变量时整类跳过。
+
+**桌面端到端冒烟（Windows x64，真实执行）**：以 P2-08 产物作为 `DESKTOP_PG_RUNTIME` 用 desktop profile 启动，Flyway 在全新数据目录 0.7 秒完成 V1~V15，`pg_extension` 为 `vector 0.8.7`，`/actuator/health` 为 `UP`，`/api/meta` 返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`；无令牌访问 `/api/projects` 返回 401，带本地令牌返回 200；桌面端注册接口返回 404。`mvn test` 为 **155 项，0 失败、0 错误、2 项环境相关跳过**（新增集成测试 3 项，仅在设置 `DESKTOP_PG_RUNTIME` 时执行）。
+
+**P2-08 验收边界**：仅 Windows x64。pgvector 的 Windows 二进制取自社区仓库（pgvector 官方不发布 Windows 构建），脚本以固定 SHA-256 锁定；正式发布前应在可控构建环境自行编译并替换来源与哈希。macOS/Linux 运行时未构建、未验证；运行时压缩包未打进 jar 或安装包，仍需 `DESKTOP_PG_RUNTIME` 指定或由 Phase 3 打包流程注入；未覆盖代码签名、安装后冷/热启动与长稳。
 
 ---
 

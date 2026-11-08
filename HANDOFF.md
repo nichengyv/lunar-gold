@@ -124,7 +124,7 @@ cd frontend; npx vue-tsc --noEmit   # 退出码 0
 | MCP filesystem 写入不入审批 | 中 | 审批只覆盖内置工具 |
 | MCP 熔断 5 分钟内不降级 | 中 | 冷却期体验差 |
 | 审批状态存进程内存 | 低 | 重启丢正在等待的卡；120s 超时兜底 |
-| 桌面端内置 pgvector 运行时未随包 | 中 | 需用 `DESKTOP_PG_RUNTIME` 指定；目前仅 Windows x64 验证（P2-08） |
+| 桌面端 pgvector 运行时仅 Windows x64 | 中 | 由 `scripts/build-pg-runtime.ps1` 产出（PG 16.11.0 + pgvector 0.8.7，SHA-256 锁定的社区二进制），仍需 `DESKTOP_PG_RUNTIME` 指定；macOS/Linux 与安装包内布局未做（P2-08 边界） |
 | 桌面端本地令牌存文件而非 OS 凭据库 | 低 | `<data-dir>/local-token`，POSIX 收紧为 600；Windows 依赖用户目录 ACL（PR-07 记录的差异） |
 | 桌面端登录/改密接口未显式关闭 | 低 | 本地用户密码为一次性随机值，实际不可用；正常路径只走本地令牌 |
 | ReAct / SSE / 审批阻塞 无集成测试 | 低 | 纯编译验证无法覆盖行为回归 |

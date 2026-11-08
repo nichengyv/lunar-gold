@@ -1,6 +1,6 @@
 # 部署运维手册（Agent Gateway v3）
 
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-06。系统设计看 `design.md`，状态速查看 `STATUS.md`。
+> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-08、PR-12。系统设计看 `design.md`，状态速查看 `STATUS.md`。
 
 ---
 
@@ -44,12 +44,26 @@ npm run dev     # http://localhost:5173, 代理 /api → 8080
 
 桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.agentkey/desktop/db`，首次启动自动建库并执行 Flyway V1~V15。
 
+**运行时清单与构建（P2-08，Windows x64）**：Maven 依赖内置的 zonky 二进制不含 pgvector，需先用脚本注入扩展。
+
+| 组成 | 版本 | 来源 |
+|---|---|---|
+| PostgreSQL | 16.11.0 | 依赖 `io.zonky.test.postgres:embedded-postgres-binaries-windows-amd64:16.11.0` 内的 `postgres-windows-x86_64.txz` |
+| pgvector | 0.8.7 | 社区预编译 `vector.v0.8.7-pg16.zip`（pgvector 官方不发布 Windows 二进制），脚本按固定 SHA-256 校验 |
+
+```powershell
+# 产物：build\pg-runtime\pg-runtime-windows-x64-pg16.11.0-vector0.8.7.txz（约 22 MiB；build/ 不入 Git）
+powershell -ExecutionPolicy Bypass -File scripts\build-pg-runtime.ps1
+```
+
+脚本会校验内置包结构（`bin/`、`lib/`、`share/` 必须直接位于压缩包根目录，符合 zonky 解压约定），把 `vector.dll` 放进 `lib/`、`vector.control` 与升级脚本放进 `share/extension/`，重新打包并打印 SHA-256。升级 pgvector 时同步修改脚本中的版本、URL 与哈希，三者不一致会直接中止。
+
 ```powershell
 $env:JAVA_HOME = 'C:\Users\16680\.jdks\ms-21.0.11'
 # 桌面端用本地令牌替代 JWT，不再需要 JWT_SECRET；API Key 落盘加密仍需要 AES 主密钥
 $env:AES_MASTER_KEY = '<Base64 编码的 16/24/32 字节随机密钥>'
 # 含 pgvector 的 PostgreSQL 运行时压缩包；未配置时使用依赖内置二进制（不含 pgvector，V3 迁移会失败）
-$env:DESKTOP_PG_RUNTIME = 'D:\path\to\pg-runtime.txz'
+$env:DESKTOP_PG_RUNTIME = (Resolve-Path 'build\pg-runtime\pg-runtime-windows-x64-pg16.11.0-vector0.8.7.txz').Path
 $env:DESKTOP_DATA_DIR = 'D:\agentkey-data'      # 可选，默认 ~/.agentkey/desktop
 $env:DESKTOP_SERVER_PORT = '8080'               # 可选
 $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空闲端口
@@ -65,7 +79,7 @@ $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空�
 
 验证：`GET /api/meta` 应返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`，能力集中不含 `DOWNLOAD`；`GET /actuator/health` 为 `UP`；不带令牌访问 `/api/projects` 返回 401；`POST /api/auth/register` 返回 404（桌面端关闭注册）。日志中不应出现任何 Redis 连接记录。
 
-边界：桌面端登录/改密接口仍在路由上，但本地用户密码是一次性随机值，实际不可用；一键启动脚本（P2-06）、工作区加固（P2-07）与 pgvector 运行时随包（P2-08）尚未实施，因此未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移会失败。
+边界：桌面端登录/改密接口仍在路由上，但本地用户密码是一次性随机值，实际不可用；一键启动脚本（P2-06）与工作区加固（P2-07）尚未实施。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，但未打进 jar 或安装包，未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
 
 ---
 
@@ -90,7 +104,7 @@ $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空�
 | `WORKSPACE_COMMAND_ALLOWED` | npm,node,git,mvn,... | 白名单，不含 cmd/powershell/sh |
 | `WORKSPACE_JAVA_HOME` | C:/Users/16680/.jdks/ms-21.0.11 | 找不到 java 时的兜底 |
 | `WORKSPACE_MAVEN_HOME` | D:/IDEA/.../maven3 | 找不到 mvn 时的兜底 |
-| `DESKTOP_PG_RUNTIME` | 空 | 仅 desktop：含 pgvector 的 PostgreSQL 运行时压缩包路径；留空则用依赖内置二进制（不含 pgvector） |
+| `DESKTOP_PG_RUNTIME` | 空 | 仅 desktop：含 pgvector 的 PostgreSQL 运行时压缩包路径，由 `scripts/build-pg-runtime.ps1` 产出；留空则用依赖内置二进制（不含 pgvector） |
 | `DESKTOP_DATA_DIR` | `~/.agentkey/desktop` | 仅 desktop：本地数据根目录，数据库在 `<data-dir>/db` |
 | `DESKTOP_DB_PORT` | `0` | 仅 desktop：内嵌库端口，`0` 表示每次启动自动挑空闲端口 |
 | `DESKTOP_SERVER_PORT` | `8080` | 仅 desktop：HTTP 端口 |

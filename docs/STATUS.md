@@ -1,7 +1,7 @@
 # AgentKey Pro · 项目状态速查
 
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07。
+> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-08、PR-12。
 
 ---
 
@@ -90,7 +90,7 @@ node node_modules/vue-tsc/bin/vue-tsc.js --noEmit     # 类型检查
 - **Batch D**（批 71~74）：D1 范围约束 / D2 模型 fallback / D3 可观测面板 / D4 diff 打磨
 - **Batch E**（批 75）：权限三档重定义（手动审批 / 自动审批 / 完全权限）+ 审批卡可读化（不再展示入参 JSON）
 - **Batch F**（批 76）：自动审批只拦破坏性命令（`CommandRisk` + `DESTRUCTIVE` 风险）+ 内置 `delete_file`（沙箱/审查流/撤回）+ 计划卡串台与流式省略号修复
-- **双端改造**：PR-01 安全红线、PR-03 运行模式与 `/api/meta`、PR-04 工具注册和控制器能力门控、PR-05 前端能力渲染与下载页、PR-06 desktop 运行时（内嵌 PG + pgvector、无 Redis、`DbLifecycleManager`）、PR-07 桌面本地令牌 + 单用户初始化、PR-12 网页端账号安全闭环（邮箱验证码 + 找回密码）已完成
+- **双端改造**：PR-01 安全红线、PR-03 运行模式与 `/api/meta`、PR-04 工具注册和控制器能力门控、PR-05 前端能力渲染与下载页、PR-06 desktop 运行时（内嵌 PG + pgvector、无 Redis、`DbLifecycleManager`）、PR-07 桌面本地令牌 + 单用户初始化、P2-08 桌面 pgvector 运行时构建脚本与数据库集成测试（Windows x64）、PR-12 网页端账号安全闭环（邮箱验证码 + 找回密码）已完成
 
 ---
 
@@ -111,8 +111,8 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | 设置中心产品化 | 🟡 | 默认值持久化、6 tab 完善 |
 | 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
 | 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
-| 测试覆盖 | ⚠️ | 当前 152 项回归，0 失败、0 错误、2 项环境相关测试跳过；PR-07 新增本地令牌/单用户初始化 12 项；desktop profile 已在 Windows x64 完成启动冒烟（内嵌 PG + pgvector、`/api/meta`、`/actuator/health`），SSE 端到端与桌面 DB 向量检索自动化仍待补 |
-| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB 与本地令牌认证、单用户初始化已可用；仍缺桌面壳、pgvector 运行时随包与桌面端端到端冒烟 |
+| 测试覆盖 | ⚠️ | 当前 155 项回归，0 失败、0 错误、2 项环境相关测试跳过；桌面数据库集成测试（V1~V15、pgvector 1024 维余弦检索）在设置 `DESKTOP_PG_RUNTIME` 时自动执行；desktop profile 已在 Windows x64 完成启动冒烟，SSE 端到端与前端自动化仍待补 |
+| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；仍缺桌面壳、macOS/Linux 运行时、把运行时打进安装包与桌面端端到端冒烟 |
 
 ### Level 5 ⏳ 尚未实施
 桌面外壳与分发见 `UPDATE_PLAN.md` Phase 3；当前仍以浏览器作为 desktop 开发环境。
