@@ -355,6 +355,7 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 
 | ID | 任务 | 涉及文件 | 验收 |
 |---|---|---|---|
+| P3-00 | **已完成（P3-00）**：前端随 jar 分发 | `pom.xml`、`WebConfig.java`、`SecurityConfig.java` | `mvn -Pwith-frontend package` 后单 jar 直接提供 UI，SPA 深链可用 |
 | P3-01 | 桌面壳骨架 | 新增 `desktop/`（Electron 或 Tauri） | 启动后拉起侧车并加载 UI |
 | P3-02 | 侧车生命周期 | `desktop/*/sidecar` | 选空闲端口、健康检查、退出时杀掉进程树、单实例锁 |
 | P3-03 | JRE 裁剪与打包 | 构建脚本 | `jlink` 定制运行时，安装包体积达标 |
@@ -363,6 +364,12 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 | P3-06 | 崩溃上报 | 壳与后端接入 Sentry 或等价方案 | 崩溃可上报；默认脱敏；可关闭 |
 | P3-07 | 冒烟流水线 | CI 三平台任务 | 静默安装 → 启动 → `/health` → 运行脚本任务 → 卸载 |
 | P3-08 | 发布合规 | 隐私政策、服务条款、遥测开关、第三方许可 | 文档可从网页端与桌面端访问；遥测默认脱敏且可关闭；安装包内含第三方许可 |
+
+**P3-00 完成批注（2026-11-08，未提交）**：为让桌面壳只需加载一个 URL，先做了「前端随 jar 分发」。`pom.xml` 新增 `with-frontend` profile，在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`；[WebConfig.java](../src/main/java/com/capsule/agentkey/config/WebConfig.java) 注册 `/**` 静态处理器与 `SpaFallbackResolver`：真实文件照常返回，无扩展名的前端路由回 `index.html`，`api/`、`actuator/`、`v3/`、`swagger-ui`、`error` 前缀与带扩展名的缺失资源仍按原语义 404；[SecurityConfig.java](../src/main/java/com/capsule/agentkey/config/SecurityConfig.java) 放行 `/assets/**` 与 7 条 SPA 路由（`/chat`、`/knowledge`、`/keys`、`/profile`、`/settings`、`/login`、`/download`），接口鉴权不变。
+
+**P3-00 实测（Windows x64，真实执行）**：`mvn -Pwith-frontend -DskipTests package` 产出 220.1 MB 单 jar，`BOOT-INF/classes/static/` 内含 index.html 与 assets；以 desktop profile 直接 `java -jar` 启动 11.7 秒就绪，`/`、`/chat`、`/settings`、`/login` 均为 200 且返回 SPA 页面，`/assets/index-*.js` 200，`/api/meta` 为 `DESKTOP`，无令牌访问 `/api/projects` 401、用 `/api/desktop/token` 换取令牌后 200，缺失静态资源 404。真实浏览器打开 `http://127.0.0.1:8080/` 自动跳转 `/chat`，侧栏与输入框渲染正常，控制台无报错、无 CSP 拦截，`ProjectController`/`SettingsController`/`FileReviewController` 均收到带令牌的成功请求。`mvn test` 为 **156 项，0 失败、0 错误、5 项跳过**，与上一轮一致。
+
+**P3-00 验收边界**：pgvector 运行时压缩包仍未随 jar 分发，运行仍需 `DESKTOP_PG_RUNTIME` 或由后续打包流程注入；未做 JRE 裁剪，jar 220 MB 中大部分是依赖与未裁剪的静态资源；未引入桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`（壳接管后应置 `false` 并改为读取令牌文件）。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 

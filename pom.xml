@@ -242,4 +242,40 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- 前端静态资源随 jar 分发（P3-01 前置）：
+             先构建 frontend/dist，再执行 mvn -Pwith-frontend package，
+             产物由后端直接托管，桌面壳只需加载 http://127.0.0.1:<port>/。
+             不激活该 profile 时行为不变（dev/cloud 仍由 Vite 或 Nginx 托管）。 -->
+        <profile>
+            <id>with-frontend</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend-dist</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}/frontend/dist</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

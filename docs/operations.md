@@ -1,6 +1,6 @@
 # 部署运维手册（Agent Gateway v3）
 
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-08、PR-12。系统设计看 `design.md`，状态速查看 `STATUS.md`。
+> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-08、P3-00、PR-12。系统设计看 `design.md`，状态速查看 `STATUS.md`。
 
 ---
 
@@ -91,6 +91,33 @@ $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空�
 验证：`GET /api/meta` 应返回 `mode=DESKTOP`、`authMode=LOCAL_SINGLE_USER`，能力集中不含 `DOWNLOAD`；`GET /actuator/health` 为 `UP`；不带令牌访问 `/api/projects` 返回 401；`POST /api/auth/register` 返回 404（桌面端关闭注册）。日志中不应出现任何 Redis 连接记录。
 
 边界：桌面端账号 UI 已隐藏（`mode=DESKTOP` 时不显示账号与安全 tab、用户名和退出入口，`/profile` 重定向到对话），登录/改密接口仍留在路由上但本地用户密码是一次性随机值，实际不可用。一键启动（P2-06）与工作区加固（P2-07）已完成。pgvector 运行时（P2-08）已由 `scripts/build-pg-runtime.ps1` 产出并验证，但未打进 jar 或安装包，未配置 `DESKTOP_PG_RUNTIME` 时 V3 迁移仍会失败。桌面数据库集成测试 `DesktopPgVectorIntegrationTest` 在设置 `DESKTOP_PG_RUNTIME` 时参与 `mvn test`，否则整类跳过。
+
+### 1.5 打包成单 jar 运行（P3-00）
+
+前端构建产物可随 jar 分发，启动后由后端直接托管，不需要另起静态服务器：
+
+```powershell
+cd d:\test-code\agent-gateway-v3\frontend
+npm run build                       # 产出 frontend/dist
+
+cd ..
+$env:JAVA_HOME = 'C:\Users\16680\.jdks\ms-21.0.11'
+& 'D:\IDEA\IntelliJ IDEA 2024.1\plugins\maven\lib\maven3\bin\mvn.cmd' -Pwith-frontend -DskipTests package
+# 产物：target\agent-gateway-1.0.0.jar（BOOT-INF/classes/static 内含 index.html 与 assets）
+```
+
+运行方式与 1.4 一致（仍需 `AES_MASTER_KEY` 与 `DESKTOP_PG_RUNTIME`）：
+
+```powershell
+java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop
+# 浏览器打开 http://127.0.0.1:8080/ ，路由守卫会自动跳到 /chat
+```
+
+`with-frontend` 只在 `prepare-package` 阶段把 `frontend/dist` 拷进 `classpath:/static`，不激活时行为不变（dev 用 Vite、cloud 用 Nginx）。后端对无扩展名的非接口路径回 `index.html`（SPA 深链），`/api/**`、`/actuator/**`、`/v3/**`、`/swagger-ui/**` 保持原语义；`/chat`、`/settings` 等 7 条前端路由在安全链中放行，页面权限仍由前端守卫与接口鉴权决定。
+
+实测（Windows x64）：单 jar 以 desktop profile 启动 11.7 秒就绪；`/`、`/chat`、`/settings`、`/login` 返回 200 的 SPA 页面，`/assets/*.js` 200，缺失静态资源 404，`/api/meta` 为 `DESKTOP`，无令牌 401、本地令牌 200；真实浏览器打开后自动进入 `/chat` 且会话/设置接口正常。
+
+边界：pgvector 运行时压缩包尚未打进 jar，仍需 `DESKTOP_PG_RUNTIME`；未做 `jlink` 裁剪，jar 约 220 MB；尚无桌面壳，`DESKTOP_EXPOSE_TOKEN_ENDPOINT` 仍为 `true`，接入壳后应置 `false` 并改由壳读取令牌文件。
 
 ---
 

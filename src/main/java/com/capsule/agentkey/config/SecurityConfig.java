@@ -74,7 +74,17 @@ public class SecurityConfig {
                                 "/api/desktop/token",
                                 "/",
                                 "/index.html",
+                                // SPA 路由：服务端只负责回 index.html，页面权限由前端路由守卫与接口鉴权决定
+                                "/chat",
+                                "/knowledge",
+                                "/keys",
+                                "/profile",
+                                "/settings",
+                                "/login",
+                                "/download",
                                 "/static/**",
+                                // Vite 生产构建把脚本与样式放在 /assets 下
+                                "/assets/**",
                                 "/css/**",
                                 "/js/**",
                                 "/favicon.ico",
