@@ -40,6 +40,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "include": "nsis/include.nsh",
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "AgentKey Pro",

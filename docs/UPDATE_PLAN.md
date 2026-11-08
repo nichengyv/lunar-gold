@@ -360,7 +360,7 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 | P3-01 | **已完成（Windows x64 冒烟）**：Electron 桌面壳 | 新增 `desktop/main.js`、`desktop/sidecar.js` | 单实例、拉起侧车、加载 UI、退出杀树；真实窗口与双开已验证 |
 | P3-02 | **已完成**：侧车生命周期 | `desktop/sidecar.js`、`desktop/main.js` | 选空闲端口、健康检查、整树终止（含游离 postmaster）、崩溃重启、失败快速诊断；单实例双开已验证 |
 | P3-03 | **已完成**：JRE 裁剪与打包 | `scripts/build-desktop-runtime.ps1`、`desktop/main.js` | `jlink` 定制运行时（19 个模块、约 49 MiB），裁剪 JRE 无头冒烟全链路通过 |
-| P3-04 | **进行中（Windows 未签名包已生成）**：安装包与签名 | `desktop/package.json`、`scripts/build-desktop-installer.ps1`、证书配置 | Windows 安装/卸载、三平台与签名仍待验收 |
+| P3-04 | **进行中（Windows 安装/卸载已通过，未签名包已生成）**：安装包与签名 | `desktop/package.json`、`desktop/nsis/include.nsh`、`scripts/build-desktop-installer.ps1`、证书配置 | 三平台、签名、陌生机器与 Release 验收仍待完成 |
 | P3-05 | 自动更新 | 更新模块、版本清单接口 | N-1 升级到 N；失败可回滚 |
 | P3-06 | 崩溃上报 | 壳与后端接入 Sentry 或等价方案 | 崩溃可上报；默认脱敏；可关闭 |
 | P3-07 | 冒烟流水线 | CI 三平台任务 | 静默安装 → 启动 → `/health` → 运行脚本任务 → 卸载 |
@@ -396,11 +396,19 @@ P2-07 补齐最后一项缺口：新增 [CommandServiceTimeoutTest.java](../src/
 
 **P3-04 进展批注（2026-11-08）**：`desktop/package.json` 固定使用 `npm ci` 已安装的 Electron（`electronDist=node_modules/electron/dist`），所有 electron-builder 命令显式 `--publish never`，避免重复下载和 CI 环境隐式发布；unpacked 与 NSIS 使用两阶段构建。新增 [build-desktop-installer.ps1](../scripts/build-desktop-installer.ps1) 作为统一入口：依次执行前端构建、`with-frontend,with-pg-runtime` 后端构建、jlink 裁剪和 NSIS 打包，默认运行 Maven `verify`；强制检查 jar 中的 SPA 首页与 `desktop/pg-runtime.txz`，并检查安装包、app.asar、包内 JRE/jar 及 Maven/包内 jar 的 SHA-256 一致性，缺少 PG 运行时不再只告警。使用方式为 `powershell -ExecutionPolicy Bypass -File scripts\build-desktop-installer.ps1 -JavaHome <JDK21> -MavenCmd <mvn.cmd>`，依赖已就绪时可加 `-SkipInstall`。
 
-**P3-04 构建实测（Windows x64）**：统一脚本先通过 PowerShell 语法检查，再以 `-SkipInstall -SkipTests` 连续执行完整构建；最终一轮前端 1836 个模块构建成功、Maven package 成功、私有 JRE 为 49.43 MiB，NSIS 为 **353.37 MiB**，unpacked 为 **638.97 MiB**，所有产物预检和 jar 哈希比较通过。本轮跳过重复测试，回归依据仍为当前继承代码的 **156 项、0 失败、0 错误、5 跳过**。重复构建曾持续在 `default_app.asar` 报 `EBUSY`；Restart Manager 定位到占用者是 Trae 扩展宿主而非 AgentKey 进程，因此统一脚本把 unpacked 固定暂存到 `<系统临时目录>/agentkey-desktop-pack`，最终安装包仍写入 `build/installer`。调整后同一 unpacked 路径被成功覆盖并重新生成 NSIS，证明入口可重复执行，同时避免在工作区累积多份约 639 MiB 的中间产物。
+**P3-04 构建实测（Windows x64）**：统一脚本最终一轮以 `-SkipInstall` 执行完整构建，前端 1836 个模块构建成功，Maven `verify` 为 **156 项、0 失败、0 错误、5 跳过，BUILD SUCCESS**；私有 JRE 为 **50.21 MiB**，NSIS 为 **353.66 MiB**，unpacked 为 **639.75 MiB**，所有产物预检和 jar 哈希比较通过。重复构建曾在 `default_app.asar` 报 `EBUSY`，Restart Manager 定位到占用者是 Trae 扩展宿主而非 AgentKey 进程；另确认工作区 `build` 目录带有 `Mandatory Label\Low Mandatory Level:(I)(OI)(CI)(NW)`，可能让从其生成的安装器继承低完整性。统一脚本因此把 unpacked 固定暂存到 `<系统临时目录>/agentkey-desktop-pack`，最终安装器固定写入 `<系统临时目录>/agentkey-desktop-installer`，不再写入 `build/installer`。调整后同一路径可重复覆盖构建，最终安装器 ACL 仅有正常继承的 SYSTEM、Administrators、当前用户 FullControl，没有 Low 标记。
 
 **P3-04 全新首启与 Electron 实测**：使用 unpacked 内的裁剪 JRE 和自包含 jar，不设置 `DESKTOP_PG_RUNTIME`，在系统临时目录创建全新数据目录；`initdb` 15.9 秒成功，日志确认使用 jar 内置 PG 运行时，Flyway 一次应用 V1~V15，`/actuator/health` 200/UP、`/api/meta` 200 且返回 `DESKTOP`/`LOCAL_SINGLE_USER`、`/` 200 且为 SPA。随后直接启动真实 `AgentKey Pro.exe`：另一全新目录再次完成 `initdb` 和 V15，健康检查 200，窗口标题为 `AgentKey Pro` 且存在可见窗口句柄；第二次启动的进程退出码 0、主实例保持存活；主窗口关闭后退出码 0，postmaster 无残留。以上验证了全新数据目录、壳内 Java 解析、窗口和单实例，但未人工检查每个页面的视觉效果与完整业务任务。
 
-**P3-04 验收边界（仍进行中）**：真实 NSIS 静默安装在沙箱内外及显式 `/currentuser`、不同目标目录下均只返回退出码 0，未创建安装目录或卸载注册项，原因尚未定位；因此真实安装、安装后启动和卸载 **未通过**，不能把该退出码当作安装成功。`Get-AuthenticodeSignature` 为 `NotSigned`，仍使用默认 Electron 图标；代码签名、macOS/Linux 构建、陌生 Windows 机器的交互式安装/卸载与首个任务、长稳和升级均未完成，P3-04 不能标记全部完成。
+**P3-04 验收边界（仍进行中）**：Windows x64 的全新自定义目录安装、安装后首启、静默卸载和正常卸载向导现已通过，但这不等同于发布验收完成。最终安装器 `Get-AuthenticodeSignature` 为 `NotSigned`，仍使用默认 Electron 图标；代码签名、可信时间戳、macOS/Linux 构建、陌生 Windows 机器从 GitHub Release 下载后的安装/卸载与首个任务、长稳、升级和回滚均未完成，P3-04 不能标记全部完成。
+
+**P3-04 空目录首装修复（2026-11-08）**：用户连续两次安装到同一空目录，均出现「AgentKey Pro 无法关闭」和卸载器写入失败，确认不是正常旧版本覆盖安装。electron-builder 默认即使空目录首装也执行 `CHECK_APP_RUNNING`，现由 `desktop/nsis/include.nsh` 的 `customCheckAppRunning` 在目标 exe 确实存在时才执行原检测，避免无应用可关闭时的误报。自动安装测试使用 `ProcessStartInfo.UseShellExecute=false` 保留 `/S`、`/D=` 参数；`Start-Process`/ShellExecute 对未签名安装器会触发安全提示，曾造成参数和实际执行状态难以确认，不能把启动器返回 0 当作安装或卸载成功。
+
+**P3-04 卸载框架根因与修复（2026-11-08）**：正常卸载器会被 NSIS 复制到 `Temp\~nsu.tmp\Un_A.exe` 执行，因此 `$EXEDIR` 不是安装目录；electron-builder 的通用 `initMultiUser`/卸载模式页又会把 `$INSTDIR` 重置为默认每用户目录，并在卸载页复用“所有用户/仅为我安装/全新安装”等安装文案。现场轨迹显示默认目录被删除而自定义目录完整保留；真实子进程命令行则包含 `_?=<原始安装目录>`。NSIS 会从 `$CMDLINE` 隐藏这个特殊参数，因此项目内 NSIS include 使用 `StdUtils.GetAllParameters` 恢复原始路径，在 `customUnInit` 和删除前重新固定 `$INSTDIR`；`customInstallMode` 强制与 `perMachine: false` 一致的当前用户模式，跳过通用模式选择页；`customRemoveFiles` 直接 `RMDir /r`，避开默认更新专用 `atomicRMDir/restoreFiles` 分支。所有修复均在 `desktop/nsis/include.nsh`，未修改 `node_modules`，临时诊断日志已全部移除。
+
+**P3-04 最终安装/卸载实测（2026-11-08）**：最终无诊断安装器生成于 `2026-11-08 22:33:57`，长度 **370842134 字节**，SHA-256 为 `0199BC52256844D29BCB9DB80864CA42A2801F74F48E8F7A4D7DE66DFFB4BA4C`。在两个不同的全新自定义 `/D=` 目录分别验证：① `/S` 静默卸载；② 以 Windows 注册的 `/currentuser` 命令启动非静默向导，首页点击“下一步”后直接进入卸载进度，`MODE_PAGE_REAPPEARED=False`、到达完成页，不再出现截图中的模式选择/“全新安装”页面。两条路径结束时应用 exe、卸载器、安装目录、Install/Uninstall 注册项均不存在；既有测试数据目录保留，`aes.key` SHA-256 前后均为 `335D35164AFC029D255504FACA357E6B85B7CDE90902CBEB8A0CE44135C7A0EF`，无相关 AgentKey/Java/PostgreSQL 残留进程。
+
+**P3-04 Windows 安全警告与签名安排（2026-11-08 用户反馈）**：启动当前 `AgentKey Pro Setup 0.1.0.exe` 会出现「Open File - Security Warning / Unknown Publisher」，根因是安装器没有有效的 Authenticode 代码签名；从 GitHub Release 下载未签名 exe 同样会触发此类警告，不能把引导用户点「Run」、`Unblock-File` 或关闭 Windows 安全功能当作发布方案。后续发布必须完成：① 申请 OV 或 EV 代码签名证书，私钥放证书介质/HSM/云签名服务或 CI 加密凭据，证书与密码不得入库；② 在 Windows Release 构建中通过 electron-builder 的 `CSC_LINK`/`CSC_KEY_PASSWORD` 或本机证书存储配置，对安装器和应用 exe 签名并加可信时间戳；③ 发布前用 `Get-AuthenticodeSignature` 验证状态为 `Valid`、发布者名称正确且时间戳有效，在 Release 同时提供 SHA-256；④ 从 GitHub Release 重新下载到干净 Windows 机器，确认不再显示 `Unknown Publisher`，再完成安装、启动、升级和卸载验收。需注意普通 OV 签名不等于立即获得 SmartScreen 信誉，EV 或累计分发信誉也不能预先承诺完全消除所有 SmartScreen 提示，应以真实下载验收结果为准。开发期 unsigned 包仍可能告警，因此自动冒烟优先运行 unpacked 应用，真实安装器只在明确的安装验收阶段启动。
 
 **出口标准**：陌生机器安装后能完成首个任务；升级、回滚可用；数据目录可备份；隐私政策、服务条款、第三方许可与遥测开关随版本发布。
 

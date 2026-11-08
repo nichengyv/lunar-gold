@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     按锁文件安装前后端依赖，依次构建前端、含 UI/PG 运行时的后端 jar、
-    裁剪 JRE 和 electron-builder 安装包。unpacked 暂存在系统临时目录，避免 IDE
-    文件监视长期占用工作区内的 default_app.asar；最终安装包仍写入 build/installer。
+    裁剪 JRE 和 electron-builder 安装包。unpacked 与最终安装包都写入系统临时目录，
+    避免 IDE 文件监视占用以及工作区 build 目录的低完整性标记影响安装器。
     不清理上传文件、开发数据库或用户数据目录。
 
 .PARAMETER JavaHome
@@ -39,6 +39,7 @@ $pgRuntime = Join-Path $buildDir 'pg-runtime\pg-runtime.txz'
 $jreJava = Join-Path $buildDir 'desktop-runtime\jre\bin\java.exe'
 $packRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'agentkey-desktop-pack'
 $unpacked = Join-Path $packRoot 'win-unpacked'
+$installerDir = Join-Path ([System.IO.Path]::GetTempPath()) 'agentkey-desktop-installer'
 
 function Write-Step($message) { Write-Host "[desktop-installer] $message" -ForegroundColor Cyan }
 function Assert-NativeSuccess($message) {
@@ -106,12 +107,12 @@ try {
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
     & $builder --dir --publish never "--config.directories.output=$packRoot"
     Assert-NativeSuccess 'electron-builder unpacked 构建失败'
-    & $builder --prepackaged $unpacked --publish never
+    & $builder --prepackaged $unpacked --publish never "--config.directories.output=$installerDir"
     Assert-NativeSuccess 'electron-builder NSIS 构建失败'
 } finally { Pop-Location }
 
 $package = Get-Content -LiteralPath (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
-$installer = Join-Path $buildDir "installer\$($package.build.productName) Setup $($package.version).exe"
+$installer = Join-Path $installerDir "$($package.build.productName) Setup $($package.version).exe"
 $packagedJar = Join-Path $unpacked 'resources\sidecar\agent-gateway-1.0.0.jar'
 Assert-File $installer 'NSIS 安装包未生成'
 Assert-File $packagedJar 'unpacked 应用缺少后端 jar'
