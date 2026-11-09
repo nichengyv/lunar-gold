@@ -1,11 +1,10 @@
-; A running executable cannot be deleted on Windows. If the target executable
-; does not exist, this installation cannot have a running app to close.
-; electron-builder otherwise runs its process detection even for an empty
-; first-install directory, which can produce a false "app cannot be closed".
-!include "getProcessInfo.nsh"
-Var pid
+; electron-builder's PowerShell check treats every process below INSTDIR as
+; the app. Use the exact executable name instead so an installer, uninstaller,
+; or unrelated helper cannot trigger a false "app cannot be closed" error.
+!include "nsProcess.nsh"
 !ifdef BUILD_UNINSTALLER
   Var originalUninstallDir
+  Var isUpdateFlow
 !endif
 
 ; NSIS removes the special _?= parameter from $CMDLINE before macros can read
@@ -51,10 +50,23 @@ Var pid
   StrCpy $isForceCurrentInstall "1"
 !macroend
 
+; Close a running instance before replacing files, but never block the
+; installation. If the close/kill reports failure we continue: the file copy
+; step already retries and offers its own retry prompt, and a dead-end dialog
+; made the installer unusable when the process check produced a false positive.
 !macro customCheckAppRunning
   ${If} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
-    !insertmacro IS_POWERSHELL_AVAILABLE
-    !insertmacro _CHECK_APP_RUNNING
+    ${nsProcess::FindProcess} "${APP_EXECUTABLE_FILENAME}" $R0
+    ${If} $R0 == 0
+      DetailPrint "$(appClosing)"
+      ${nsProcess::CloseProcess} "${APP_EXECUTABLE_FILENAME}" $R0
+      Sleep 1000
+      ${nsProcess::FindProcess} "${APP_EXECUTABLE_FILENAME}" $R0
+      ${If} $R0 == 0
+        ${nsProcess::KillProcess} "${APP_EXECUTABLE_FILENAME}" $R0
+        Sleep 1000
+      ${EndIf}
+    ${EndIf}
   ${EndIf}
 !macroend
 
@@ -63,8 +75,10 @@ Var pid
 !macro customUnInit
   !insertmacro GetOriginalUninstallDir $originalUninstallDir
   ${If} $originalUninstallDir != ""
+    StrCpy $isUpdateFlow "1"
     StrCpy $INSTDIR $originalUninstallDir
   ${Else}
+    StrCpy $isUpdateFlow "0"
     SetRegView 64
     ReadRegStr $0 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
     ${If} $0 != ""
@@ -75,9 +89,19 @@ Var pid
 !macroend
 
 ; The generic mode page can reset INSTDIR again, so restore it before removal.
+; For a real uninstall (not an update run via _?=), also remove the current-user
+; shortcuts and registry keys explicitly: electron-builder's later cleanup runs
+; after the program files are gone and can be skipped, leaving both behind.
 !macro customUnInstall
   ${If} $originalUninstallDir != ""
     StrCpy $INSTDIR $originalUninstallDir
+  ${EndIf}
+  ${If} $isUpdateFlow == "0"
+    SetShellVarContext current
+    Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
+    Delete "$SMPROGRAMS\${SHORTCUT_NAME}.lnk"
+    DeleteRegKey HKCU "${UNINSTALL_REGISTRY_KEY}"
+    DeleteRegKey HKCU "${INSTALL_REGISTRY_KEY}"
   ${EndIf}
 !macroend
 

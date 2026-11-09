@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * AgentKey Pro 桌面壳（P3-01 骨架）。
+ * Lunar Gold 桌面壳（P3-01 骨架）。
  *
  * 职责：单实例 → 拉起侧车（与日志同目录）→ 就绪后加载本地 UI → 退出时终止整棵进程树。
  * 安装包、签名、自动更新属于 P3-04，这里只保证「同一个 jar 能像桌面应用一样启动」。
@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { startSidecar, stopSidecar } = require('./sidecar');
 
-const APP_TITLE = 'AgentKey Pro';
+const APP_TITLE = 'Lunar Gold';
 const JAR_NAME = 'agent-gateway-1.0.0.jar';
 const HEALTH_TIMEOUT_MS = 120000;
 
@@ -52,7 +52,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function bootstrap() {
-  const dataDir = process.env.DESKTOP_DATA_DIR || path.join(app.getPath('home'), '.agentkey', 'desktop');
+  const dataDir = process.env.DESKTOP_DATA_DIR || path.join(app.getPath('home'), '.lunargold', 'desktop');
   fs.mkdirSync(dataDir, { recursive: true });
 
   runtime = {
@@ -176,7 +176,7 @@ function loadingPage() {
 
 function resolveJar() {
   const candidates = [];
-  if (process.env.AGENTKEY_JAR) candidates.push(process.env.AGENTKEY_JAR);
+  if (process.env.LUNARGOLD_JAR) candidates.push(process.env.LUNARGOLD_JAR);
   if (app.isPackaged) {
     candidates.push(path.join(process.resourcesPath, 'sidecar', JAR_NAME));
     candidates.push(path.join(process.resourcesPath, 'sidecar', 'agent-gateway.jar'));

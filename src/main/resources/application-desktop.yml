@@ -32,7 +32,7 @@ app:
     log-codes: false
   desktop:
     # 本地数据根目录：数据库在 <data-dir>/db，删除该目录等于重置桌面端数据
-    data-dir: ${DESKTOP_DATA_DIR:${user.home}/.agentkey/desktop}
+    data-dir: ${DESKTOP_DATA_DIR:${user.home}/.lunargold/desktop}
     # 含 pgvector 的 PostgreSQL 运行时压缩包（P2-08 按平台产出）；
     # 留空时优先使用 jar 内置的 classpath:desktop/pg-runtime.txz（-Pwith-pg-runtime 打包），
     # 两者都没有才退回依赖内置二进制，此时 pgvector 不可用、V3 迁移会报错

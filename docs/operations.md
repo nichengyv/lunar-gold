@@ -42,7 +42,7 @@ npm run dev     # http://localhost:5173, 代理 /api → 8080
 
 ### 1.4 后端（desktop 桌面模式，PR-06 / PR-07）
 
-桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.agentkey/desktop/db`，首次启动自动建库并执行 Flyway V1~V15。
+桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.lunargold/desktop/db`，首次启动自动建库并执行 Flyway V1~V15。
 
 **运行时清单与构建（P2-08，Windows x64）**：Maven 依赖内置的 zonky 二进制不含 pgvector，需先用脚本注入扩展。
 
@@ -75,7 +75,7 @@ $env:JAVA_HOME = 'C:\Users\16680\.jdks\ms-21.0.11'
 $env:AES_MASTER_KEY = '<Base64 编码的 16/24/32 字节随机密钥>'
 # 含 pgvector 的 PostgreSQL 运行时压缩包；未配置时使用依赖内置二进制（不含 pgvector，V3 迁移会失败）
 $env:DESKTOP_PG_RUNTIME = (Resolve-Path 'build\pg-runtime\pg-runtime-windows-x64-pg16.11.0-vector0.8.7.txz').Path
-$env:DESKTOP_DATA_DIR = 'D:\agentkey-data'      # 可选，默认 ~/.agentkey/desktop
+$env:DESKTOP_DATA_DIR = 'D:\lunargold-data'      # 可选，默认 ~/.lunargold/desktop
 $env:DESKTOP_SERVER_PORT = '8080'               # 可选
 $env:DESKTOP_DB_PORT = '0'                      # 0 = 每次启动自动挑空闲端口
 
@@ -129,7 +129,7 @@ java -jar target\agent-gateway-1.0.0.jar --spring.profiles.active=desktop
 
 ### 1.6 桌面壳（P3-01 骨架，Electron）
 
-前置：先按 1.5 产出 `target\agent-gateway-1.0.0.jar`（壳查找顺序：`AGENTKEY_JAR` → 打包后的 `resources/sidecar` → 仓库内 `target/`）。
+前置：先按 1.5 产出 `target\agent-gateway-1.0.0.jar`（壳查找顺序：`LUNARGOLD_JAR` → 打包后的 `resources/sidecar` → 仓库内 `target/`）。
 
 ```powershell
 cd d:\test-code\agent-gateway-v3\desktop
@@ -180,7 +180,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-desktop-runtime.ps1
 | `WORKSPACE_JAVA_HOME` | C:/Users/16680/.jdks/ms-21.0.11 | 找不到 java 时的兜底 |
 | `WORKSPACE_MAVEN_HOME` | D:/IDEA/.../maven3 | 找不到 mvn 时的兜底 |
 | `DESKTOP_PG_RUNTIME` | 空 | 仅 desktop：含 pgvector 的 PostgreSQL 运行时压缩包路径，由 `scripts/build-pg-runtime.ps1` 产出；留空则用依赖内置二进制（不含 pgvector） |
-| `DESKTOP_DATA_DIR` | `~/.agentkey/desktop` | 仅 desktop：本地数据根目录，数据库在 `<data-dir>/db` |
+| `DESKTOP_DATA_DIR` | `~/.lunargold/desktop` | 仅 desktop：本地数据根目录，数据库在 `<data-dir>/db` |
 | `DESKTOP_DB_PORT` | `0` | 仅 desktop：内嵌库端口，`0` 表示每次启动自动挑空闲端口 |
 | `DESKTOP_SERVER_PORT` | `8080` | 仅 desktop：HTTP 端口 |
 | `DESKTOP_LOCAL_USERNAME` | `local` | 仅 desktop：本地单用户用户名，首次启动自动建号 |

@@ -3,7 +3,7 @@
     <aside class="sidebar" :class="{ open: sidebarOpen, collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
         <Icon name="bot" :size="18" />
-        <span class="brand-text">AgentKey</span>
+        <span class="brand-text">Lunar Gold</span>
         <button
           class="collapse-btn"
           :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
@@ -280,7 +280,7 @@
         <div class="ws-form">
           <div class="ws-field">
             <label>工作区名称</label>
-            <el-input v-model="wsName" placeholder="例如：我的博客项目、AgentKey" maxlength="50" />
+            <el-input v-model="wsName" placeholder="例如：我的博客项目、Lunar Gold" maxlength="50" />
           </div>
           <div class="ws-field">
             <label>工作区文件夹 <span class="required">*</span></label>
@@ -438,7 +438,7 @@ const navItems = computed(() => {
   return items;
 });
 
-const pageTitle = computed(() => (route.meta.title as string) || 'AgentKey');
+const pageTitle = computed(() => (route.meta.title as string) || 'Lunar Gold');
 
 /** 搜索时同时匹配工作区名和其下会话标题；命中会话的工作区也会保留并自动展开 */
 function sessionsOf(projectId: number) {

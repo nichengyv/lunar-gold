@@ -61,7 +61,7 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**运行模式（PR-06）**：`cloud`/`dev` 使用外部 PostgreSQL，Redis 只在云端提供限流、登录锁定、JWT 撤销与验证码存储；`desktop` 由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据目录默认 `~/.agentkey/desktop/db`（`DESKTOP_DATA_DIR` 可改），排除 Redis 自动配置后上述能力全部走进程内存降级，`/api/meta` 返回 `DESKTOP` 能力集。
+**运行模式（PR-06）**：`cloud`/`dev` 使用外部 PostgreSQL，Redis 只在云端提供限流、登录锁定、JWT 撤销与验证码存储；`desktop` 由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据目录默认 `~/.lunargold/desktop/db`（`DESKTOP_DATA_DIR` 可改），排除 Redis 自动配置后上述能力全部走进程内存降级，`/api/meta` 返回 `DESKTOP` 能力集。
 
 **本地身份（PR-07）**：`desktop` 下由 `LocalUserService` 首次启动创建单用户（默认 `local`），`LocalTokenService` 在 `<data-dir>/local-token` 生成并持久化随机令牌，`LocalTokenFilter` 校验通过后把用户 id 写入 `SecurityContext`；`JwtAuthenticationFilter` 标注 `@Profile("!desktop")` 与前者互斥，`SecurityConfig` 用 `ObjectProvider` 只装配当前 profile 的认证过滤器。因此桌面端不需要 `JWT_SECRET`，注册、邮箱验证码与找回密码入口在 `DESKTOP` 模式下直接返回 404。浏览器开发模式可由路由守卫调用 `GET /api/desktop/token` 自动换取令牌（仅回环地址 + `Origin` 白名单，可用 `DESKTOP_EXPOSE_TOKEN_ENDPOINT=false` 关闭）。
 

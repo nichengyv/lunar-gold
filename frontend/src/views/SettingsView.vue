@@ -14,7 +14,7 @@
           <span>{{ tab.label }}</span>
         </button>
         <div class="nav-spacer"></div>
-        <div class="nav-version">AgentKey {{ version }}</div>
+        <div class="nav-version">Lunar Gold {{ version }}</div>
       </nav>
 
       <!-- 右侧内容区 -->
@@ -132,7 +132,7 @@
           <div class="section">
             <h2 class="section-title">扩展工具</h2>
             <p class="section-desc">
-              AgentKey 内置了文件读写、命令执行、代码编辑等工具链。扩展工具可以接入更多外部能力，
+              Lunar Gold 内置了文件读写、命令执行、代码编辑等工具链。扩展工具可以接入更多外部能力，
               让 Agent 能做普通聊天机器人做不到的事。
             </p>
 

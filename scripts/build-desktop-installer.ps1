@@ -4,15 +4,19 @@
 
 .DESCRIPTION
     按锁文件安装前后端依赖，依次构建前端、含 UI/PG 运行时的后端 jar、
-    裁剪 JRE 和 electron-builder 安装包。unpacked 与最终安装包都写入系统临时目录，
-    避免 IDE 文件监视占用以及工作区 build 目录的低完整性标记影响安装器。
-    不清理上传文件、开发数据库或用户数据目录。
+    裁剪 JRE 和 electron-builder 安装包。unpacked 默认写入工作区外
+    D:\test\01\desktop-pack，避免 IDE 索引锁定 asar；最终安装包固定写入
+    项目 release/installer。不清理上传文件、开发数据库或用户数据目录。
 
 .PARAMETER JavaHome
     带 javac/jlink 的 JDK 21 目录；默认取 JAVA_HOME。
 
 .PARAMETER MavenCmd
     mvn.cmd 路径；默认从 PATH 或 MAVEN_HOME 解析。
+
+.PARAMETER PackRoot
+    unpacked 中间构建目录；默认 D:\test\01\desktop-pack。
+    最终安装器始终写入项目 release/installer。
 
 .PARAMETER SkipInstall
     复用现有 node_modules，跳过 npm ci。
@@ -27,6 +31,7 @@
 param(
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$MavenCmd,
+    [string]$PackRoot = 'D:\test\01\desktop-pack',
     [switch]$SkipInstall,
     [switch]$SkipTests
 )
@@ -37,9 +42,8 @@ $buildDir = Join-Path $repo 'build'
 $jarPath = Join-Path $repo 'target\agent-gateway-1.0.0.jar'
 $pgRuntime = Join-Path $buildDir 'pg-runtime\pg-runtime.txz'
 $jreJava = Join-Path $buildDir 'desktop-runtime\jre\bin\java.exe'
-$packRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'agentkey-desktop-pack'
-$unpacked = Join-Path $packRoot 'win-unpacked'
-$installerDir = Join-Path ([System.IO.Path]::GetTempPath()) 'agentkey-desktop-installer'
+$unpacked = Join-Path $PackRoot 'win-unpacked'
+$installerDir = Join-Path $repo 'release\installer'
 
 function Write-Step($message) { Write-Host "[desktop-installer] $message" -ForegroundColor Cyan }
 function Assert-NativeSuccess($message) {
@@ -105,14 +109,15 @@ try {
     if (-not $SkipInstall) { & npm ci; Assert-NativeSuccess '桌面壳 npm ci 失败' }
     $builder = Join-Path $repo 'desktop\node_modules\.bin\electron-builder.cmd'
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
-    & $builder --dir --publish never "--config.directories.output=$packRoot"
+    & $builder --dir --publish never "--config.directories.output=$PackRoot"
     Assert-NativeSuccess 'electron-builder unpacked 构建失败'
     & $builder --prepackaged $unpacked --publish never "--config.directories.output=$installerDir"
     Assert-NativeSuccess 'electron-builder NSIS 构建失败'
 } finally { Pop-Location }
 
 $package = Get-Content -LiteralPath (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
-$installer = Join-Path $installerDir "$($package.build.productName) Setup $($package.version).exe"
+$installerName = $package.build.artifactName.Replace('${version}', $package.version).Replace('${ext}', 'exe')
+$installer = Join-Path $installerDir $installerName
 $packagedJar = Join-Path $unpacked 'resources\sidecar\agent-gateway-1.0.0.jar'
 Assert-File $installer 'NSIS 安装包未生成'
 Assert-File $packagedJar 'unpacked 应用缺少后端 jar'

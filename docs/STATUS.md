@@ -1,4 +1,4 @@
-# AgentKey Pro · 项目状态速查
+# Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
 > 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-06、P2-07、P2-08、P3-00、P3-00b、P3-01、P3-02、P3-03、PR-12。

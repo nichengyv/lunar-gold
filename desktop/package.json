@@ -1,8 +1,9 @@
 {
-  "name": "agentkey-desktop",
+  "name": "lunargold-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentKey Pro 桌面壳（Electron）",
+  "description": "Lunar Gold（金月）桌面壳（Electron）",
+  "author": "杨俊懿",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -14,8 +15,10 @@
     "electron-builder": "^26.18.0"
   },
   "build": {
-    "appId": "com.agentkey.pro",
-    "productName": "AgentKey Pro",
+    "appId": "com.lunargold.desktop",
+    "productName": "Lunar Gold",
+    "executableName": "lunar-gold",
+    "artifactName": "LunarGold-Setup-${version}.${ext}",
     "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "../build/installer"
@@ -43,7 +46,7 @@
       "include": "nsis/include.nsh",
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "AgentKey Pro",
+      "shortcutName": "Lunar Gold",
       "deleteAppDataOnUninstall": false
     }
   }

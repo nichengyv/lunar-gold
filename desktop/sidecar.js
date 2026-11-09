@@ -202,7 +202,7 @@ async function startSidecar({ javaCmd, jarPath, env, logPath, timeoutMs = 120000
   child.stderr.pipe(log);
 
   // 与后端 app.desktop.data-dir 的默认值保持一致，用于按 postmaster.pid 终止内嵌数据库
-  const dataDir = (env && env.DESKTOP_DATA_DIR) || path.join(os.homedir(), '.agentkey', 'desktop');
+  const dataDir = (env && env.DESKTOP_DATA_DIR) || path.join(os.homedir(), '.lunargold', 'desktop');
   const handle = { child, port, url: `http://127.0.0.1:${port}/`, dataDir };
   try {
     await waitForHealth(port, timeoutMs, child, logPath);

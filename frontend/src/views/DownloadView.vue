@@ -3,7 +3,7 @@
     <div class="download-card">
       <div class="download-hero">
         <span class="download-logo"><Icon name="bot" :size="28" /></span>
-        <h1>AgentKey 桌面端</h1>
+        <h1>Lunar Gold 桌面端</h1>
         <p class="download-sub">
           本地项目读写、命令执行、Git、MCP 与审批审查全部在你自己的电脑上运行。
         </p>

@@ -1,7 +1,7 @@
 <template>
   <div class="auth-overlay">
     <div class="auth-card">
-      <h2><Icon name="bot" :size="22" /> AgentKey Pro</h2>
+      <h2><Icon name="bot" :size="22" /> Lunar Gold</h2>
 
       <div v-if="mode !== 'reset'" class="input-group">
         <label>用户名</label>
