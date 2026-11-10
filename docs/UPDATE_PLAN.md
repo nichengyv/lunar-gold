@@ -10,14 +10,14 @@
 
 ## 0. 当前位置与下一步
 
-Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环和统一构建已通过，详细证据已归档。
+Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环、统一构建与 v0.1.0 预发布已完成，详细证据已归档。**本阶段只适配 Windows**，macOS/Linux 安装包按项目所有者决定暂缓。
 
-**当前主线仍是 P3-04 发布基线收尾。**
+**当前主线：P3-05 已发布 v0.1.1 基线，下一步做 0.1.2（版本号 + 体积裁剪）并用线上源复核 N-1 → N。**
 
-1. ~~最新安装器最小回归~~ **已完成**：当前基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,359,923 字节，含定稿黑白图标），SHA-256 `40C06B8AC86054FBCC4777C81B4253A7D1B5B058632D12367BB027CF5EE6A92E`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.5。更早的 `A46FF10F…4D2D`、`6FE3C93D…C220`、`6BEF673C…1AD959` 三版验收均不适用于新产物。
-2. 开源许可证已选定 **Apache-2.0** 并写入 `LICENSE`；下一步公开 GitHub 仓库并申请 SignPath Foundation 开源签名（均需项目所有者操作）。
-3. 在 GitHub Actions 中完成签名、Release 上传和干净 Windows 机器验收。
-4. Windows 发布基线稳定后进入 P3-05 自动更新；Phase 4、Phase 5 不是生成当前 Windows 安装包的前置条件。
+1. ~~最新安装器最小回归~~ **已完成**：当前发布基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,662,112 字节，含定稿黑白图标与 `Lunar Gold Project` author 元数据），SHA-256 `3E085FAB3D709EE0CD44894F7BF10838B21F477DC0CD06A91971B921ED9A9022`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；GitHub `v0.1.0` 资产大小与本地产物一致（371,662,112 字节）。证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.6。
+2. 开源许可证已选定 **Apache-2.0** 并写入 `LICENSE`；GitHub 公开仓库已完成，**v0.1.1 已于 2026-11-10 作为正式 Release 发布**（非 prerelease，`/releases/latest` 指向 v0.1.1，含安装器、blockmap、`latest.yml`、`SHA256SUMS.txt`，哈希与本地一致）。
+3. **SignPath Foundation 申请已被拒（2026-11-10）**：理由是项目缺少公开可见度信号（GitHub star/fork/贡献者、外部文章或社区讨论、机构背书），非质量判断；官方建议积累社区后重申，或改用其付费订阅。当前结论：**未签名正常发布，README 明示「未知发布者」提示与 SHA-256 校验方式**；签名待有可见度后重申或另选商业/Azure 方案，不再阻塞 P3-05。接入后由 [release.yml](../.github/workflows/release.yml) 自动签名并复核 Authenticode。
+4. 代码侧直接进入 P3-05 自动更新；签名与 clean-machine 验收作为并行阻塞项跟踪，不阻塞自动更新开发。Phase 4、Phase 5 不是当前前置条件。
 
 ---
 
@@ -52,38 +52,51 @@ Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环
 
 | 工作 | 当前状态 / 下一步 | 验收 |
 |---|---|---|
-| 最新 Windows 安装器最小回归 | **已完成**（2026-11-09）；基线哈希 `6BEF673C…1AD959`，22 项检查全通过 | 安装、首启、卸载通过；目录、注册项、health 和进程状态正确 |
-| Windows 应用与安装器签名 | **待申请和接入**；优先 SignPath Foundation 免费开源计划 | Authenticode 为 `Valid`，发布者与实际证书一致，可信时间戳有效 |
-| GitHub Release | **已创建未签名预发布**（2026-11-10）：`v0.1.0`，安装器 371,359,923 字节（与本地哈希 `40C06B8A…6A92E` 一致），说明含未签名声明与 SignPath 链接。SignPath 通过后发布签名版并复验 | 从 Release 重新下载后哈希一致，干净机器安装/首启/首个任务/卸载通过 |
-| macOS/Linux 运行时与安装包 | **未完成**；分别准备 PG/pgvector、JRE 和签名/公证 | 每个 OS/arch 独立安装与首启通过，不外推 Windows 结果 |
+| 最新 Windows 安装器最小回归 | **已完成**（2026-11-10）；发布基线哈希 `3E085FAB…9022`，22 项检查全通过 | 安装、首启、卸载通过；目录、注册项、health 和进程状态正确 |
+| Windows 应用与安装器签名 | **SignPath Foundation 申请已被拒**（2026-11-10，缺公开可见度信号）；改按未签名发布并在 README 明示提示，待可见度积累后重申或评估商业/Azure 证书 | Authenticode 为 `Valid`，发布者与实际证书一致，可信时间戳有效 |
+| GitHub Release | **已完成**（2026-11-10）：`v0.1.1` 为正式 Release（非 prerelease），`/releases/latest` 指向它；资产为 `LunarGold-Setup-0.1.1.exe`（371,688,816 字节，SHA-256 `5ECB4371…6400B`）、`.blockmap`、`latest.yml`（声明 v0.1.1，sha512/size 与实际一致）、`SHA256SUMS.txt`。未签名声明与 SHA-256 已写入 Release 说明和 README | 从 Release 重新下载后哈希一致，干净机器安装/首启/首个任务/卸载通过 |
+| macOS/Linux 运行时与安装包 | **暂缓**；项目所有者决定本阶段只适配 Windows | 恢复时每个 OS/arch 独立安装与首启通过，不外推 Windows 结果 |
 | 图标与发布元数据 | **图标已完成**（2026-11-10）：黑白月亮线稿接入 `desktop/app-icon/icon.ico`，含 16–256 七档尺寸；`author` 已填。Release 文案元数据随 P3-08 补齐 | 安装器、快捷方式、卸载项和 Release 信息一致 |
 
 #### GitHub + SignPath 免费开源路线
 
-GitHub 托管和公开仓库标准 Actions runner可以免费，但 GitHub 不提供 Windows Authenticode 证书。当前优先申请 SignPath Foundation；免费以资格审核通过为前提，不视为已经获得。
+GitHub 托管和公开仓库标准 Actions runner可以免费，但 GitHub 不提供 Windows Authenticode 证书。SignPath Foundation **2026-11-10 已拒**（缺 star/fork/贡献者、外部文章、社区讨论或机构背书等可见度信号），待项目积累用户与讨论后重申；当前不为签名阻塞发布。
 
 - [x] **选择开源许可证**：已选定 Apache-2.0 并写入仓库根目录 `LICENSE`；发布前仍需确认全部被打包组件满足 SignPath 的开源要求。
-- [ ] **建立 GitHub 公开仓库**：明确 GitHub 与现有 Gitee 的主仓库/镜像关系，保护默认分支和发布标签。
-- [ ] **申请 SignPath Foundation**：提交项目、仓库和许可证信息；审核未通过前不得宣称签名免费方案已落地。
-- [ ] **接入受信构建**：按最小权限安装 SignPath GitHub App，关联指定仓库、项目和 GitHub Actions；私钥由签名服务管理，不导出、不入库。
+- [x] **建立 GitHub 公开仓库**：`https://github.com/nichengyv/lunar-gold` 已公开，`v0.1.0` 预发布已上传；默认分支与标签保护待按需开启。
+- [x] **申请 SignPath Foundation**：2026-11-10 提交，同日被拒，理由为公开可见度不足（非质量判断），官方建议积累社区后重申或改用付费订阅。
+- [ ] **积累可见度后重申**：发布正式版本、完善 README、在社区（V2EX / 少数派 / Reddit r/selfhosted 等）介绍项目后再次申请。
+- [ ] **接入受信构建**：审核通过后按最小权限安装 SignPath GitHub App，关联指定仓库、项目和 GitHub Actions；私钥由签名服务管理，不导出、不入库。
 - [ ] **签名应用 exe 和安装器**：在受信 Release 构建中签名并加可信时间戳，禁止只签外层安装器而遗漏主程序。
 - [ ] **验证签名与下载产物**：检查 `Get-AuthenticodeSignature`、证书链、发布者和时间戳；Release 同时提供 SHA-256。
 - [ ] **验收 SmartScreen 实际表现**：OV 级签名不等于立即获得 SmartScreen 信誉，不承诺消除所有提示。
-- [ ] **准备备选方案**：审核未通过时，未签名包只用于明确标注的内部测试；正式公开分发再评估商业证书。自签名不作为信任方案。
+- [ ] **准备备选方案**：已达可见度门槛前按未签名分发，README 明示「未知发布者」提示并提供 SHA-256；正式大规模分发再评估商业证书或 Azure Trusted Signing。自签名不作为信任方案。
 
 SignPath 的 Windows 方案不覆盖 macOS Developer ID 和 Apple 公证；macOS 的费用与凭据需单独评估。
 
 ### P3-05：自动更新与失败回滚
 
-- 接入 `electron-updater`、GitHub Release 清单和 blockmap；开发态不自动更新。
-- 默认采用检查并提示，不强制用户立即更新。
-- 下载后校验版本、签名和哈希，校验失败不得安装。
-- 升级前备份数据目录；数据库迁移失败不得删除工作区、会话、知识库或 uploads。
-- 验证 N-1 → N 的下载、退出、安装、重启和首启。
-- 模拟下载中断、磁盘不足、签名错误、安装失败和迁移失败，确认旧版本可恢复。
-- 升级、回滚结束后不得残留无关 Lunar Gold/Java/PostgreSQL 进程。
+- [x] 接入 `electron-updater`、GitHub Release 清单和 blockmap；开发态不自动更新。
+  - `desktop/updater.js` 统一封装检查/下载/校验/备份/安装/回滚；`desktop/package.json` 增加 `build.publish`，electron-builder 已产出 `latest.yml` + `.blockmap`。
+  - 构建脚本补写 `resources/app-update.yml`（`--dir` + `--prepackaged` 两段式构建不会自动生成，缺失会导致装好的应用读不到更新源）。
+- [x] 默认采用检查并提示，不强制用户立即更新。
+  - 首启延迟 8 秒检查，发现新版弹窗选择「下载更新 / 稍后提醒」；下载完成后可选「立即重启安装 / 退出时安装」。
+- [x] 下载后校验版本、签名和哈希，校验失败不得安装。
+  - sha512 由 electron-updater 强校验；`LUNARGOLD_REQUIRE_SIGNATURE=1` 时额外校验 Authenticode（SignPath 接入后开启）。
+- [x] 升级前备份数据目录；数据库迁移失败不得删除工作区、会话、知识库或 uploads。
+  - 备份整目录到 `~/.lunargold/backup/<旧版本>-<时间戳>`，保留最近 2 份；安装前写 `upgrade-state.json` 标记，首启成功自动清理，失败保留证据目录 `*.failed-<时间戳>`。
+  - 工作区为用户自选目录、`uploads/` 在安装目录，升级与回滚均未删除。
+- [x] 验证 N-1 → N 的下载、退出、安装、重启和首启。
+  - 本地 generic 源实测 `0.1.1 → 0.1.2`：下载 → 备份 → 静默安装 → 重启 → 首启成功 → 标记清理；`local-token` 哈希、`db` 数据、用户 canary 文件均完整。
+- [x] 模拟下载中断、磁盘不足、签名错误、安装失败和迁移失败，确认旧版本可恢复。
+  - 哈希错误：`sha512 checksum mismatch`，不安装，版本不变。
+  - 签名错误：`NotSigned`，不安装，版本不变。
+  - 磁盘不足：下载前预检拦截（`磁盘空间不足`），不下载不安装。
+  - 迁移/启动失败：人为破坏侧车 jar 触发回滚，自动恢复数据备份并静默装回 `0.1.1`；`local-token` 哈希与 canary 一致，`data2.failed-*` 保留现场，陈旧升级标记自动清理。
+- [x] 升级、回滚结束后不得残留无关 Lunar Gold/Java/PostgreSQL 进程。
+  - 正常退出与回滚后检查：`lunar-gold` / `java` / `postgres` 均 0 残留。
 
-**出口**：真实 N-1 升级和至少一类失败回滚通过，用户数据完整。
+**出口**：真实 N-1 升级和至少一类失败回滚通过，用户数据完整。**代码侧已完成（2026-11-10）**，待项目所有者发布 `v0.1.1` 正式 Release（含 `latest.yml`）后，用线上源再跑一次 N-1 → N 复核；SignPath 签名通过后打开签名强制校验。
 
 ### P3-06：崩溃诊断与上报
 
@@ -108,10 +121,12 @@ lint / build / test
 ```
 
 - 公开仓库使用标准 GitHub-hosted runner；私有仓库或自托管 runner 的成本单独评估。
+- **现状**：[release.yml](../.github/workflows/release.yml) 的 `push.tags` 触发在 CI 打包链路冒烟通过前临时关闭（仅留 `workflow_dispatch`），发布使用本地已验证产物 + 手工上传，避免同名标签另起 CI 草稿 Release 冲突；P3-07 打通后恢复标签触发。
 - 发布凭据只放 CI 加密凭据或签名服务，限制 `GITHUB_TOKEN` 和第三方 App 权限。
 - 发布任务只由版本标签或手动触发，不能随普通 push 自动公开。
 - 每个制品可追溯到 commit、工作流运行、测试结果和 SHA-256。
 - 安装器、blockmap 和调试元数据不提交进 Git；`release/` 继续作为本地忽略目录。
+- **体积预算**：当前安装器 354 MiB，主要来自 Electron 运行时 + 242.9 MB 后端 jar（内含 PG 运行时、`openai-java-core`）+ 49.4 MB JRE，桌面壳代码仅约 15 KB。0.1.2 起做依赖裁剪：jar 内多余的 zonky Windows PG 二进制（21.9 MB）、非 Windows 的 netty native 库（7.7 MB）、electron-builder 语言包（`electronLanguages`），目标约 320 MB；不为体积更换内嵌 PG 或私有 JRE 架构。
 - CI 冒烟必须检查真实目录、health、进程和卸载结果，不能只认启动器退出码。
 
 ### P3-08：发布合规

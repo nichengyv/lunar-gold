@@ -12,6 +12,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { startSidecar, stopSidecar } = require('./sidecar');
+const updater = require('./updater');
 
 const APP_TITLE = 'Lunar Gold';
 const JAR_NAME = 'agent-gateway-1.0.0.jar';
@@ -57,6 +58,7 @@ async function bootstrap() {
 
   runtime = {
     jarPath: resolveJar(),
+    dataDir,
     env: {
       ...process.env,
       AES_MASTER_KEY: process.env.AES_MASTER_KEY || readOrCreateAesKey(dataDir)
@@ -67,10 +69,47 @@ async function bootstrap() {
   mainWindow = createWindow();
   await mainWindow.loadURL(loadingPage());
 
+  updater.initUpdater({
+    getWindow: () => mainWindow,
+    dataDir: runtime.dataDir,
+    logPath: runtime.logPath,
+    // 备份数据前停侧车：置位 sidecarRestarting 避免 onSidecarExit 误弹崩溃对话框
+    stopSidecar: () => {
+      sidecarRestarting = true;
+      stopSidecar(sidecar);
+    },
+    // 用户选择「退出时安装」或备份出错时重新拉起侧车
+    restartSidecar: async () => {
+      try {
+        await launchSidecar();
+        await mainWindow.loadURL(sidecar.url);
+      } finally {
+        sidecarRestarting = false;
+      }
+    }
+  });
+
   try {
     await launchSidecar();
     await mainWindow.loadURL(sidecar.url);
+    // 升级后的首次成功启动：确认进程稳定存活几秒再清标记，
+    // 避免启动后秒崩（如新版本初始化异常）却误判为升级成功
+    if (updater.pendingUpgrade()) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (sidecar && sidecar.child && sidecar.child.exitCode === null) {
+        updater.markStartupSuccess();
+      }
+    } else {
+      updater.markStartupSuccess();
+    }
+    updater.scheduleUpdateCheck();
   } catch (err) {
+    // 升级后启动失败才提供回滚入口；普通启动失败保持原有提示
+    const marker = updater.pendingUpgrade();
+    if (marker) {
+      await updater.rollbackAfterFailedUpgrade(marker);
+      return;
+    }
     fail('本地服务没有启动成功', err, runtime.logPath);
   }
 }

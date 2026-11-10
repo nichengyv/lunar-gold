@@ -1,6 +1,6 @@
 {
   "name": "lunargold-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Lunar Gold（金月）桌面壳（Electron）",
   "author": "Lunar Gold Project",
@@ -26,7 +26,16 @@
     "files": [
       "main.js",
       "sidecar.js",
+      "updater.js",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "nichengyv",
+        "repo": "lunar-gold",
+        "releaseType": "draft"
+      }
     ],
     "extraResources": [
       {
@@ -50,5 +59,8 @@
       "shortcutName": "Lunar Gold",
       "deleteAppDataOnUninstall": false
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

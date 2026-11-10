@@ -116,6 +116,24 @@ try {
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
     & $builder --dir --publish never "--config.directories.output=$PackRoot"
     Assert-NativeSuccess 'electron-builder unpacked 构建失败'
+
+    # --dir 不产出 app-update.yml（它只在正式打包目标创建时才写），
+    # 而 CI 是先 --dir、签名 exe、再 --prepackaged 出安装包，跳过这一步会导致装好的应用读不到更新源。
+    Write-Step '写入自动更新清单 app-update.yml'
+    $pkg = Get-Content -LiteralPath (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
+    $publish = @($pkg.build.publish)[0]
+    if (-not $publish) { throw 'desktop/package.json 缺少 build.publish，自动更新无法定位发布源' }
+    $appUpdateYml = @(
+        "provider: $($publish.provider)"
+        "owner: $($publish.owner)"
+        "repo: $($publish.repo)"
+        "releaseType: $($publish.releaseType)"
+        "updaterCacheDirName: $($pkg.name)-updater"
+    ) -join "`r`n"
+    $appUpdatePath = Join-Path $unpacked 'resources\app-update.yml'
+    [System.IO.File]::WriteAllText($appUpdatePath, $appUpdateYml, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-File $appUpdatePath '自动更新清单未写入'
+
     if (-not $SkipNsis) {
         & $builder --prepackaged $unpacked --publish never "--config.directories.output=$installerDir"
         Assert-NativeSuccess 'electron-builder NSIS 构建失败'
@@ -129,6 +147,7 @@ if ($SkipNsis) {
 
 $package = Get-Content -LiteralPath (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
 $installerName = $package.build.artifactName.Replace('${version}', $package.version).Replace('${ext}', 'exe')
+Assert-File (Join-Path $unpacked 'resources\app-update.yml') 'unpacked 应用缺少自动更新清单'
 $installer = Join-Path $installerDir $installerName
 $packagedJar = Join-Path $unpacked 'resources\sidecar\agent-gateway-1.0.0.jar'
 Assert-File $installer 'NSIS 安装包未生成'

@@ -15,7 +15,7 @@ Lunar Gold is a desktop AI agent for Windows. It can read and write files in you
 Download the Windows installer (`LunarGold-Setup-x.y.z.exe`) from the [GitHub Releases](https://github.com/nichengyv/lunar-gold/releases) page.
 
 - Every release ships with its SHA-256 checksum; verify after download.
-- Installers are code-signed via the [SignPath Foundation](https://signpath.org/foundation) free open-source signing program.
+- **Installers are currently unsigned.** Windows SmartScreen may show "Unknown publisher" (`未知发布者`); choose "More info → Run anyway" after verifying the SHA-256. We applied to the [SignPath Foundation](https://signpath.org/foundation) free open-source signing program and were declined for now (the program requires a higher level of public visibility); we will reapply as the project grows.
 - Current platform: **Windows x64**. macOS and Linux packages are planned.
 
 ## Privacy

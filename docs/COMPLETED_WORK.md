@@ -130,11 +130,58 @@
 - 重新打包并回归：安装器 `release/installer/LunarGold-Setup-0.1.0.exe`，**371,359,923 字节**，SHA-256 `40C06B8AC86054FBCC4777C81B4253A7D1B5B058632D12367BB027CF5EE6A92E`；**22 项静默回归全部通过**；`ExtractAssociatedIcon` 从包内 `lunar-gold.exe` 取出的图标与设计一致。
 - 中间产物（AI 生成草稿、加粗对比图）已清理，仅保留定稿 `icon.png`/`icon.ico` 与金色备选 `icon-gold.png`。
 
-仍未完成：SignPath 申请与受信签名构建、GitHub Release、干净机器验收、macOS/Linux 安装包。以上均由项目所有者操作或在 P3-04 后续跟踪。
+### 5.6 author 元数据重打包与 v0.1.0 预发布（2026-11-10）
+
+- `desktop/package.json` 的 `author` 改为 `Lunar Gold Project` 后重打包，发布基线更新为 **371,662,112 字节**，SHA-256 `3E085FAB3D709EE0CD44894F7BF10838B21F477DC0CD06A91971B921ED9A9022`（含定稿黑白图标）。
+- GitHub 预发布 `v0.1.0` 已上传该产物，Release 资产大小 **371,662,112 字节**，与本地基线一致；配套发布 `.blockmap` 与 SHA256 说明。
+- 同批次新增 [release.yml](../.github/workflows/release.yml)：`v*` 标签触发，SignPath secrets 未配置时自动跳过签名并产出未签名草稿 Release。
+
+仍未完成：SignPath 申请与受信签名构建、干净 Windows 机器验收；macOS/Linux 安装包按所有者决定暂缓。以上在 UPDATE_PLAN.md 的 P3-04 中跟踪。
+
+### 5.7 v0.1.1 正式发布（2026-11-10）
+
+- `v0.1.1` 在 GitHub 发布为**正式 Release**（非 prerelease），`/releases/latest` 已指向它；原 `v0.1.0` 预发布不再作为更新源基线。
+- 资产：`LunarGold-Setup-0.1.1.exe` 371,688,816 字节 / SHA-256 `5ECB437109E7DDAA81C06D6C50D26ECBD6086D31520F0DE3C33937EB0DB6400B`、同名 `.blockmap`、`latest.yml`（v0.1.1，sha512 与 size 与实际文件一致）、`SHA256SUMS.txt`。四个资产的 GitHub digest 与本地逐一核对一致。
+- 发布说明与 [README.md](../README.md) 同步写明未签名现状、SmartScreen「未知发布者」处理方式与 SHA-256 校验方法；SignPath 拒绝理由记录在 UPDATE_PLAN。
+- `release.yml` 的 `push.tags` 触发临时关闭，避免手工发布的同名标签另起 CI 草稿 Release；P3-07 打通 CI 打包后再恢复。
+- 待办：用线上源验证 N-1 → N 需要下一个版本（计划 0.1.2，同时做安装包体积裁剪）。
 
 ---
 
-## 6. 完成档案使用规则
+## 6. P3-05：Windows 自动更新与失败回滚（2026-11-10）
+
+### 6.1 改动
+
+- 新增 [updater.js](file:///d:/test-code/agent-gateway-v3/desktop/updater.js)：封装检查、提示、下载、校验、备份、静默安装与回滚。默认「检查并提示」，不强制更新；未打包态不检查。
+- [main.js](file:///d:/test-code/agent-gateway-v3/desktop/main.js) 接入更新器；`runtime` 增加 `dataDir`/`logPath`。首启加载页面成功后才 `markStartupSuccess()` 并排期检查；加载失败且存在升级标记时走 `rollbackAfterFailedUpgrade()`。
+- [package.json](file:///d:/test-code/agent-gateway-v3/desktop/package.json)：版本 `0.1.1`，新增 `electron-updater@6.8.11`、`files` 增加 `updater.js`、`build.publish` 指向 GitHub（owner `nichengyv` / repo `lunar-gold`，`releaseType=draft`）。
+- [build-desktop-installer.ps1](file:///d:/test-code/agent-gateway-v3/scripts/build-desktop-installer.ps1)：`--dir` 构建后补写 `resources/app-update.yml` 并 `Assert-File` 校验。两段式 `--dir` + `--prepackaged` 不会自动生成该文件，缺失会导致装好的应用读不到更新源。
+- [release.yml](file:///d:/test-code/agent-gateway-v3/.github/workflows/release.yml)：上传 `latest.yml`；新增签名后重算 `latest.yml` 的 sha512/size 并删除失配 `*.blockmap`；`prerelease` 改为仅在标签含 `rc`/`beta` 时为真（GitHub provider 只识别正式 Release）。
+
+### 6.2 验证
+
+本地 generic 源实测 `0.1.1 → 0.1.2`：下载 → 数据备份 → 静默安装 → 重启 → 首启成功 → 标记清理；`local-token` 哈希、`db` 数据与用户 canary 文件均完整。
+
+| 场景 | 结果 |
+|---|---|
+| 正常升级 | 通过，数据完整，进程 0 残留 |
+| sha512 错误 | `checksum mismatch`，不安装，版本不变 |
+| 签名错误（强制校验） | `NotSigned`，不安装，版本不变 |
+| 磁盘不足 | 下载前预检拦截，不下载不安装 |
+| 升级后启动失败 | 自动恢复数据备份并静默装回 `0.1.1`；`*.failed-<时间戳>` 保留现场；陈旧标记自动清理 |
+| 回滚/退出后进程 | `lunar-gold`/`java`/`postgres` 均 0 残留 |
+
+过程中的 5 个问题与修复（`app-update.yml` 缺失、下载缓存目录名、http feed 协议、detached PowerShell wrapper 不执行、`spawnSync` 等待导致误判）见 [lessons 记录](lessons/2026-11-10/p3-05-auto-update.md)。
+
+### 6.3 边界
+
+- 只覆盖 Windows；macOS/Linux 更新按所有者决定暂缓。
+- 线上 N-1 → N 尚未复核：需所有者发布 `v0.1.1` 正式 Release（含 `latest.yml`）后用线上源再跑一次。
+- Authenticode 强制校验默认关闭，待 SignPath 接入后以 `LUNARGOLD_REQUIRE_SIGNATURE=1` 打开。
+
+---
+
+## 7. 完成档案使用规则
 
 1. 新任务完成后，将任务编号、实际改动、测试结果和验收边界移入本文。
 2. `UPDATE_PLAN.md` 只保留未完成工作、当前阻塞和下一步，不再持续追加长篇完成批注。

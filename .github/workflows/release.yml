@@ -1,7 +1,7 @@
 # Lunar Gold Windows x64 发布流水线
 #
-# 触发：推送 v* 标签或手动 workflow_dispatch。
-# 产物：NSIS 安装包 + blockmap + SHA256SUMS.txt，上传为 GitHub 草稿 Release（不自动公开）。
+# 触发：推送 v* 标签（P3-07 打通前临时关闭）或手动 workflow_dispatch。
+# 产物：NSIS 安装包 + blockmap + latest.yml（自动更新清单）+ SHA256SUMS.txt，上传为 GitHub 草稿 Release（不自动公开）。
 # 签名：SignPath Foundation（受信构建）。SIGNPATH_* secrets 尚未配置时，
 #       两个签名步骤自动跳过，流程仍可完整产出未签名草稿 Release。
 #
@@ -17,13 +17,17 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # 标签触发暂时关闭：CI 打包链路尚未在 P3-07 中验证，当前发布使用本地已验证产物。
+  # 若开启，推送 v* 标签会另起一个 CI 草稿 Release，与手工发布的同名标签冲突。
+  # 待 P3-07 打通并冒烟通过后恢复 push.tags。
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   windows-x64:
@@ -66,7 +70,7 @@ jobs:
 
       - name: Sign app exe (SignPath)
         if: env.SIGNPATH_API_TOKEN != ''
-        uses: signpath/github-action-signpath@v1
+        uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -129,7 +133,7 @@ jobs:
 
       - name: Sign installer (SignPath)
         if: env.SIGNPATH_API_TOKEN != ''
-        uses: signpath/github-action-signpath@v1
+        uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -157,14 +161,40 @@ jobs:
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"
           } | Set-Content "$dir\SHA256SUMS.txt"
 
+      # 签名会改变文件哈希：必须重写 latest.yml 的 sha512/size，并删掉与签名后文件不再匹配的 blockmap，
+      # 让客户端退回整包下载，否则自动更新会因校验失败一直装不上
+      - name: Refresh update manifest (post-signing)
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: powershell
+        run: |
+          $dir = "$env:GITHUB_WORKSPACE\release\installer"
+          $exe = Get-ChildItem $dir -Filter 'LunarGold-Setup-*.exe' | Select-Object -First 1
+          if (-not $exe) { throw '找不到签名后的安装包' }
+          $version = $exe.BaseName -replace '^LunarGold-Setup-', ''
+          $sha = [Convert]::ToBase64String(
+            [System.Security.Cryptography.SHA512]::Create().ComputeHash([System.IO.File]::ReadAllBytes($exe.FullName))
+          )
+          @(
+            "version: $version",
+            "files:",
+            "  - url: $($exe.Name)",
+            "    sha512: $sha",
+            "    size: $($exe.Length)"
+          ) | Set-Content "$dir\latest.yml" -Encoding ASCII
+          Get-ChildItem $dir -Filter '*.blockmap' | Remove-Item -Force
+
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          prerelease: true
+          # 自动更新走 GitHub provider，只识别正式 Release；预发布会被客户端忽略，
+          # 因此这里不标 prerelease，除非标签里带 rc/beta 之类测试标识
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') }}
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          # 签名流程会删除签名后失配的 blockmap，此处置为 false 避免误判失败
+          fail_on_unmatched_files: false
           files: |
             release/installer/LunarGold-Setup-*.exe
             release/installer/*.blockmap
+            release/installer/latest.yml
             release/installer/SHA256SUMS.txt
