@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Lunar Gold（金月）桌面壳（Electron）",
-  "author": "杨俊懿",
+  "author": "Lunar Gold Project",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
