@@ -3,7 +3,7 @@
 > 记录日期：2026-11-09
 > 适用范围：AgentKey Pro Windows x64、Electron 43.3、electron-builder 26.18、NSIS 辅助安装向导
 > 当前产物：`release/installer/LunarGold-Setup-0.1.0.exe`
-> 当前产物 SHA-256：`A46FF10F0D2126018C3DA587B9CFD87C66A50A04A30CBE3CBB05DB4AC0D24D2D`
+> 当前产物 SHA-256：`6FE3C93D39656A578BCBC4D8BFBB230AF24BA16B884E04BD845B4FE65CECC220`
 > 当前产物说明：2026-11-09 更名 Lunar Gold 后的重打包产物，22 项静默回归全通过；`6BEF673C…1AD959` 为更名前的 AgentKey Pro 产物
 > 更名说明：同日产品更名为 **Lunar Gold（金月）**，安装标识改为 `LunarGold-Setup-*.exe`、`lunar-gold.exe`、`%LOCALAPPDATA%\Programs\Lunar Gold`，数据目录改为 `~/.lunargold/desktop`。下文出现的 AgentKey 名称、路径与哈希均为当次排障的原始记录，不再回改。
 

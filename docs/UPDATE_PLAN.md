@@ -14,7 +14,7 @@ Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环
 
 **当前主线仍是 P3-04 发布基线收尾。**
 
-1. ~~最新安装器最小回归~~ **已完成**：更名后的基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,342,808 字节），SHA-256 `A46FF10F0D2126018C3DA587B9CFD87C66A50A04A30CBE3CBB05DB4AC0D24D2D`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4。上一版 AgentKey Pro 基线 `6BEF673C…1AD959` 的验收不适用于新产物。
+1. ~~最新安装器最小回归~~ **已完成**：当前基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,353,795 字节，含黑白图标），SHA-256 `6FE3C93D39656A578BCBC4D8BFBB230AF24BA16B884E04BD845B4FE65CECC220`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.5。更名首版 `A46FF10F…4D2D` 与更名前 `6BEF673C…1AD959` 的验收均不适用于新产物。
 2. 开源许可证已选定 **Apache-2.0** 并写入 `LICENSE`；下一步公开 GitHub 仓库并申请 SignPath Foundation 开源签名（均需项目所有者操作）。
 3. 在 GitHub Actions 中完成签名、Release 上传和干净 Windows 机器验收。
 4. Windows 发布基线稳定后进入 P3-05 自动更新；Phase 4、Phase 5 不是生成当前 Windows 安装包的前置条件。
@@ -56,7 +56,7 @@ Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环
 | Windows 应用与安装器签名 | **待申请和接入**；优先 SignPath Foundation 免费开源计划 | Authenticode 为 `Valid`，发布者与实际证书一致，可信时间戳有效 |
 | GitHub Release | **待发布**；上传安装器、SHA-256、版本说明和许可文件 | 从 Release 重新下载后哈希一致，干净机器安装/首启/首个任务/卸载通过 |
 | macOS/Linux 运行时与安装包 | **未完成**；分别准备 PG/pgvector、JRE 和签名/公证 | 每个 OS/arch 独立安装与首启通过，不外推 Windows 结果 |
-| 图标与发布元数据 | **未完成，本轮按项目所有者决定跳过**；仍使用默认 Electron 图标 | 安装器、快捷方式、卸载项和 Release 信息一致 |
+| 图标与发布元数据 | **图标已完成**（2026-11-10）：黑白月亮线稿接入 `desktop/app-icon/icon.ico`，含 16–256 七档尺寸；`author` 已填。Release 文案元数据随 P3-08 补齐 | 安装器、快捷方式、卸载项和 Release 信息一致 |
 
 #### GitHub + SignPath 免费开源路线
 

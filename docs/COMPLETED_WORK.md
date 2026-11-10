@@ -115,14 +115,21 @@
 
 - 产品更名为 **Lunar Gold（金月）**：`appId=com.lunargold.desktop`、`productName=Lunar Gold`、`executableName=lunar-gold`、安装器 `LunarGold-Setup-${version}.exe`、快捷方式 `Lunar Gold`、数据目录 `~/.lunargold/desktop`、jar 覆盖变量 `LUNARGOLD_JAR`。
 - 刻意未改：Java 包 `com.capsule.agentkey`、数据库 `agentkey_vector`、jar 名 `agent-gateway-1.0.0.jar`。这些属于 jar 内部标识，用户不可见，重命名需改两百多个文件。
-- 安装器：`release/installer/LunarGold-Setup-0.1.0.exe`，**354.14 MiB / 371,342,808 字节**，SHA-256 `A46FF10F0D2126018C3DA587B9CFD87C66A50A04A30CBE3CBB05DB4AC0D24D2D`。
+- 安装器：`release/installer/LunarGold-Setup-0.1.0.exe`，**354.14 MiB / 371,342,808 字节**，SHA-256 `A46FF10F0D2126018C3DA587B9CFD87C66A50A04A30CBE3CBB05DB4AC0D24D2D`（此版无自定义图标）。
 - 包内 `lunar-gold.exe`、`resources/jre/bin/java.exe` 存在，包内 jar 与 Maven 产物哈希一致。
 - 静默回归（安装到 `D:\test\02\Lunar Gold`，数据目录 `D:\test\03\data`）：**22 项，22 通过、0 失败**，覆盖安装、首启 health、PG 进程、退出无残留、卸载清理与用户数据保留。
 - 本次构建新增两条环境事实：
   1. 通过工具的后台任务方式运行构建会被沙箱限制，在工作区外建目录报 `EPERM mkdir`；同样的命令前台执行即可通过。构建必须前台跑。
   2. 回归脚本原先用 `CommandLine` 匹配 PostgreSQL 进程，机器上既有的 PG 服务进程 `CommandLine` 为空，导致计数为 0 的假失败；改为「PG 进程数相对基线增加」后判定稳定。
 
-仍未完成：GitHub 公开仓库、SignPath 申请与受信签名构建、GitHub Release、干净机器验收、macOS/Linux 安装包、图标。以上均由项目所有者操作或在 P3-04 后续跟踪。
+### 5.5 黑白图标接入与重打包（2026-11-10）
+
+- 图标定为**单色黑白**（白色圆角方块 + 黑色月亮线条 + 三颗星），与同行业桌面智能体风格一致；深底金色版本作为备选保留，未打包。
+- 源图经白底转透明、亮度归一化处理，输出 `desktop/app-icon/icon.png`（1024×1024，圆角外透明）与 `desktop/app-icon/icon.ico`（16/24/32/48/64/128/256 七档）。
+- `desktop/package.json` 增加 `build.win.icon = app-icon/icon.ico`；图标刻意放在 `desktop/app-icon/` 而非 `desktop/build/`，因为根 `.gitignore` 的 `build/` 规则会把后者排除在仓库之外。
+- 重新打包并回归：安装器 `release/installer/LunarGold-Setup-0.1.0.exe`，**371,353,795 字节**，SHA-256 `6FE3C93D39656A578BCBC4D8BFBB230AF24BA16B884E04BD845B4FE65CECC220`；**22 项静默回归全部通过**；`ExtractAssociatedIcon` 从包内 `lunar-gold.exe` 取出的图标与设计一致。
+
+仍未完成：SignPath 申请与受信签名构建、GitHub Release、干净机器验收、macOS/Linux 安装包。以上均由项目所有者操作或在 P3-04 后续跟踪。
 
 ---
 

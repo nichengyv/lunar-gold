@@ -39,7 +39,8 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "app-icon/icon.ico"
     },
     "nsis": {
       "oneClick": false,
