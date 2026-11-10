@@ -14,7 +14,7 @@ Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环
 
 **当前主线仍是 P3-04 发布基线收尾。**
 
-1. ~~最新安装器最小回归~~ **已完成**：当前基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,353,795 字节，含黑白图标），SHA-256 `6FE3C93D39656A578BCBC4D8BFBB230AF24BA16B884E04BD845B4FE65CECC220`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.5。更名首版 `A46FF10F…4D2D` 与更名前 `6BEF673C…1AD959` 的验收均不适用于新产物。
+1. ~~最新安装器最小回归~~ **已完成**：当前基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,359,923 字节，含定稿黑白图标），SHA-256 `40C06B8AC86054FBCC4777C81B4253A7D1B5B058632D12367BB027CF5EE6A92E`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.5。更早的 `A46FF10F…4D2D`、`6FE3C93D…C220`、`6BEF673C…1AD959` 三版验收均不适用于新产物。
 2. 开源许可证已选定 **Apache-2.0** 并写入 `LICENSE`；下一步公开 GitHub 仓库并申请 SignPath Foundation 开源签名（均需项目所有者操作）。
 3. 在 GitHub Actions 中完成签名、Release 上传和干净 Windows 机器验收。
 4. Windows 发布基线稳定后进入 P3-05 自动更新；Phase 4、Phase 5 不是生成当前 Windows 安装包的前置条件。

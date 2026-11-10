@@ -124,10 +124,11 @@
 
 ### 5.5 黑白图标接入与重打包（2026-11-10）
 
-- 图标定为**单色黑白**（白色圆角方块 + 黑色月亮线条 + 三颗星），与同行业桌面智能体风格一致；深底金色版本作为备选保留，未打包。
-- 源图经白底转透明、亮度归一化处理，输出 `desktop/app-icon/icon.png`（1024×1024，圆角外透明）与 `desktop/app-icon/icon.ico`（16/24/32/48/64/128/256 七档）。
+- 图标最终采用**黑白单色月亮**（白底圆角方块 + 黑色弯月笑脸 + 四颗四角星），与同行业桌面智能体风格一致；`desktop/app-icon/icon-gold.png` 为深底金色备选版，仅保留不打包。
+- 源图经白底转透明、亮度归一化、4px 轻度加粗处理，输出 `desktop/app-icon/icon.png`（1024×1024，圆角外透明）与 `desktop/app-icon/icon.ico`（16/24/32/48/64/128/256 七档）。
 - `desktop/package.json` 增加 `build.win.icon = app-icon/icon.ico`；图标刻意放在 `desktop/app-icon/` 而非 `desktop/build/`，因为根 `.gitignore` 的 `build/` 规则会把后者排除在仓库之外。
-- 重新打包并回归：安装器 `release/installer/LunarGold-Setup-0.1.0.exe`，**371,353,795 字节**，SHA-256 `6FE3C93D39656A578BCBC4D8BFBB230AF24BA16B884E04BD845B4FE65CECC220`；**22 项静默回归全部通过**；`ExtractAssociatedIcon` 从包内 `lunar-gold.exe` 取出的图标与设计一致。
+- 重新打包并回归：安装器 `release/installer/LunarGold-Setup-0.1.0.exe`，**371,359,923 字节**，SHA-256 `40C06B8AC86054FBCC4777C81B4253A7D1B5B058632D12367BB027CF5EE6A92E`；**22 项静默回归全部通过**；`ExtractAssociatedIcon` 从包内 `lunar-gold.exe` 取出的图标与设计一致。
+- 中间产物（AI 生成草稿、加粗对比图）已清理，仅保留定稿 `icon.png`/`icon.ico` 与金色备选 `icon-gold.png`。
 
 仍未完成：SignPath 申请与受信签名构建、GitHub Release、干净机器验收、macOS/Linux 安装包。以上均由项目所有者操作或在 P3-04 后续跟踪。
 
