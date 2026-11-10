@@ -24,6 +24,10 @@
 .PARAMETER SkipTests
     跳过 Maven 测试；正式发布不建议使用。
 
+.PARAMETER SkipNsis
+    停止在 unpacked 阶段（用于 CI 在打包前对主程序 exe 签名）；
+    NSIS 安装包随后由 electron-builder --prepackaged 单独生成。
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\build-desktop-installer.ps1 -JavaHome C:\Java\jdk-21
 #>
@@ -33,7 +37,8 @@ param(
     [string]$MavenCmd,
     [string]$PackRoot = 'D:\test\01\desktop-pack',
     [switch]$SkipInstall,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipNsis
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,7 +108,7 @@ Write-Step '裁剪桌面端私有 JRE'
 Assert-NativeSuccess 'JRE 裁剪失败'
 Assert-File $jreJava '裁剪 JRE 缺少 java.exe'
 
-Write-Step '生成 unpacked 应用与 NSIS 安装包'
+Write-Step '生成 unpacked 应用'
 Push-Location (Join-Path $repo 'desktop')
 try {
     if (-not $SkipInstall) { & npm ci; Assert-NativeSuccess '桌面壳 npm ci 失败' }
@@ -111,9 +116,16 @@ try {
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
     & $builder --dir --publish never "--config.directories.output=$PackRoot"
     Assert-NativeSuccess 'electron-builder unpacked 构建失败'
-    & $builder --prepackaged $unpacked --publish never "--config.directories.output=$installerDir"
-    Assert-NativeSuccess 'electron-builder NSIS 构建失败'
+    if (-not $SkipNsis) {
+        & $builder --prepackaged $unpacked --publish never "--config.directories.output=$installerDir"
+        Assert-NativeSuccess 'electron-builder NSIS 构建失败'
+    }
 } finally { Pop-Location }
+
+if ($SkipNsis) {
+    Write-Warning '已按 -SkipNsis 停止在 unpacked 阶段；NSIS 安装包由后续步骤（签名后）用 --prepackaged 生成'
+    return
+}
 
 $package = Get-Content -LiteralPath (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
 $installerName = $package.build.artifactName.Replace('${version}', $package.version).Replace('${ext}', 'exe')

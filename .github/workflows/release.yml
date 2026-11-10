@@ -1,0 +1,170 @@
+# Lunar Gold Windows x64 发布流水线
+#
+# 触发：推送 v* 标签或手动 workflow_dispatch。
+# 产物：NSIS 安装包 + blockmap + SHA256SUMS.txt，上传为 GitHub 草稿 Release（不自动公开）。
+# 签名：SignPath Foundation（受信构建）。SIGNPATH_* secrets 尚未配置时，
+#       两个签名步骤自动跳过，流程仍可完整产出未签名草稿 Release。
+#
+# SignPath 审核通过后需要配置的 secrets：
+#   SIGNPATH_API_TOKEN        — 具备提交签名请求权限的 API Token
+#   SIGNPATH_ORGANIZATION_ID  — SignPath 组织 ID（审核邮件中提供）
+# 项目 slug 固定为 lunar-gold；签名策略 slug 默认 release-signing，
+# 以 Foundation 实际开通的策略为准（常见为 test-signing / release-signing）。
+#
+# 流程要点：主程序 exe 在 unpacked 完成、NSIS 打包前签名（规范要求内外层都签）；
+# --prepackaged 重打包后复核签名仍为 Valid，防止 electron-builder 改写 exe 资源导致签名失效。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: lunar-gold
+      SIGNPATH_SIGNING_POLICY_SLUG: release-signing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 构建到 unpacked 为止。runner 自带 Maven（PATH 可寻），
+      # JAVA_HOME 由 setup-java 设置，无需显式传参。
+      - name: Build (frontend, backend jar, JRE, unpacked)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-desktop-installer.ps1 -PackRoot "$env:RUNNER_TEMP\desktop-pack" -SkipNsis
+
+      - name: Upload unsigned app exe for signing
+        id: upload-app-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app-exe
+          path: ${{ runner.temp }}\desktop-pack\win-unpacked\lunar-gold.exe
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Sign app exe (SignPath)
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-signpath@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-app-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          skip-decompress: true
+          output-artifact-directory: ${{ runner.temp }}\signed-app-exe
+
+      - name: Put signed app exe back into unpacked
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: powershell
+        run: |
+          Copy-Item "${{ runner.temp }}\signed-app-exe\lunar-gold.exe" `
+            "${{ runner.temp }}\desktop-pack\win-unpacked\lunar-gold.exe" -Force
+
+      - name: Repackage NSIS installer from signed unpacked
+        shell: powershell
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\desktop"
+          & ".\node_modules\.bin\electron-builder.cmd" `
+            --prepackaged "$env:RUNNER_TEMP\desktop-pack\win-unpacked" `
+            --publish never `
+            --config.directories.output="$env:GITHUB_WORKSPACE\release\installer"
+          if ($LASTEXITCODE -ne 0) { throw "electron-builder NSIS 构建失败" }
+
+      - name: Verify signatures (only when signing is enabled)
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: powershell
+        run: |
+          $targets = @(
+            "${{ runner.temp }}\desktop-pack\win-unpacked\lunar-gold.exe",
+            (Get-ChildItem "$env:GITHUB_WORKSPACE\release\installer\LunarGold-Setup-*.exe" | Select-Object -First 1).FullName
+          )
+          foreach ($t in $targets) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $t
+            if ($sig.Status -ne 'Valid') { throw "签名校验失败：$t -> $($sig.Status)" }
+            Write-Host "签名有效：$t（$($sig.SignerCertificate.Subject)）"
+          }
+
+      - name: Generate SHA-256 checksums
+        shell: powershell
+        run: |
+          $dir = "$env:GITHUB_WORKSPACE\release\installer"
+          Get-ChildItem $dir -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"
+          } | Set-Content "$dir\SHA256SUMS.txt"
+
+      - name: Upload installer for signing
+        id: upload-installer
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: ${{ github.workspace }}\release\installer\LunarGold-Setup-*.exe
+          archive: false
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Sign installer (SignPath)
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-signpath@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          skip-decompress: true
+          output-artifact-directory: ${{ runner.temp }}\signed-installer
+
+      - name: Replace installer with signed version
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: powershell
+        run: |
+          Copy-Item "${{ runner.temp }}\signed-installer\LunarGold-Setup-*.exe" `
+            "$env:GITHUB_WORKSPACE\release\installer\" -Force
+
+      # 注意：替换签名安装器后 SHA256SUMS.txt 需要重算
+      - name: Regenerate SHA-256 checksums (post-signing)
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: powershell
+        run: |
+          $dir = "$env:GITHUB_WORKSPACE\release\installer"
+          Get-ChildItem $dir -File -Exclude SHA256SUMS.txt | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)"
+          } | Set-Content "$dir\SHA256SUMS.txt"
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/installer/LunarGold-Setup-*.exe
+            release/installer/*.blockmap
+            release/installer/SHA256SUMS.txt
