@@ -183,9 +183,23 @@ jobs:
           ) | Set-Content "$dir\latest.yml" -Encoding ASCII
           Get-ChildItem $dir -Filter '*.blockmap' | Remove-Item -Force
 
+      - name: Resolve release version
+        id: version
+        shell: powershell
+        run: |
+          $v = (Get-Content "$env:GITHUB_WORKSPACE\desktop\package.json" -Raw | ConvertFrom-Json).version
+          if (-not $v) { throw '无法从 desktop/package.json 读取版本号' }
+          # 必须无 BOM 追加，否则 GITHUB_ENV 会把 BOM 混进变量名
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "VERSION=$v`n", (New-Object System.Text.UTF8Encoding($false)))
+          Write-Host "发布版本：$v"
+
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
+          # workflow_dispatch 在分支上触发时 github.ref_name 是分支名，
+          # 必须显式给 tag_name，否则会生成名为 master 的错标签草稿
+          tag_name: v${{ env.VERSION }}
+          name: Lunar Gold v${{ env.VERSION }}
           draft: true
           # 自动更新走 GitHub provider，只识别正式 Release；预发布会被客户端忽略，
           # 因此这里不标 prerelease，除非标签里带 rc/beta 之类测试标识

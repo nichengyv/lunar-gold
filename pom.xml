@@ -129,10 +129,15 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!-- zonky 原始 Windows 二进制只用于测试与开发期兜底；发布包统一使用
+             -Pwith-pg-runtime 内置的 pg-runtime.txz（含 pgvector）。
+             用 test scope 而不是 provided：Spring Boot repackage 仍会把 provided
+             打进 BOOT-INF/lib，只有 test scope 才彻底排除这 22 MB 重复运行时。 -->
         <dependency>
             <groupId>io.zonky.test.postgres</groupId>
             <artifactId>embedded-postgres-binaries-windows-amd64</artifactId>
             <version>16.11.0</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
@@ -210,6 +215,24 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
+            <exclusions>
+                <!-- 桌面端只走 HTTP/1.1 + HTTP/2，不使用 HTTP/3；
+                     reactor-netty 默认带入的 QUIC 原生库（linux/osx/windows 共约 12 MB）、
+                     macOS DNS resolver 与 Linux epoll 在 Windows 发布包里是死重量。
+                     只排除原生库、保留 http3 编解码类，避免运行时类加载缺类。 -->
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-codec-native-quic</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-resolver-dns-native-macos</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-epoll</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- 第五十一批：MCP 客户端。只做「工具发现 + 工具调用」，
              执行权仍由自研 ToolRegistry.dispatch 掌握，Spring AI 内部工具执行保持关闭 -->

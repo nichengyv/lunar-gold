@@ -1,6 +1,6 @@
 {
   "name": "lunargold-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Lunar Gold（金月）桌面壳（Electron）",
   "author": "Lunar Gold Project",
@@ -14,12 +14,16 @@
     "electron": "^43.3.0",
     "electron-builder": "^26.18.0"
   },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
   "build": {
     "appId": "com.lunargold.desktop",
     "productName": "Lunar Gold",
     "executableName": "lunar-gold",
     "artifactName": "LunarGold-Setup-${version}.${ext}",
     "electronDist": "node_modules/electron/dist",
+    "electronLanguages": ["en-US", "zh-CN", "zh-TW"],
     "directories": {
       "output": "../build/installer"
     },
