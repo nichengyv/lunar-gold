@@ -1,0 +1,107 @@
+Lunar Gold（金月）
+Copyright 2026 杨俊懿 (Junyi Yang)
+
+本产品包含第三方开发的软件。以下列出 Windows 安装包（LunarGold-Setup-x.y.z.exe）中打包的组件及其分发许可证。机器可读清单（CycloneDX 1.6）随安装包提供四份：SBOM.json（Java 后端及全部传递依赖）、SBOM.frontend.json（前端生产依赖）、SBOM.desktop.json（桌面壳生产依赖）、SBOM.runtime.json（Electron、裁剪 JRE、PostgreSQL、pgvector 运行时）。完整第三方许可证与版权文本见 THIRD-PARTY-LICENSES.txt。
+
+Lunar Gold 本身按 Apache License 2.0 授权（见 LICENSE）。本 NOTICE 不改变任何第三方许可证。
+
+English version: NOTICE.en
+
+================================================================================
+1. 应用外壳与更新器（桌面端）
+================================================================================
+
+Electron 43.3.0 ................................ MIT
+  内含 Chromium 与 Node.js：
+  Chromium ........................................ BSD-3-Clause 及其他开源许可证
+  Node.js ......................................... MIT
+electron-updater 6.8.11 .......................... MIT
+  及其传递依赖（builder-util-runtime、fs-extra、js-yaml、lazy-val、
+  lodash.escaperegexp、lodash.isequal、semver、tiny-typed-emitter 等），
+  分别采用 MIT、ISC 或 BSD 条款。
+Electron 语言包（en-US、zh-CN、zh-TW） .......... MIT
+
+================================================================================
+2. 内置运行时
+================================================================================
+
+Eclipse Temurin JDK 21 运行时（经 jlink 裁剪）
+  ................................................ GPL-2.0 WITH Classpath Exception
+PostgreSQL 16.11（Windows x64 运行时） ........... PostgreSQL License
+pgvector 0.8.7（PostgreSQL 向量扩展） ............ PostgreSQL License
+
+================================================================================
+3. 后端（Java / Spring）组件
+================================================================================
+
+后端 jar 内含 243 个 Maven 组件，SBOM.json 列出每个组件的版本与声明的许可证。按许可证分组如下：
+
+  Apache-2.0（202 个），包括：
+    Spring Boot 4.1.2、Spring Framework、Spring Security、Spring Data、
+    Spring AI 2.0.2（含 MCP 客户端）、Flyway、Hibernate ORM 与 Validator、
+    Tomcat embed、Jackson、Netty、Reactor、Micrometer / Prometheus 客户端、
+    Log4j API、OkHttp、Okio、Apache PDFBox、Apache POI、Apache Tika Core、
+    Swagger / springdoc、Byte Buddy、Kotlin 标准库、embedded-postgres（io.zonky.test）
+
+  MIT（12 个）：
+    checker-qual、jsoup、jtokkit、jul-to-slf4j、lettuce-core、lombok、
+    mcp、mcp-core、mcp-json-jackson3、redis-authx-core、slf4j-api、
+    webjars-locator-lite
+
+  BSD-3-Clause（9 个）：
+    angus-activation、antlr4-runtime、curvesapi、istack-commons-runtime、
+    jakarta.activation-api、jakarta.xml.bind-api、jaxb-core、jaxb-runtime、txw2
+
+  EPL-2.0（7 个）：
+    aspectjweaver、junit-jupiter、junit-jupiter-api、junit-jupiter-engine、
+    junit-jupiter-params、junit-platform-commons、junit-platform-engine
+
+  EPL-2.0 / BSD-3-Clause（1 个）：
+    jakarta.persistence-api
+
+  EPL-2.0 / GPL-2.0-with-classpath-exception（2 个）：
+    jakarta.annotation-api、jakarta.transaction-api
+
+  EPL-2.0 / GPL-2.0-with-classpath-exception / BSD-3-Clause（2 个）：
+    angus-mail、jakarta.mail-api
+
+  EPL-2.0 / LGPL-2.1-only（2 个）：
+    logback-classic、logback-core
+
+  BSD-2-Clause（1 个）：postgresql（JDBC 驱动）
+  BSD-4-Clause（1 个）：ST4
+  BSD licence（1 个）：antlr-runtime
+  CC0-1.0 / BSD-2-Clause（1 个）：HdrHistogram
+  0BSD（1 个）：xz
+  MIT-0（1 个）：reactive-streams
+
+说明：
+  - 在 Spring Boot 4 中，junit-jupiter 与 junit-platform 经由
+    spring-boot-starter-test 以 compile 作用域解析，因此会进入打包后的 jar。
+    它们属于测试工具，运行时不使用。
+  - embedded-postgres-binaries-windows-amd64（test 作用域）出现在 SBOM.json 中，
+    但不随安装包发布；实际发布的 PostgreSQL 运行时由
+    scripts/build-pg-runtime.ps1 构建。
+
+================================================================================
+4. 前端库
+================================================================================
+
+Vue 3.5、Vue Router 4.6、Pinia 2.3、Element Plus 2.14、axios 1.20、
+marked 15、jsencrypt 3.5、CodeMirror 6 及 @codemirror 系列包、
+@codemirror/theme-one-dark ........................ MIT
+highlight.js 11 .................................. BSD-3-Clause
+DOMPurify 3 ...................................... MPL-2.0 OR Apache-2.0
+
+================================================================================
+5. 许可证文本与源码
+================================================================================
+
+- Apache License 2.0：LICENSE
+- 组件清单：SBOM.json、SBOM.frontend.json、SBOM.desktop.json、SBOM.runtime.json
+- 第三方许可证与版权全文：THIRD-PARTY-LICENSES.txt
+- 上游源码与许可证文本：各组件所在仓库（Java 组件见 Maven Central，JavaScript
+  包见 npm，另见 github.com/electron/electron、adoptium.net、postgresql.org、
+  github.com/pgvector/pgvector、github.com/andreiramani/pgvector_pgsql_windows）。
+
+如果你基于本仓库重新分发安装包，请保留本 NOTICE、LICENSE 以及你所分发组件适用的第三方许可证文本。

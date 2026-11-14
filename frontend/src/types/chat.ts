@@ -1,9 +1,78 @@
+/** 本轮任务的完成状态：执行结束不代表任务已经验证或完成 */
+export type CompletionStatus = 'COMPLETED' | 'UNVERIFIED' | 'INCOMPLETE';
+
+/** 后端 completion 事件下发的任务收尾信息 */
+export interface CompletionInfo {
+  status: CompletionStatus;
+  reason?: string;
+  message?: string;
+  filesChanged?: boolean;
+}
+
+/** P5-05：一条编译/语言服务诊断 */
+export interface DiagnosticItem {
+  file: string;
+  line: number;
+  column: number;
+  severity: 'ERROR' | 'WARNING' | 'INFO';
+  message: string;
+}
+
+/** P5-05：变更文件诊断结果（diagnostics 事件 / 消息 trace） */
+export interface DiagnosticsInfo {
+  provider: string;
+  available: boolean;
+  analyzedFiles: number;
+  totalCount: number;
+  truncated: boolean;
+  diagnostics: DiagnosticItem[];
+  runId?: number;
+  turnId?: string;
+  fileVersion?: string;
+  at?: number;
+}
+
+/** P5-06：验证状态；未配置/不可用不能被展示为通过 */
+export type VerifyStatus = 'PASSED' | 'FAILED' | 'NOT_CONFIGURED' | 'UNAVAILABLE';
+
+/** P5-06：单条验证命令结果 */
+export interface VerifyCommandOutcome {
+  name: string;
+  command: string;
+  cwd?: string;
+  required: boolean;
+  exitCode: number;
+  timedOut: boolean;
+  durationMs: number;
+  skipped: boolean;
+  outputTail?: string;
+}
+
+/** P5-06：项目验证结果（verify 事件 / 消息 trace） */
+export interface VerifyInfo {
+  runId?: number;
+  turnId?: string;
+  status: VerifyStatus;
+  configured: boolean;
+  attempt: number;
+  maxAttempts: number;
+  configPath?: string;
+  authorization?: string;
+  message?: string;
+  failureFingerprint?: string;
+  commands: VerifyCommandOutcome[];
+  at?: number;
+}
+
 /** 命中的资料来源（后端 sources 事件下发）；content 为命中的片段原文 */
 export interface SourceRef {
   id: number;
   name: string;
   score: number;
   content?: string;
+  /** P5-07：命中的切片编号与序号（chunkIndex 从 0 开始） */
+  chunkId?: number;
+  chunkIndex?: number;
 }
 
 /** 工作区文件变更（与 UI 模型共用一份定义） */
@@ -37,6 +106,27 @@ export interface ApprovalRequest {
   expiresAt: number;
 }
 
+/** P5-10-2：审批决策来源；旧记录为 null，展示为来源未知 */
+export type ApprovalDecisionSource = 'USER' | 'BATCH' | 'TIMEOUT' | 'SESSION_STOP' | 'SYSTEM';
+
+/** P5-10-2：会话内已处理审批历史项（不包含原始参数） */
+export interface ApprovalHistoryItem {
+  approvalId: string;
+  tool: string;
+  risk: 'WRITE' | 'EXECUTE' | 'DESTRUCTIVE';
+  state: 'APPROVED' | 'REJECTED';
+  decisionSource?: ApprovalDecisionSource | null;
+  decisionTime?: string | null;
+  createTime?: string | null;
+  rememberSession: boolean;
+}
+
+/** P5-10-2：批量允许结果，只包含实际完成的审批 */
+export interface ApprovalBatchResult {
+  batchId: string;
+  resolvedIds: string[];
+}
+
 /** 计划步骤状态：待开始 / 进行中 / 已完成 */
 export type PlanStepStatus = 'pending' | 'in_progress' | 'completed' | 'aborted';
 
@@ -51,6 +141,45 @@ export interface PlanSnapshot {
   steps: PlanStep[];
   /** 最后一次更新时间（毫秒时间戳） */
   updatedAt: number;
+}
+
+/** P5-10-3：本轮预算进度（usage SSE）；旧后端可能只给 token 三项 */
+export interface RunUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** 已完成的模型轮次，恢复后可能缺省 */
+  round?: number;
+  /** 当前推理档位的轮次上限 */
+  maxRounds?: number;
+  /** token 上限，0 表示不限 */
+  maxTokens?: number;
+  /** 服务端已用时间 */
+  elapsedMs?: number;
+  /** 时间上限，0 表示不限 */
+  maxElapsedMs?: number;
+}
+
+/** P5-10-3：长任务的五个执行阶段 */
+export type TaskStageKey = 'understand' | 'read' | 'modify' | 'verify' | 'summarize';
+export type TaskStageStatus = 'pending' | 'active' | 'done' | 'skipped';
+
+export interface TaskStageItem {
+  key: TaskStageKey;
+  label: string;
+  status: TaskStageStatus;
+  startedAt?: number;
+  durationMs?: number;
+}
+
+/** P5-10-3：失败分级；不同类别给不同动作 */
+export type FailureClass = 'retryable' | 'config' | 'approval' | 'manual';
+
+export interface FailureInfo {
+  class: FailureClass;
+  label: string;
+  hint: string;
+  primaryAction: 'retry' | 'settings' | 'reload';
 }
 
 /** 推理档位：快速 / 标准 / 深度，决定工具轮次与历史预算 */
@@ -71,4 +200,6 @@ export interface StreamPayload {
   model?: string;
   reasoning?: ReasoningLevel;
   permission?: PermissionLevel;
+  /** 每次发送生成一次；网络重试必须复用，后端据此阻止重复执行 */
+  clientRequestId?: string;
 }

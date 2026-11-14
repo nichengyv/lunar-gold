@@ -8,7 +8,9 @@
     <script>
         // 应用挂载前恢复主题，避免刷新闪白
         (function () {
-            var theme = localStorage.getItem('theme') || 'light';
+            // themeVersion 之前的值可能是旧版默认主题自动写入的，不算用户选择，统一用新的深色默认
+            var version = localStorage.getItem('themeVersion');
+            var theme = version === '2' ? (localStorage.getItem('theme') || 'dark') : 'dark';
             var root = document.documentElement;
             root.setAttribute('data-theme', theme);
             if (theme === 'dark') root.classList.add('dark');

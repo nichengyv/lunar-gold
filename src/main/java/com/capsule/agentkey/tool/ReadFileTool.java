@@ -27,6 +27,10 @@ public class ReadFileTool implements BaseTool {
     @Override
     public String getName() { return "read_file"; }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() { return true; }
+
     @Override
     public Capability requiredCapability() { return Capability.LOCAL_WORKSPACE; }
 

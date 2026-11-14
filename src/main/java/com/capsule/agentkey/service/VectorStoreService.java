@@ -1,6 +1,7 @@
 package com.capsule.agentkey.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -127,6 +128,65 @@ public class VectorStoreService {
     public List<SearchResult> searchForProject(Long userId, Long projectId, float[] queryVec,
                                                int topK, float minScore, List<Long> documentIds) {
         return search(userId, queryVec, topK, null, null, projectId, minScore, documentIds);
+    }
+
+    /**
+     * P5-07 词法召回：用 pg_trgm 的 {@code word_similarity} 在切片原文里找精确词命中，
+     * 补上向量对专有名词、编号、罕见术语的漏召回。
+     *
+     * <p>词法分与余弦相似度不可直接比较，只用于排名融合与独立的词法门槛；
+     * pg_trgm 扩展由 V9 迁移创建，无需新增表或列。</p>
+     */
+    public List<SearchResult> searchLexicalForProject(Long userId, Long projectId, String query,
+                                                      int topK, float minScore) {
+        return searchLexicalForProject(userId, projectId, query, topK, minScore, null);
+    }
+
+    /** 词法召回，限定到指定资料；无 projectId 时不加项目过滤，行为与向量检索保持一致 */
+    public List<SearchResult> searchLexicalForProject(Long userId, Long projectId, String query,
+                                                      int topK, float minScore, List<Long> documentIds) {
+        if (query == null || query.isBlank()) {
+            return Collections.emptyList();
+        }
+        StringBuilder sql = new StringBuilder("""
+                SELECT chunk_id, document_id, content,
+                       word_similarity(CAST(? AS text), content) AS score
+                FROM vector_record
+                WHERE user_id = ?
+                """);
+        List<Object> params = new ArrayList<>();
+        params.add(query);
+        params.add(userId);
+        if (projectId != null) {
+            sql.append(" AND project_id = ? AND source_type = 'knowledge'");
+            params.add(projectId);
+        }
+        if (documentIds != null && !documentIds.isEmpty()) {
+            sql.append(" AND document_id IN (");
+            for (int i = 0; i < documentIds.size(); i++) {
+                sql.append(i == 0 ? "?" : ", ?");
+                params.add(documentIds.get(i));
+            }
+            sql.append(")");
+        }
+        sql.append(" ORDER BY score DESC LIMIT ?");
+        params.add(Math.max(1, topK));
+
+        try {
+            return jdbc.query(sql.toString(), (rs, i) -> new SearchResult(
+                            rs.getObject("chunk_id", Long.class),
+                            rs.getLong("document_id"),
+                            rs.getString("content"),
+                            rs.getFloat("score")),
+                    params.toArray())
+                    .stream()
+                    .filter(r -> r.score() > minScore)
+                    .collect(Collectors.toList());
+        } catch (DataAccessException e) {
+            // pg_trgm 不可用或 SQL 失败时降级为纯向量检索，不影响对话
+            log.warn("词法检索失败，本轮降级为纯向量检索: {}", e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
     //余弦相似度检索：由 pgvector 的 HNSW 索引加速，替代原内存版的 O(N) 暴力扫描

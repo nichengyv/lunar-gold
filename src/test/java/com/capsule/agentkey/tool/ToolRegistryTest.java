@@ -51,6 +51,21 @@ class ToolRegistryTest {
         assertEquals(5, registry.getAllTools().size());
     }
 
+    @Test
+    void 只读工具可并行_MCP与fallback按串行处理() {
+        ToolRegistry registry = registry("desktop");
+        registry.register(tool("read_file", Capability.LOCAL_WORKSPACE, true, "builtin", false));
+        registry.register(tool("mcp_read", Capability.MCP_READ, true, "mcp", false));
+        registry.register(tool("read_fallback", null, true, "builtin", true));
+        registry.register(tool("write_file", null, false, "builtin", false));
+
+        assertTrue(registry.isReadOnly("read_file"));
+        assertFalse(registry.isReadOnly("mcp_read"), "MCP 工具副作用不可判定，按串行处理");
+        assertFalse(registry.isReadOnly("read_fallback"), "fallback 工具按串行处理");
+        assertFalse(registry.isReadOnly("write_file"));
+        assertFalse(registry.isReadOnly("missing_tool"));
+    }
+
     private ToolRegistry registry(String profile) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);
@@ -59,6 +74,11 @@ class ToolRegistryTest {
     }
 
     private BaseTool tool(String name, Capability requiredCapability) {
+        return tool(name, requiredCapability, false, "builtin", false);
+    }
+
+    private BaseTool tool(String name, Capability requiredCapability, boolean readOnly,
+                          String source, boolean fallback) {
         return new BaseTool() {
             @Override
             public String getName() {
@@ -83,6 +103,21 @@ class ToolRegistryTest {
             @Override
             public Capability requiredCapability() {
                 return requiredCapability;
+            }
+
+            @Override
+            public boolean readOnly() {
+                return readOnly;
+            }
+
+            @Override
+            public String source() {
+                return source;
+            }
+
+            @Override
+            public boolean isFallback() {
+                return fallback;
             }
         };
     }

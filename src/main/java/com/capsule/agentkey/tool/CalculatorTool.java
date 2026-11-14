@@ -18,6 +18,12 @@ public class CalculatorTool implements BaseTool {
         return "calculator";
     }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() {
+        return true;
+    }
+
     @Override
     public String getDescription() {
         return "精确计算器。当用户涉及数学运算、单位换算、财务计算、日期差值时，" +

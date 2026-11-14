@@ -73,6 +73,21 @@ class ReActAgentServiceTest {
         assertTrue(aborted.stream().allMatch(s -> "aborted".equals(s.status())));
     }
 
+    // —— P5-10-3：时间预算 ——
+
+    @Test
+    void 时间预算为0时不限制() {
+        assertFalse(ReActAgentService.isTimeBudgetExceeded(24 * 60 * 60 * 1000L, 0));
+        assertFalse(ReActAgentService.isTimeBudgetExceeded(24 * 60 * 60 * 1000L, -1));
+    }
+
+    @Test
+    void 时间预算达到上限时停止() {
+        assertFalse(ReActAgentService.isTimeBudgetExceeded(59_999L, 60));
+        assertTrue(ReActAgentService.isTimeBudgetExceeded(60_000L, 60));
+        assertTrue(ReActAgentService.isTimeBudgetExceeded(61_000L, 60));
+    }
+
     // —— pending 文件变更 status 校验：批次 A3 的状态流转 ——
 
     @Test

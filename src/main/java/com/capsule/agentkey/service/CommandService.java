@@ -1,6 +1,7 @@
 package com.capsule.agentkey.service;
 
 import com.capsule.agentkey.exception.BusinessException;
+import com.capsule.agentkey.service.sandbox.ProcessSandbox;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,12 +32,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 工作区终端命令执行器（沙箱）。
  *
- * 四道限制：
+ * 五道限制：
  * 1. 程序白名单：只允许 npm / node / git / mvn / python 等开发工具，
  *    rm、del、sh、powershell 这类破坏性程序一律拒绝；
  * 2. 工作目录必须落在工作区内（复用 WorkspaceFileService.resolveInWorkspace 的越界校验）；
  * 3. 超时强制终止整棵进程树，避免 build 卡死把会话拖到 SSE 超时；
  * 4. 输出截断，防止一次 build 日志把模型上下文撑爆。
+ * 5. 【P4-01】Windows 下把进程挂进 Job Object，句柄关闭由内核回收整棵进程树
+ *    （含脱离父进程的后台 daemon），并限制单进程内存与 Job 内进程数。
  *
  * 另外：命令不经过 shell 解释。自己分词后直接交给 ProcessBuilder，
  * 因此 "&&"、"|"、">" 都不会被当成管道/重定向执行（含这些字符的参数直接拒绝）。
@@ -125,8 +128,12 @@ public class CommandService {
 
     private final WorkspaceFileService workspaceFileService;
 
-    public CommandService(WorkspaceFileService workspaceFileService) {
+    /** P4-01：OS 级沙箱（Windows Job Object），不支持的平台内部退化为 NOOP */
+    private final ProcessSandbox processSandbox;
+
+    public CommandService(WorkspaceFileService workspaceFileService, ProcessSandbox processSandbox) {
         this.workspaceFileService = workspaceFileService;
+        this.processSandbox = processSandbox;
     }
 
     /** 启动时探测 Docker daemon——只测一次，避免每次 run() 都 fork 进程 */
@@ -296,6 +303,10 @@ public class CommandService {
             throw new BusinessException("命令启动失败：" + e.getMessage());
         }
 
+        // P4-01：挂进 OS 级沙箱。句柄 close() 时由内核回收整棵进程树，
+        // 覆盖 descendants() 枚举不到的后台 daemon；接入失败会退化为 NONE，不影响命令本身
+        ProcessSandbox.Handle sandboxHandle = processSandbox.attach(process);
+
         log.info("执行命令: {} (cwd={}, timeout={}s)", command, cwd == null ? "." : cwd, timeout);
 
         StringBuilder output = new StringBuilder();
@@ -307,36 +318,42 @@ public class CommandService {
 
         boolean timedOut = false;
         boolean stopped = false;
+        int exitCode = -1;
         try {
-            while (true) {
-                if (process.waitFor(200, TimeUnit.MILLISECONDS)) {
-                    break;
+            try {
+                while (true) {
+                    if (process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                        break;
+                    }
+                    if (cancelled != null && cancelled.get()) {
+                        stopped = true;
+                        killTree(process);
+                        break;
+                    }
+                    if (System.currentTimeMillis() - start > timeout * 1000L) {
+                        timedOut = true;
+                        killTree(process);
+                        break;
+                    }
                 }
-                if (cancelled != null && cancelled.get()) {
-                    stopped = true;
-                    killTree(process);
-                    break;
-                }
-                if (System.currentTimeMillis() - start > timeout * 1000L) {
-                    timedOut = true;
-                    killTree(process);
-                    break;
-                }
+                // 给被强杀的子进程一点收尾时间，避免 exitValue 抛 IllegalThreadStateException
+                process.waitFor(3, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                killTree(process);
             }
-            // 给被强杀的子进程一点收尾时间，避免 exitValue 抛 IllegalThreadStateException
-            process.waitFor(3, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            killTree(process);
+
+            try {
+                reader.join(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            exitCode = process.isAlive() ? -1 : process.exitValue();
+        } finally {
+            sandboxHandle.close();
         }
 
-        try {
-            reader.join(2000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        int exitCode = process.isAlive() ? -1 : process.exitValue();
         long duration = System.currentTimeMillis() - start;
         log.info("命令结束: exit={}, cost={}ms, timedOut={}, cancelled={}",
                 exitCode, duration, timedOut, stopped);

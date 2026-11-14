@@ -4,6 +4,19 @@ export function formatDateTime(isoString?: string): string {
   return isoString.substring(0, 16).replace('T', ' ');
 }
 
+/** 相对时间：刚刚 / 5 分钟前 / 3 小时前 / 2 天前，超过一周退回日期；用于侧栏任务列表 */
+export function formatRelativeTime(isoString?: string): string {
+  if (!isoString) return '-';
+  const time = new Date(isoString).getTime();
+  if (Number.isNaN(time)) return formatDateTime(isoString);
+  const diff = Date.now() - time;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return isoString.substring(0, 10);
+}
+
 export function formatFileSize(bytes?: number): string {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];

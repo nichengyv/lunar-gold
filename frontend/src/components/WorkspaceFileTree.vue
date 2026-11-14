@@ -450,7 +450,7 @@ function formatSize(bytes: number): string {
     align-items: center;
     color: var(--text-secondary);
 }
-.ws-row.is-dir .ws-row-icon { color: #e0a84a; }
+.ws-row.is-dir .ws-row-icon { color: var(--warning); }
 
 .ws-row-name {
     flex: 1;

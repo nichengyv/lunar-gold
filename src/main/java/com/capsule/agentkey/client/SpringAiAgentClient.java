@@ -21,12 +21,20 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.MimeType;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -43,41 +51,133 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Component
 @Slf4j
-public class SpringAiAgentClient {
+public class SpringAiAgentClient implements AgentClient {
 
     private final SpringAiChatModelConfig modelConfig;
+    private final ProviderCircuitBreaker circuitBreaker;
 
-    public SpringAiAgentClient(SpringAiChatModelConfig modelConfig) {
+    /** 辅助调用（摘要/视觉）超时兜底：虚拟线程等待，避免阻塞请求线程 */
+    private static final ExecutorService SYNC_EXECUTOR =
+            Executors.newVirtualThreadPerTaskExecutor();
+
+    public SpringAiAgentClient(SpringAiChatModelConfig modelConfig,
+                               ProviderCircuitBreaker circuitBreaker) {
         this.modelConfig = modelConfig;
+        this.circuitBreaker = circuitBreaker;
     }
 
-    /** D2: streamChat 结果 —— 成功 null，失败返回异常；sentChunk 标记是否已经输出过 */
-    public record StreamResult(Throwable error, boolean sentChunk) {}
-
+    /**
+     * P4-06：流式调用带超时、指数退避重试与 Provider 级熔断。
+     *
+     * <p>规则：
+     * <ul>
+     *   <li>已经输出过 chunk 的请求绝不重试——否则用户会看到重复内容；
+     *   <li>只有瞬时错误（429/5xx/超时/连接中断）才重试，鉴权或参数错误直接换 fallback；
+     *   <li>同一 Provider 连续失败达到阈值后熔断，窗口期内快速失败；
+     *   <li>整条链路最终失败时只回调一次 {@code onError}，避免上层重复收尾。
+     * </ul>
+     */
+    @Override
     public StreamResult streamChat(String apiKey, String model, List<ObjectNode> messages,
                            List<ToolCallback> toolCallbacks, String memorySummary,
                            AgentStreamCallback callback) {
-        // D2: 主模型 fallback——如果配置了备选模型，第一次失败（且还没输出任何 chunk）就换
-        List<String> fallbacks = modelConfig.fallbackModelsFor(model);
-        StreamResult first = doStream(apiKey, model, messages, toolCallbacks, memorySummary, callback);
-        if (first.error() == null || fallbacks.isEmpty()) return first;
+        String provider = modelConfig.providerId();
+        List<String> candidates = new ArrayList<>();
+        candidates.add(model);
+        candidates.addAll(modelConfig.fallbackModelsFor(model));
 
-        // 已经发过 chunk 了就不重试——用户已经看到部分输出
-        if (first.sentChunk()) return first;
-
-        // 依次尝试 fallback
-        Throwable lastErr = first.error();
-        for (String fb : fallbacks) {
-            log.warn("D2 主模型 {} 失败（{}），尝试 fallback {}", model, lastErr.getMessage(), fb);
-            StreamResult r = doStream(apiKey, fb, messages, toolCallbacks, memorySummary, callback);
-            if (r.error() == null) {
-                log.info("D2 fallback {} 成功", fb);
-                return r;
+        Throwable lastErr = null;
+        for (int c = 0; c < candidates.size(); c++) {
+            String candidate = candidates.get(c);
+            for (int attempt = 1; attempt <= modelConfig.maxAttempts(); attempt++) {
+                if (!circuitBreaker.allowRequest(provider)) {
+                    // 保留上一次真实失败原因，只有从未调用过才用熔断提示兜底
+                    if (lastErr == null) {
+                        lastErr = new IllegalStateException("模型服务暂时不可用（熔断中），请稍后重试");
+                    }
+                    break;
+                }
+                if (attempt > 1 && !sleepBackoff(attempt - 1)) {
+                    if (lastErr == null) {
+                        lastErr = new IllegalStateException("模型调用重试被中断");
+                    }
+                    break;
+                }
+                StreamResult result = doStream(apiKey, candidate, messages, toolCallbacks,
+                        memorySummary, callback);
+                if (result.error() == null) {
+                    circuitBreaker.recordSuccess(provider);
+                    if (c != 0 || attempt > 1) {
+                        log.info("模型 {} 调用成功（fallback 序号={}, 第 {} 次尝试）", candidate, c, attempt);
+                    }
+                    return result;
+                }
+                circuitBreaker.recordFailure(provider);
+                lastErr = result.error();
+                // 已经输出过内容：不重试，也不换模型，避免重复输出
+                if (result.sentChunk()) {
+                    callback.onError(lastErr);
+                    return result;
+                }
+                if (!isRetryable(lastErr)) {
+                    break;
+                }
+                log.warn("模型 {} 第 {} 次调用失败（{}），准备重试",
+                        candidate, attempt, lastErr.getMessage());
             }
-            if (r.sentChunk()) return r; // fallback 也输出过 chunk 了就停
-            lastErr = r.error();
+            if (lastErr != null && !isRetryable(lastErr)) {
+                break;
+            }
+            if (circuitBreaker.isOpen(provider)) {
+                break;
+            }
         }
-        return new StreamResult(lastErr, false);
+
+        Throwable failure = lastErr == null
+                ? new IllegalStateException("没有可用的模型调用")
+                : lastErr;
+        callback.onError(failure);
+        return new StreamResult(failure, false);
+    }
+
+    /** 指数退避；被中断时返回 false 让调用方停止重试 */
+    private boolean sleepBackoff(int attempt) {
+        long base = modelConfig.retryBackoffMs();
+        long delay = Math.min(base << Math.min(attempt - 1, 4), 8000L);
+        if (delay <= 0) return true;
+        try {
+            Thread.sleep(delay);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * 是否值得重试：限流、上游 5xx、连接中断、超时属于瞬时错误；
+     * 401/403/400 这类是配置或参数问题，重试只会浪费配额。
+     */
+    static boolean isRetryable(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 5; depth++) {
+            if (current instanceof TimeoutException
+                    || current instanceof java.io.IOException
+                    || current instanceof java.net.ConnectException) {
+                return true;
+            }
+            String name = current.getClass().getSimpleName();
+            if (name.contains("Transient") || name.contains("Timeout")) {
+                return true;
+            }
+            String msg = String.valueOf(current.getMessage());
+            if (msg.matches("(?s).*(\\b429\\b|\\b500\\b|\\b502\\b|\\b503\\b|\\b504\\b|timed out|timeout|"
+                    + "rate limit|Too Many Requests|Connection reset|connection reset).*")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private StreamResult doStream(String apiKey, String model, List<ObjectNode> messages,
@@ -99,8 +199,11 @@ public class SpringAiAgentClient {
                 @Override public void onComplete() { callback.onComplete(); }
                 @Override public void onError(Throwable t) { callback.onError(t); }
             };
+            Duration idleTimeout = Duration.ofSeconds(modelConfig.idleTimeoutSeconds());
             if (memorySummary == null || memorySummary.isBlank()) {
                 chatModel.stream(prompt)
+                        // P4-06：两个分片之间的最大空闲时间；模型卡住时尽快失败而不是无限等待
+                        .timeout(idleTimeout)
                         .doOnNext(response -> handleResponse(response, wrapped, toolCallAcc))
                         .doOnError(streamError::set)
                         .blockLast();
@@ -110,6 +213,7 @@ public class SpringAiAgentClient {
                         .advisors(SessionMemoryAdvisor.of(memorySummary))
                         .stream()
                         .chatResponse()
+                        .timeout(idleTimeout)
                         .doOnNext(response -> handleResponse(response, wrapped, toolCallAcc))
                         .doOnError(streamError::set)
                         .blockLast();
@@ -122,7 +226,7 @@ public class SpringAiAgentClient {
             return new StreamResult(null, sentChunk.get());
         } catch (Exception e) {
             log.error("Spring AI 流式请求失败 (model={})", model, e);
-            callback.onError(e);
+            // 由 streamChat 统一回调 onError，避免重试过程中重复通知上层
             return new StreamResult(e, sentChunk.get());
         }
     }
@@ -131,17 +235,19 @@ public class SpringAiAgentClient {
      * 第四十八批：非流式文本调用，供会话摘要等辅助任务使用。
      * 失败直接抛出，由调用方沿用原有降级策略（摘要失败则跳过注入）。
      */
+    @Override
     public String callSync(String apiKey, String model, List<ObjectNode> messages) {
         ChatModel chatModel = modelConfig.create(apiKey, model);
         Prompt prompt = new Prompt(toSpringAiMessages(messages),
                 OpenAiChatOptions.builder().model(model).build());
-        return extractText(chatModel.call(prompt));
+        return withTimeout(() -> extractText(chatModel.call(prompt)));
     }
 
     /**
      * 第四十八批：多模态转写，图片以 data URL 传入（与自研客户端收到的格式一致）。
      * 转成 Spring AI 的 UserMessage + Media，由 OpenAI 协议适配层编码成 image_url。
      */
+    @Override
     public String callVision(String apiKey, String model, String instruction, List<String> imageDataUrls) {
         List<Media> media = new ArrayList<>();
         if (imageDataUrls != null) {
@@ -156,7 +262,28 @@ public class SpringAiAgentClient {
         ChatModel chatModel = modelConfig.create(apiKey, model);
         Prompt prompt = new Prompt(List.of(userMessage),
                 OpenAiChatOptions.builder().model(model).build());
-        return extractText(chatModel.call(prompt));
+        return withTimeout(() -> extractText(chatModel.call(prompt)));
+    }
+
+    /**
+     * 非流式调用没有分片可以用来判断「空闲」，只能按总时长兜底；
+     * 用虚拟线程等待，超时后取消任务，避免把请求线程挂死。
+     */
+    private String withTimeout(Callable<String> task) {
+        Future<String> future = SYNC_EXECUTOR.submit(task);
+        try {
+            return future.get(modelConfig.syncTimeoutSeconds(), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new IllegalStateException("模型调用超时（>" + modelConfig.syncTimeoutSeconds() + "s）", e);
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("模型调用被中断", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw new IllegalStateException("模型调用失败: " + cause.getMessage(), cause);
+        }
     }
 
     private String extractText(ChatResponse response) {
@@ -194,6 +321,18 @@ public class SpringAiAgentClient {
                                 Map<String, ObjectNode> toolCallAcc) {
         if (response == null || response.getResults() == null) {
             return;
+        }
+        // P4-07：usage 通常只出现在最后一个分片，拿到就上报，由上层按 run 累加
+        org.springframework.ai.chat.metadata.Usage usage =
+                response.getMetadata() == null ? null : response.getMetadata().getUsage();
+        if (usage != null) {
+            Number prompt = usage.getPromptTokens();
+            Number completion = usage.getCompletionTokens();
+            long p = prompt == null ? 0L : prompt.longValue();
+            long c = completion == null ? 0L : completion.longValue();
+            if (p > 0 || c > 0) {
+                callback.onUsage(p, c);
+            }
         }
         for (Generation generation : response.getResults()) {
             AssistantMessage output = generation.getOutput();

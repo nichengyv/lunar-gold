@@ -1,0 +1,222 @@
+package com.capsule.agentkey.service;
+
+import com.capsule.agentkey.entity.AgentRun;
+import com.capsule.agentkey.entity.AgentRun.RunState;
+import com.capsule.agentkey.entity.AgentRunEvent;
+import com.capsule.agentkey.entity.AgentRunEvent.EventType;
+import com.capsule.agentkey.repository.AgentRunEventRepository;
+import com.capsule.agentkey.repository.AgentRunRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Phase 4 第一批：AgentRunService 状态机单元测试。
+ * 所有 Repository 调用都走 Mockito，不连数据库。
+ */
+@ExtendWith(MockitoExtension.class)
+class AgentRunServiceTest {
+
+    @Mock AgentRunRepository runRepo;
+    @Mock AgentRunEventRepository eventRepo;
+
+    private AgentRunService service;
+    private final ObjectMapper om = new ObjectMapper();
+
+    /** 准备一个可被 Repository 返回的 run 实例 */
+    private AgentRun run(Long id, RunState state) {
+        AgentRun r = new AgentRun();
+        r.setId(id);
+        r.setUserId(1L);
+        r.setState(state);
+        r.setCreateTime(LocalDateTime.now());
+        return r;
+    }
+
+    @BeforeEach
+    void setup() {
+        service = new AgentRunService(runRepo, eventRepo, om);
+        // 默认：事件 repo 查最大 seq 返回 null（空表）
+        lenient().when(eventRepo.findMaxSeqByRunId(anyLong())).thenReturn(null);
+    }
+
+    // ------------------------------------------------------------------
+    // 状态转移表静态校验
+    // ------------------------------------------------------------------
+
+    @Test
+    void 静态转移表覆盖所有合法迁移() {
+        // QUEUED → RUNNING
+        assertTrue(AgentRunService.transitionAllowed(RunState.QUEUED, RunState.RUNNING));
+        // RUNNING → WAITING_APPROVAL
+        assertTrue(AgentRunService.transitionAllowed(RunState.RUNNING, RunState.WAITING_APPROVAL));
+        // WAITING_APPROVAL → RUNNING（批准）
+        assertTrue(AgentRunService.transitionAllowed(RunState.WAITING_APPROVAL, RunState.RUNNING));
+        // RUNNING → SUCCEEDED / FAILED / CANCELLED
+        assertTrue(AgentRunService.transitionAllowed(RunState.RUNNING, RunState.SUCCEEDED));
+        assertTrue(AgentRunService.transitionAllowed(RunState.RUNNING, RunState.FAILED));
+        assertTrue(AgentRunService.transitionAllowed(RunState.RUNNING, RunState.CANCELLED));
+        // WAITING_APPROVAL → CANCELLED（拒绝 / 超时）
+        assertTrue(AgentRunService.transitionAllowed(RunState.WAITING_APPROVAL, RunState.CANCELLED));
+        // QUEUED 取消启动
+        assertTrue(AgentRunService.transitionAllowed(RunState.QUEUED, RunState.CANCELLED));
+    }
+
+    @Test
+    void 终态禁止再迁移() {
+        for (RunState terminal : List.of(RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELLED)) {
+            assertFalse(AgentRunService.transitionAllowed(terminal, RunState.RUNNING));
+            assertFalse(AgentRunService.transitionAllowed(terminal, RunState.QUEUED));
+            assertFalse(AgentRunService.transitionAllowed(terminal, RunState.WAITING_APPROVAL));
+            assertFalse(AgentRunService.transitionAllowed(terminal, RunState.SUCCEEDED));
+        }
+    }
+
+    @Test
+    void 非法迁移被拒绝() {
+        // WAITING_APPROVAL 不能直接 SUCCEEDED（必须先 RUNNING）
+        assertFalse(AgentRunService.transitionAllowed(RunState.WAITING_APPROVAL, RunState.SUCCEEDED));
+        // QUEUED 不能直接 FAILED（除非启动前异常，当前未开放）
+        assertFalse(AgentRunService.transitionAllowed(RunState.QUEUED, RunState.WAITING_APPROVAL));
+    }
+
+    // ------------------------------------------------------------------
+    // 全链路 happy path + 事件验证
+    // ------------------------------------------------------------------
+
+    @Test
+    void create_start_run_succeed_全链路写对状态和事件() {
+        // Arrange：findById 返回当前可变 run，save 同步更新 holder
+        AgentRun[] holder = new AgentRun[]{ run(42L, RunState.QUEUED) };
+        when(runRepo.findById(42L)).thenAnswer(inv -> Optional.of(holder[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder[0] = inv.getArgument(0);
+            holder[0].setId(42L);
+            return holder[0];
+        });
+        when(eventRepo.findMaxSeqByRunId(42L)).thenReturn(null, 1, 2);
+
+        // Act
+        AgentRunService.CreateResult createResult = service.create(1L, 10L, 20L, null, "{\"prompt\":\"hello\"}");
+        AgentRun created = createResult.run();
+        assertTrue(createResult.created());
+        AgentRun started = service.start(42L);
+        AgentRun succeeded = service.succeed(42L, "{\"ok\":true}");
+
+        // Assert 状态：mock 返回同一可变实体，历史变量不能当作状态快照
+        assertEquals(42L, created.getId());
+        assertEquals(42L, started.getId());
+        assertEquals(RunState.SUCCEEDED, succeeded.getState());
+        assertNotNull(succeeded.getStartTime(), "进入 RUNNING 后应写入 startTime");
+        assertNotNull(succeeded.getEndTime(), "SUCCEEDED 应写入 endTime");
+
+        // Assert 事件：QUEUED + RUNNING + SUCCEEDED 各一条 STATE_CHANGED
+        ArgumentCaptor<AgentRunEvent> captor = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo, times(3)).save(captor.capture());
+        List<AgentRunEvent> saved = captor.getAllValues();
+        assertEquals(1, saved.get(0).getSeq());
+        assertEquals(2, saved.get(1).getSeq());
+        assertEquals(3, saved.get(2).getSeq());
+        assertEquals(EventType.STATE_CHANGED, saved.get(0).getEventType());
+        assertEquals(EventType.STATE_CHANGED, saved.get(1).getEventType());
+        assertEquals(EventType.STATE_CHANGED, saved.get(2).getEventType());
+    }
+
+    @Test
+    void 审批路径_WAITING_APPROVAL_批准后回到RUNNING() {
+        AgentRun[] holder = new AgentRun[]{ run(7L, RunState.RUNNING) };
+        when(runRepo.findById(7L)).thenAnswer(inv -> Optional.of(holder[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder[0] = inv.getArgument(0);
+            holder[0].setId(7L);
+            return holder[0];
+        });
+        // 模拟已有 1 条事件（seq=1）
+        when(eventRepo.findMaxSeqByRunId(7L)).thenReturn(1);
+
+        AgentRun paused = service.pauseForApproval(7L, "ap-xyz", "write_file");
+        assertEquals(RunState.WAITING_APPROVAL, paused.getState());
+
+        AgentRun resumed = service.resumeAfterApproval(7L, "APPROVE", "USER", null);
+        assertEquals(RunState.RUNNING, resumed.getState());
+
+        // 事件计数：pauseForApproval 内部写 APPROVAL_REQUESTED(seq=2) + STATE_CHANGED(seq=3)；
+        // resumeAfterApproval 写 APPROVAL_RESOLVED(seq=4) + STATE_CHANGED(seq=5) → 4 条
+        ArgumentCaptor<AgentRunEvent> cap = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo, times(4)).save(cap.capture());
+        List<AgentRunEvent> saved = cap.getAllValues();
+        assertEquals(2, saved.get(0).getSeq());
+        assertEquals(EventType.APPROVAL_REQUESTED, saved.get(0).getEventType());
+        assertEquals(EventType.STATE_CHANGED, saved.get(1).getEventType());
+        assertEquals(EventType.APPROVAL_RESOLVED, saved.get(2).getEventType());
+        assertEquals(EventType.STATE_CHANGED, saved.get(3).getEventType());
+    }
+
+    @Test
+    void 非法迁移抛IllegalStateException() {
+        AgentRun[] holder = new AgentRun[]{ run(9L, RunState.SUCCEEDED) };
+        when(runRepo.findById(9L)).thenAnswer(inv -> Optional.of(holder[0]));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.start(9L));
+        assertTrue(ex.getMessage().contains("非法状态迁移"));
+    }
+
+    @Test
+    void 幂等命中返回已存在的run() {
+        AgentRun existing = run(100L, RunState.RUNNING);
+        when(runRepo.findByUserIdAndClientRequestId(1L, "req-abc")).thenReturn(Optional.of(existing));
+
+        AgentRunService.CreateResult result = service.create(1L, 10L, 20L, "req-abc", "{\"prompt\":\"repeat\"}");
+
+        assertFalse(result.created());
+        assertEquals(100L, result.run().getId());
+        verify(runRepo, never()).save(any()); // 不应新建
+        verify(eventRepo, never()).save(any()); // 不应写事件
+    }
+
+    @Test
+    void cancel和fail都写终态时间戳和对应事件() {
+        // fail
+        AgentRun[] holder1 = new AgentRun[]{ run(11L, RunState.RUNNING) };
+        when(runRepo.findById(11L)).thenAnswer(inv -> Optional.of(holder1[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder1[0] = inv.getArgument(0);
+            holder1[0].setId(11L);
+            return holder1[0];
+        });
+        AgentRun failed = service.fail(11L, "ELECTRON_MAIN_START_FAILED", "sidecar jar missing");
+        assertEquals(RunState.FAILED, failed.getState());
+        assertEquals("ELECTRON_MAIN_START_FAILED", failed.getErrorCode());
+        assertNotNull(failed.getEndTime());
+
+        // cancel
+        AgentRun[] holder2 = new AgentRun[]{ run(12L, RunState.WAITING_APPROVAL) };
+        when(runRepo.findById(12L)).thenAnswer(inv -> Optional.of(holder2[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder2[0] = inv.getArgument(0);
+            holder2[0].setId(12L);
+            return holder2[0];
+        });
+        AgentRun cancelled = service.cancel(12L, "user stopped");
+        assertEquals(RunState.CANCELLED, cancelled.getState());
+        assertNotNull(cancelled.getEndTime());
+
+        // cancel 必须额外写一条 CANCELED 事件
+        ArgumentCaptor<AgentRunEvent> cap = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo, atLeastOnce()).save(cap.capture());
+        assertTrue(cap.getAllValues().stream()
+                .anyMatch(e -> e.getEventType() == EventType.CANCELED));
+    }
+}

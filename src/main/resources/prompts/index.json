@@ -1,0 +1,36 @@
+{
+  "prompts": [
+    {
+      "id": "agent-system",
+      "version": "v1",
+      "scenario": "agent",
+      "path": "prompts/agent/system-v1.md",
+      "sha256": "bafd9aa94aa6c9d7351403ace2112ecb32404c86e4391a9727ef17f79db6ad57",
+      "default": true
+    },
+    {
+      "id": "coding-system",
+      "version": "v1",
+      "scenario": "coding",
+      "path": "prompts/coding/system-v1.md",
+      "sha256": "c2c4a0eec3b5b804fb2466a0ead66fbb5172b3c9964dd0166dc0004f30847bc2",
+      "default": true
+    },
+    {
+      "id": "tool-mcp",
+      "version": "v1",
+      "scenario": "tool-mcp",
+      "path": "prompts/tool-notes/mcp-v1.md",
+      "sha256": "8604734469fec11b9f3754e125660ec4bbfce02c984657e42d2b043b81d1ae5f",
+      "default": true
+    },
+    {
+      "id": "tool-terminal",
+      "version": "v1",
+      "scenario": "tool-terminal",
+      "path": "prompts/tool-notes/terminal-v1.md",
+      "sha256": "66b2cf9242410c89d5cd1776bd125993b9a6dcea410bd701213986f0ec3b4ea9",
+      "default": true
+    }
+  ]
+}

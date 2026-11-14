@@ -1,7 +1,17 @@
-/* 设计令牌：间距 / 圆角 / 字号 / 图标尺寸 / 动效时长
- * 颜色沿用 style.css 里的语义变量（--bg / --surface / --text / --primary ...），
- * 新组件只引用这里和语义色，避免各处再写魔法数字。 */
+/* ============================================================================
+ * 设计令牌（P5-09）：全站唯一 token 入口。
+ * - 颜色 / 间距 / 圆角 / 字号 / 图标 / 动效 / 阴影 都只在这里定义一次；
+ * - 组件内禁止再写魔法数字与十六进制色值，统一引用这里；
+ * - 亮暗两套必须逐项对应，新增 token 时同步补 [data-theme="dark"]；
+ * - 字号（--fs-*）会被 theme.setFont() 在运行时以内联变量覆盖，属于预期行为。
+ * ========================================================================== */
+
 :root {
+    /* ---- 布局 ---- */
+    --sidebar-width: 280px;
+    --header-height: 46px;
+
+    /* ---- 间距 ---- */
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -9,29 +19,111 @@
     --space-5: 24px;
     --space-6: 32px;
 
+    /* ---- 圆角 ---- */
+    --radius: 12px;
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 14px;
     --radius-pill: 999px;
 
-    --fs-xs: 11px;
-    --fs-sm: 12px;
-    --fs-base: 13.5px;
-    --fs-md: 14.5px;
+    /* ---- 字号 / 行高 ---- */
+    --fs-xs: 12px;
+    --fs-sm: 13px;
+    --fs-base: 14px;
     --fs-lg: 16px;
     --fs-xl: 20px;
+    --lh-base: 1.6;
+    --lh-tight: 1.35;
 
+    /* ---- 图标尺寸 ---- */
     --icon-sm: 14px;
     --icon-md: 18px;
     --icon-lg: 22px;
 
-    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .12);
+    /* ---- 动效 ---- */
+    --dur-fast: .15s;
+    --dur-base: .2s;
 
-    /* 浮层（下拉 / 弹窗 / 命令面板）：半透明底色 + 背景模糊，随明暗主题自动变化 */
+    /* ---- 基础色（亮色） ---- */
+    --bg: #f0f2f5;
+    --surface: #ffffff;
+    --surface-hover: #f5f6f8;
+    --surface-2: #f8f9fa;
+    --surface-3: #eef0f2;
+    --border: #e0e0e0;
+    --border-strong: #c9ccd1;
+
+    /* ---- 品牌与语义色（亮色） ---- */
+    --primary: #1a73e8;
+    --primary-hover: #1557b0;
+    --primary-light: #e8f0fe;
+    --on-primary: #ffffff;
+    --text: #202124;
+    --text-secondary: #5f6368;
+    --text-tertiary: #80868b;
+    --danger: #d93025;
+    --danger-bg: #fce8e8;
+    --success: #188038;
+    --success-bg: #e6f4ea;
+    --warning: #b26a00;
+    --warning-bg: #fff4e0;
+    --accent: #6366f1;
+
+    /* ---- 代码 / diff / 骨架屏 ---- */
+    --code-bg: #f6f8fa;
+    --code-border: #e5e7eb;
+    --diff-add-bg: #e6f4ea;
+    --diff-del-bg: #fce8e8;
+    --skeleton-a: #eceff3;
+    --skeleton-b: #f7f9fb;
+
+    /* ---- 焦点环（只为键盘导航可见，鼠标点击不出现） ---- */
+    --focus-ring: 0 0 0 3px color-mix(in srgb, var(--primary) 26%, transparent);
+
+    /* ---- 阴影与浮层 ---- */
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.12);
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, .12);
     --overlay-bg: color-mix(in srgb, var(--surface) 76%, transparent);
     --overlay-blur: blur(18px) saturate(180%);
     --shadow-overlay: 0 16px 40px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .08);
+}
 
-    --dur-fast: .15s;
-    --dur-base: .2s;
+[data-theme="dark"] {
+    /* ---- 基础色（暗色） ---- */
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-hover: #1f242c;
+    --surface-2: #0d1117;
+    --surface-3: #262c35;
+    --border: #30363d;
+    --border-strong: #484f58;
+
+    /* ---- 品牌与语义色（暗色，逐项对应亮色） ---- */
+    --primary: #58a6ff;
+    --primary-hover: #79b8ff;
+    --primary-light: #1f6feb33;
+    --on-primary: #ffffff;
+    --text: #c9d1d9;
+    --text-secondary: #8b949e;
+    --text-tertiary: #7d8590;
+    --danger: #f85149;
+    --danger-bg: #381a1a;
+    --success: #3fb950;
+    --success-bg: #12301f;
+    --warning: #d29922;
+    --warning-bg: #3a2c12;
+    --accent: #a78bfa;
+
+    /* ---- 代码 / diff / 骨架屏（暗色） ---- */
+    --code-bg: #0d1117;
+    --code-border: #30363d;
+    --diff-add-bg: #12301f;
+    --diff-del-bg: #3d1e1e;
+    --skeleton-a: #1b2129;
+    --skeleton-b: #242c35;
+
+    /* ---- 阴影 ---- */
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
 }

@@ -1,6 +1,7 @@
 package com.capsule.agentkey.service;
 
 import com.capsule.agentkey.exception.BusinessException;
+import com.capsule.agentkey.service.sandbox.ProcessSandbox;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +29,7 @@ class CommandServiceTest {
 
         // WorkspaceFileService 只有 @Value 字段，默认构造器就能用
         WorkspaceFileService ws = new WorkspaceFileService();
-        svc = new CommandService(ws);
+        svc = new CommandService(ws, ProcessSandbox.NONE);
 
         // 反射把 @Value 字段设好（Spring 外 new 的话字段都是默认值）
         Field f = CommandService.class.getDeclaredField("enabled");

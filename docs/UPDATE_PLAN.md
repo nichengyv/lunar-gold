@@ -1,28 +1,33 @@
-# Lunar Gold（金月）未完成更新规划（v1.4 · 免费版）
+﻿# Lunar Gold（金月）未完成更新规划（v1.4 · 免费版）
 
-> 更新日期：2026-11-09
+> 更新日期：2026-11-14
 > 本文只记录未完成工作、当前阻塞、后续任务和验收标准。
 > 已完成任务与历史验收见 [COMPLETED_WORK.md](COMPLETED_WORK.md)；当前代码快照见 [STATUS.md](STATUS.md)。
-> Windows 安装排障见 [WINDOWS_NSIS_TROUBLESHOOTING.md](WINDOWS_NSIS_TROUBLESHOOTING.md)。
+> Windows 安装排障见 [windows-nsis.md](troubleshooting/windows-nsis.md)。
 > 本文按“阶段 + 出口标准”组织，不以日历工期作为承诺。
 
 ---
 
 ## 0. 当前位置与下一步
 
-Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环、统一构建与 v0.1.0 预发布已完成，详细证据已归档。**本阶段只适配 Windows**，macOS/Linux 安装包按项目所有者决定暂缓。
+Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、自动更新与回滚、本地诊断和合规产物的主体工作已交付，历史证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md)。Phase 4 已落地运行状态、审批持久化、Windows 沙箱、模型韧性与成本预算，剩余风险见第 4 节。**当前只适配 Windows**，macOS/Linux 安装包继续暂缓。
 
-**当前主线：P3-05 已发布 v0.1.1 基线，下一步做 0.1.2（版本号 + 体积裁剪）并用线上源复核 N-1 → N。**
+**最终产品形态：Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面端是首个完整客户端。** Agent Runtime 只是内部的基础执行层之一，不是独立产品类型，也不是差异化本身；现有 ReAct 循环继续保留，差异化由任务成功率、可控性、验证、恢复与使用体验共同证明。
 
-1. ~~最新安装器最小回归~~ **已完成**：当前发布基线安装器为 `release/installer/LunarGold-Setup-0.1.0.exe`（371,662,112 字节，含定稿黑白图标与 `Lunar Gold Project` author 元数据），SHA-256 `3E085FAB3D709EE0CD44894F7BF10838B21F477DC0CD06A91971B921ED9A9022`，静默安装 → 首启 → 退出 → 卸载 **22 项检查全部通过**；GitHub `v0.1.0` 资产大小与本地产物一致（371,662,112 字节）。证据见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 5.4～5.6。
-2. 开源许可证已选定 **Apache-2.0** 并写入 `LICENSE`；GitHub 公开仓库已完成，**v0.1.1 已于 2026-11-10 作为正式 Release 发布**（非 prerelease，`/releases/latest` 指向 v0.1.1，含安装器、blockmap、`latest.yml`、`SHA256SUMS.txt`，哈希与本地一致）。
-3. **SignPath Foundation 申请已被拒（2026-11-10）**：理由是项目缺少公开可见度信号（GitHub star/fork/贡献者、外部文章或社区讨论、机构背书），非质量判断；官方建议积累社区后重申，或改用其付费订阅。当前结论：**未签名正常发布，README 明示「未知发布者」提示与 SHA-256 校验方式**；签名待有可见度后重申或另选商业/Azure 方案，不再阻塞 P3-05。接入后由 [release.yml](../.github/workflows/release.yml) 自动签名并复核 Authenticode。
-4. 代码侧直接进入 P3-05 自动更新；签名与 clean-machine 验收作为并行阻塞项跟踪，不阻塞自动更新开发。Phase 4、Phase 5 不是当前前置条件。
+**当前产品主线：Phase 5，按双轨推进，功能增强仍是每批交付的主体。**
+
+1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与 P5-08 并行只读工具均已完成；下一步继续 P5-07 模型 reranker 与真实语料量化、P5-04 收益量化与可选持久缓存，不取消既有功能增强。
+2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-10-3 长任务进度与 P5-10-2 审批效率剩余项已落地；下一步继续 P5-11-3 长会话性能。
+3. **并行 Windows 发布收尾**：签名、诊断 ZIP 导出人工复核、干净机器完整任务验收和 P3-08 所有者确认项单独跟踪，不阻塞 Phase 5。
+4. **后续多入口候选**：本地 API v1 → CLI → IDE 薄插件，复用同一后端能力；不属于当前 Phase 5 出口，不 fork VS Code。
 
 ---
 
 ## 1. 不变的产品与技术边界
 
+- **产品类型**：对外统一称“AI 编程工作台”；“Agent Runtime / 智能体执行引擎”只用于描述模型、工具、审批、执行、状态和验证等内部机制。
+- **执行架构**：保留 ReAct 作为基础循环，以计划、代码上下文、LSP、Verify、无进展检测和评测补强；没有评测证据时，不为了架构名词改做多智能体或复杂状态图。
+- **明确不做**：不 fork VS Code，不建设“万物皆插件”的平台或插件市场，不做泛桌面自动化；模型、MCP、LSP 与未来客户端入口可以扩展，执行约束、审批、验证和恢复保持统一。
 - **网页端**：注册/登录、对话、知识库 RAG、附件问答和桌面端下载；不操作本地工作区、不执行命令。
 - **桌面端**：本地项目读写、命令执行、Git、MCP、LSP、审批、审查流和按轮撤回；完全本地、不强制登录。
 - **双端共用**：同一套后端和 Vue 前端，通过 `DeploymentMode`、`CapabilityService` 与 `/api/meta` 区分能力。
@@ -36,13 +41,11 @@ Phase 0～2、P3-00～03 已完成；P3-04 的 Windows 交互安装/卸载闭环
 
 | 阶段 | 未完成主题 | 出口标志 |
 |---|---|---|
-| P3-04 | Windows 签名发布、GitHub Release、陌生机器验收；其他平台安装包 | 签名有效，Release 下载可安装、首启、首个任务和卸载 |
-| P3-05 | 自动更新与失败回滚 | N-1 → N 升级通过，失败不破坏旧版本和用户数据 |
-| P3-06 | 崩溃诊断与经同意的上报 | 壳、Java、PG 故障可定位；脱敏、可关闭 |
-| P3-07 | 三平台发布流水线 | 构建、安装包冒烟、签名、制品上传可追溯 |
-| P3-08 | 发布合规 | 许可证、隐私、服务条款、遥测和第三方 NOTICE 随版本发布 |
-| Phase 4 | 安全与可靠性 | 断网、重启、多实例、审批超时、模型 5xx 行为明确 |
-| Phase 5 | Agent 质量与差异化 | 评测可重复，成功率和成本有基线，提示词变更有门禁 |
+| Phase 3 发布收尾 | Windows 签名、诊断导出人工复核、干净机器完整任务、合规所有者确认 | Release 可安装、首启、执行并验证首个编程任务、审查与撤回、卸载 |
+| P3-07 | Windows 发布流水线 | 构建、安装包冒烟、签名、制品上传可追溯；其他平台恢复时另立计划 |
+| Phase 4 剩余风险 | 桌面重启恢复、双实例审批互斥、完整安全链、真实预算与并发验证 | 剩余场景行为明确且有对应验收，不用已完成单测代替端到端结论 |
+| Phase 5 | 智能体能力增强 + 工作台体验增强 | 真实 ReAct 可评测，修改有诊断与验证，任务可审查/恢复/撤回，既有功能增强有量化收益 |
+| Phase 6 候选 | 本地 API、CLI、IDE 薄插件与信息架构再评估 | 不同入口复用同一后端；不进入当前 Phase 5 出口 |
 
 ---
 
@@ -96,29 +99,34 @@ SignPath 的 Windows 方案不覆盖 macOS Developer ID 和 Apple 公证；macOS
 - [x] 升级、回滚结束后不得残留无关 Lunar Gold/Java/PostgreSQL 进程。
   - 正常退出与回滚后检查：`lunar-gold` / `java` / `postgres` 均 0 残留。
 
-**出口**：真实 N-1 升级和至少一类失败回滚通过，用户数据完整。**代码侧已完成（2026-11-10）**，待项目所有者发布 `v0.1.1` 正式 Release（含 `latest.yml`）后，用线上源再跑一次 N-1 → N 复核；SignPath 签名通过后打开签名强制校验。
+**出口**：真实 N-1 升级和至少一类失败回滚通过，用户数据完整。**代码侧已完成（2026-11-10）**；**线上复核已通过（2026-11-11）**：安装态 v0.1.1 自动检测到 v0.1.2 → 差分下载 220 MB → sha512 校验通过 → 备份到 `~/.lunargold/backup/0.1.1-<ts>` → 静默安装并重启 → 升级后首启 3 秒稳定检查通过，数据目录 40.46 MB / 1064 文件与升级前完全一致，无残留进程。SignPath 签名通过后再打开签名强制校验。
 
 ### P3-06：崩溃诊断与上报
 
-- 覆盖 Electron 主进程、渲染进程、Java 侧车和内嵌 PostgreSQL。
-- 记录版本、OS、错误码和必要日志；本地诊断可查看、可导出。
-- 默认只保留本地信息；远程上传必须征得同意并可关闭。
-- 不上传源码、对话、知识库、模型 Key 或敏感路径；上报字段采用白名单。
-- 验证壳崩溃、Java 启动失败、PG 初始化失败和端口异常均可定位。
+- [x] 覆盖 Electron 主进程、渲染进程、Java 侧车和内嵌 PostgreSQL：主进程异常与渲染崩溃/无响应/加载失败进入统一错误卡片；主进程硬崩溃通过会话标记在下次启动补提示；Java/PG/端口错误按完整日志尾部分类。
+- [x] 记录版本、OS、错误码和必要日志；本地诊断可查看、可导出。`desktop/diagnostics.js` 生成白名单 `report.json`，错误卡片可展开脱敏日志，ZIP 只含报告、`sidecar-tail.log` 和 `updater-tail.log`。
+- [x] 默认只保留本地信息，当前没有任何远程上传入口或网络请求；导出需用户自行选择保存位置。
+- [ ] 远程上传暂缓；未来若增加服务端，必须单独征得同意、可关闭，并继续沿用白名单与脱敏规则。
+- [x] 不复制源码、对话、知识库、数据库、模型 Key、`local-token`、`aes.key` 或敏感路径；通用密钥/令牌/路径脱敏外，`LocalTokenService` 的无标记随机令牌日志整段移除。合成金丝雀与真实 PG 启动日志均验证令牌未进入 ZIP。
+- [x] 可重复故障验证：主进程异常标记、渲染崩溃卡片、端口分类及五类卡片的重试/导出/退出动作通过模拟测试；真实损坏 jar 得到 `JAVA_START_FAILED`，真实缺失 PG 运行时得到 `PG_INIT_FAILED`，测试后无新增 Java 残留进程。
+- [x] 打包态真实窗口复核（2026-11-11）：把打包态 unpacked 复制到工作区隔离目录并移除 sidecar jar 后真实启动，界面实际渲染中文诊断卡片（`ELECTRON_MAIN_START_FAILED`），报告写入隔离数据目录且绝对路径脱敏为 `<PATH>`；点击「重试启动」新增 `JAVA_START_FAILED` 报告并重新渲染卡片，进程保持存活；点击「退出」进程结束且无残留。数据目录、`APPDATA`、`LOCALAPPDATA`、`TEMP`、`user-data-dir` 均指向隔离目录，未触碰真实安装目录与 `%USERPROFILE%\.lunargold`。
+- [ ] 诊断包 ZIP 的真实窗口导出待人工确认：保存对话框可正常弹出（标题「导出 Lunar Gold 诊断包」，带默认文件名），但本机窗口自动化无法驱动该系统原生对话框完成保存（标题匹配、UI Automation、鼠标点击、键盘输入均已尝试），ZIP 落盘与内容目前只由轻量测试覆盖。人工点一次「导出诊断包」并解压核对即可关闭。
 
-**出口**：四类故障都有可读诊断；远程上报脱敏且可关闭。
+**出口**：四类故障都有可读诊断；远程上报脱敏且可关闭。**本地诊断已通过打包态真实窗口复核；仅剩 ZIP 导出的人工确认与按计划暂缓的远程上报子项。**
 
-### P3-07：GitHub Actions 发布流水线
+### P3-07：GitHub Actions Windows 发布流水线
 
 ```text
-lint / build / test
+lint / build / test / eval gate
   → 准备 PG、JRE 和前端产物
-  → Windows / macOS / Linux 分别打包
+  → Windows 打包
   → unpacked 与安装包冒烟
-  → 签名 / 公证
+  → Windows 签名（证书就绪后）
   → 上传预发布 Artifacts
   → 标签或手动确认后发布 GitHub Release
 ```
+
+macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，不属于当前出口。
 
 - 公开仓库使用标准 GitHub-hosted runner；私有仓库或自托管 runner 的成本单独评估。
 - **现状**：[release.yml](../.github/workflows/release.yml) 的 `push.tags` 触发在 CI 打包链路冒烟通过前临时关闭（仅留 `workflow_dispatch`），发布使用本地已验证产物 + 手工上传，避免同名标签另起 CI 草稿 Release 冲突；P3-07 打通后恢复标签触发。
@@ -131,14 +139,19 @@ lint / build / test
 
 ### P3-08：发布合规
 
-- 选择并发布项目开源许可证，整理 Electron、JDK、PostgreSQL、pgvector 及其他依赖的许可证与 NOTICE。
-- 生成 SBOM，记录发布包中的直接和运行时依赖。
-- 发布隐私政策、服务条款、离线边界、模型 Key 与费用说明。
-- 说明卸载后程序、会话、知识库、工作区和诊断数据的保留/删除行为。
-- 遥测默认脱敏、可关闭；远程诊断上传需单独同意。
-- README 提供下载、安装、首启、校验和基础故障排查。
+- [x] 开源许可证：Apache-2.0（`LICENSE`，P3-04 已完成）。
+- [x] 第三方组件清单：新增根目录 `NOTICE`，覆盖 Electron / Chromium / Node.js / electron-updater、Temurin JDK 21 运行时、PostgreSQL 16.11 + pgvector 0.8.7、前端依赖和 243 个 Maven 组件；按许可证分组并注明测试作用域差异。
+- [x] SBOM：`SBOM.json`（Java，CycloneDX 1.6，243 个组件）+ `SBOM.frontend.json` + `SBOM.desktop.json` + `SBOM.runtime.json`（Electron、裁剪 JRE、内嵌 PostgreSQL 16.11、pgvector 0.8.7，含哈希与外部引用）；四份均由 `scripts/build-compliance.ps1` 生成并校验可解析、组件非空。
+- [x] 隐私政策重写 `PRIVACY.md`（2026-11-11）：本地数据目录逐项说明；本地诊断的报告位置、10 份上限、白名单与脱敏、导出内容、无自动上传；自动更新访问 GitHub Releases；模型 / 向量服务商、内置联网工具（Tavily、wttr.in、Open-Meteo、网页抓取）与 MCP 的网络边界；卸载保留 `%USERPROFILE%\.lunargold`、删除安装目录内 uploads。
+- [x] 服务条款新增 `TERMS.md`：Apache-2.0 授权不变、审批与备份责任、BYOK 费用、第三方服务、无担保与责任限制、Web 版账号与终止。
+- [x] README 扩充：SHA-256 校验命令、首启说明、自动更新行为、卸载保留行为、基础故障排查、合规文件入口；修正原先「sends nothing anywhere」的不准确表述。
+- [x] 文档语言：中文为主，英文对照版保留在 `README.en.md`、`PRIVACY.en.md`、`TERMS.en.md`、`NOTICE.en`，各文档首页互相链接；`SBOM.json` 保持机器可读的英文标识。
+- [x] 合规产物可复现（2026-11-11）：新增 `scripts/build-compliance.ps1` 与 `scripts/licenses-config.xml`，输出到忽略的 `build/legal`（12 个文件，含 `THIRD-PARTY-LICENSES.txt`）；`pom.xml` 补齐项目 URL/SCM 并固定 CycloneDX 2.9.3、license-maven-plugin 2.7.1；任一必需文件缺失、SBOM 不可解析或许可合集为空即中止。安装器构建前自动生成并逐文件校验 `resources/legal` 哈希，CI 严格校验后显式上传。
+- [ ] 所有者确认项（不阻塞文档发布）：`TERMS.md` 采用中华人民共和国法律与维护者住所地法院管辖，需确认；Web 版是否对外托管、以及该部署的数据主体联系方式需在真正上线前补充。
+- [x] 发布流程：`release.yml` 已把 `build/legal` 复制为 `release/legal`、逐项校验并显式上传（`fail_on_unmatched_files: true`）；下一次 Release 将随附 `SHA256SUMS.txt`、`NOTICE`、`PRIVACY.md`、`TERMS.md`、四份 SBOM 与 `THIRD-PARTY-LICENSES.txt`。
+- [ ] 发布卫生（本轮盘点发现，未修改代码）：Spring Boot 4 的 `spring-boot-starter-test` 把 `junit-jupiter` / `junit-platform` 以 compile 作用域带入，导致发布 jar 内含约 2 MB 测试框架；后续可在 pom 中显式排除或改用其他测试启动器，并复核测试仍可运行。
 
-**Phase 3 出口**：陌生机器可完成首个任务；升级和回滚可用；数据可备份；合规文件随版本发布。
+**Phase 3 出口**：陌生机器可完成一个标准编程 fixture 任务：修改文件 → 必要审批 → 验证 → 审查 diff → 撤回；升级和回滚可用，数据可备份，合规文件随版本发布。P5-06 验证回路与 P5-14 任务级交付已落地，审查与撤回可通过 ChangeSet API/看板执行；前端关键路径已由 P5-11-1 的 Playwright 用例在浏览器层用 API 仿真覆盖，但真实后端 + 真实模型的干净机器完整任务验收仍需人工执行，记录时不得把仿真 E2E 写成真机验收已通过。
 
 ---
 
@@ -146,8 +159,8 @@ lint / build / test
 
 **目标**：从“能跑”到“敢开放”。开放给真实用户操作不可信项目时，P4-01 和 P4-08 是高优先级。
 
-| ID | 任务 | 验收 |
-|---|---|---|
+| ID | 任务 | 验收 | 状态 |
+|---|---|---|---|
 | P4-01 | OS 级沙箱 | Windows Job Object；macOS Seatbelt；Linux Landlock/cgroups |
 | P4-02 | 运行状态机与 `AgentRunService` | 使用下一条未占用迁移版本，覆盖 QUEUED/RUNNING/WAITING_APPROVAL/SUCCEEDED/FAILED/CANCELLED |
 | P4-03 | 审批与运行状态持久化 | 桌面重启后待审批可恢复；云端共享 run/stop 状态，不实现云端审批 |
@@ -159,24 +172,57 @@ lint / build / test
 
 **出口**：断网、重启、双实例、审批超时、模型 5xx 五类场景均有明确行为；安全清单全绿。
 
+### 4.1 已落地（代码与单元验证完成）
+
+| ID | 落地内容 | 验证边界 |
+|---|---|---|
+| P4-02 | `AgentRun` 实体 + `AgentRunService` 状态机；V16 建 `agent_run` / `agent_run_event`；非法迁移抛 `IllegalStateException`；启动时把遗留 `QUEUED/RUNNING` 标为 `FAILED/PROCESS_RESTARTED` | `AgentRunServiceTest` 8 项通过；**出境验收（2026-11-12）**：`FlywayV18MigrationAcceptanceTest` 在真实 PostgreSQL 16.11 上完成 V1~V18 全量迁移、重复迁移 0 条、`validate` 通过；`RestartRecoveryAndMultiInstanceAcceptanceTest` 验证遗留 RUNNING/QUEUED → FAILED + `PROCESS_RESTARTED` 事件 |
+| P4-03 | V17 `tool_approval`；`ToolApprovalRegistry` 数据库权威 + 内存加速；启动恢复待审批、过期直接 `REJECTED`、恢复“本会话总是允许” | `ToolApprovalRegistryTest` 6 项、`ToolApprovalRegistryPersistenceTest` 4 项通过；**出境验收**：真实库重启恢复（未过期可批准、过期即拒绝、会话总是允许恢复）与双实例决策落库可见均通过；**已知边界**：两实例各持内存 future，跨实例唤醒与重复决策互斥未实现 |
+| P4-05 | `clientRequestId` 全链路；`create()` 返回 `created` 标记，并发命中已存在记录时不重复建消息、不重复调度 | 单元级；并发压测未做 |
+| P4-04 | SSE 自增事件 id、15s 心跳注释帧（连接结束即取消）、`GET /agent/runs/{runId}/events?sinceSeq=`；`tool_call` / `tool_result` 落事件表以便重放 | 后端能力完成；P5-10-1 已用 runId 全量重放 + 正文检查点实现前端刷新恢复与自动重连，人工断网 10s 复核仍待补 |
+| P4-06 | Provider 级熔断；瞬时错误指数退避重试（已输出 chunk 不重试）；流式空闲超时 + 非流式总时长兜底；fallback 改为显式配置 | `ProviderCircuitBreakerTest` 5 项、`SpringAiAgentClientResilienceTest` 4 项通过；**出境验收**：`ProviderOutageAcceptanceTest` 6 项用本机 stub HTTP server 真实收到 500/429/连接拒绝/流式空闲超时/首片后卡死，验证退避重试、已输出不重试、错误只回调一次、熔断后不再发请求；**观察**：Spring AI SDK 自身带内部重试，原始 HTTP 请求数约为外层尝试的 4 倍（重试放大） |
+| P4-01 | 新增 JNA core 依赖，`WindowsJobObjectSandbox` 自声明 kernel32 Job Object API：`KILL_ON_JOB_CLOSE` + 单进程内存上限 + Job 内进程数上限；`CommandService` 在 `pb.start()` 后立即 attach，结束时 `close()` 由内核回收整棵进程树；desktop 的 `server.address` 收紧到 `127.0.0.1` | `WindowsJobObjectSandboxTest` 3 项通过（含真实进程 attach→close→被回收）；`CommandService*Test` 30 项回归通过；macOS Seatbelt / Linux Landlock 未实现 |
+| P4-07 | `agent_run` 增加 `prompt_tokens/completion_tokens/total_tokens`（V18）；`AgentStreamCallback.onUsage` 逐轮累加，终态只落库一次；超 `agent.budget.max-tokens-per-run` 硬中断并映射 `TOKEN_BUDGET_EXCEEDED`；超大工具结果落盘到 `~/.lunargold/tool-results` 只回填预览 + 路径；前端追踪面板展示会话 Token | 后端编译通过、`ReActAgentService` 预算分支未做真实模型消耗演练；前端生产构建通过 |
+| P4-08 | 安全回归补跨用户越权：会话读取（`getOwnedSession`）、运行与事件流（`findByIdAndUserId`）、待审批代为决策（`ToolApprovalRegistry.resolve`）三条拦截点；路径逃逸与命令注入沿用既有用例 | `CrossTenantAccessTest` 3 项、`WorkspaceFileServiceTest` 4 项、`CommandService*Test` 30 项通过；**出境验收**：`HttpCrossTenantAcceptanceTest` 4 项用真实 `JwtUtil` 签发 token、真实 `JwtAuthenticationFilter` 解析，经 MockMvc 调用真实控制器，他人 run 事件流 / 审批 / stop 均被 4xx 拒绝，本人正常；**未覆盖**完整 `SecurityConfig` 过滤器链与 Redis 白名单（`TokenSessionService` 为 mock） |
+
+**未覆盖**：macOS Seatbelt / Linux Landlock 沙箱（当前暂缓）；完整 SecurityConfig + Redis 白名单的跨账号端到端；双实例审批唤醒与互斥；断网 10s 人工复核；桌面壳重启人工验收。前端 SSE 自动续传已在 P5-10-1 落地，不再列为未覆盖。出境验收测试仅新增 test 作用域依赖 `spring-boot-data-jpa-test`（Boot 4 已把 `@DataJpaTest` 切片拆分为独立模块）。
+
 ---
 
-## 5. Phase 5：Agent 质量与差异化
+## 5. Phase 5：智能体能力与工作台体验增强
 
-**目标**：让“可控性”成为可证明的质量优势，可与发布和 Phase 4 工作并行，但应先建立评测基线。
+> 详细方案、双轨路线与待确认决策见 [Phase 5 计划](phases/phase5/plan.md)；视觉与交互原型见 [visual-ux-preview.html](phases/phase5/visual-ux-preview.html)。
 
-| ID | 任务 | 验收 |
-|---|---|---|
-| P5-01 | 提示词外置与版本化 | 可热更新/回滚，按场景配置 |
-| P5-02 | 评测集 | 覆盖工具选择、文件编辑/删除、命令审批、RAG、拒答 |
-| P5-03 | 评测门禁 | 完成率、轮次、token、时延有基线，回归即失败 |
-| P5-04 | 代码索引 v1 | tree-sitter 解析、符号索引和 repo map |
-| P5-05 | LSP 诊断闭环 | 编辑后自动取诊断并反馈给模型 |
-| P5-06 | 验证回路 | 修改后自动运行 verify，失败回到循环 |
-| P5-07 | RAG 增强 | 混合检索、rerank、引用和离线量化 |
-| P5-08 | 并行只读工具 | 只读工具并行；写操作仍串行并审批 |
+**目标**：保留并增强现有 ReAct 执行层，用真实任务评测证明代码理解、诊断、验证、检索和并行等功能的收益；同时把任务进度、审批、变更、验证和撤回连成用户可交付的工作台闭环。双轨是同一产品的两层，不是两个产品；质量建设服务于功能增强，不替代功能增强。
 
-**出口**：评测可重复运行，核心任务成功率与成本有基线，提示词变更必须过评测。
+| ID | 任务 | 验收 | 状态 |
+|---|---|---|---|
+| P5-01 | 提示词外置与版本化 | 可热更新/回滚，按场景配置 | 已完成 |
+| P5-02 | 组件级评测集 | 覆盖工具选择、文件编辑/删除、命令审批、RAG、拒答 | 已完成 |
+| P5-03 | 评测门禁 | 完成率、轮次、token、时延有基线，回归即失败 | 已完成 |
+| P5-04 | 代码索引 v1 | 符号索引和 repo map（可插拔 CodeIndexer，v1 轻量正则） | 基础完成：repo map 已注入 prompt，符号索引与增量缓存已落地；收益量化与可选持久缓存未做 |
+| P5-05 | LSP 诊断闭环 | 编辑后自动取诊断并反馈给模型 | 已完成 |
+| P5-06 | 验证回路 | 修改后自动运行 verify，失败回到循环，未验证不得伪装成功 | 已完成 |
+| P5-07 | RAG 增强 | 向量 + pg_trgm 词法召回、RRF 融合、chunk 级引用；halfvec 按体积与精度数据决定 | 基础完成：混合检索与引用已落地；模型 reranker 与真实语料量化未做 |
+| P5-08 | 并行只读工具 | 只读工具并行且时延有收益；写操作仍串行并审批 | 已完成：连续只读批默认 3 并发，fixture p95 282→98ms；写/命令与 MCP 保持串行审批 |
+| P5-09 | 视觉体系 | token 收口、亮暗一致、加载/空/错误三态、消息排版、响应式 | 部分完成 |
+| P5-10 | 交互与体验 | 断线续传、审批键盘化、长任务进度、快捷键与无障碍 | 部分完成：断线续传（P5-10-1）、长任务进度（P5-10-3）与审批效率（P5-10-2：J/K、低风险批量、审批历史）已完成；全局快捷键与无障碍未完成 |
+| P5-11 | 体验质量基础设施 | 前端单测 + E2E、错误与性能指标；虚拟滚动按真实长会话数据实施 | 部分完成：P5-11-1 测试基线与 P5-11-2 体验可观测性已完成；当前后端 298 项、Vitest 57 项通过，Playwright 全量 14/14、三轮重复 42/42；P5-11-3 长会话性能未做 |
+| P5-12 | 信息架构 | 首屏去客服化、任务列表、轨迹与审批补强；剩余视觉细节归入 P5-09 | 核心已完成 |
+| P5-13 | 真实 ReAct 闭环 | 脚本模型驱动真实循环与工具副作用；候选完成、未验证与最终完成语义明确，重复调用/无进展可识别 | 已完成（15/15 Runtime 用例） |
+| P5-14 | 任务级 ChangeSet 与交付 | 聚合任务变更、诊断、verify 与审批，支持审查、继续修复和整体撤回 | 基础完成：Session 级聚合、按 Run 过滤、继续修复、逆序整体/按 Run 撤回与外部修改冲突检测已落地；前端看板已接入；E2E 已由 P5-11-1 覆盖 |
+
+**出口**：
+
+- 组件级门禁继续有效，真实 ReAct 循环另有确定性端到端评测，不再用组件通过率代替任务成功率。
+- 代码修改有诊断与验证证据；模型直接宣称完成、重复调用或无进展时，系统能识别并如实收尾。
+- P5-04、P5-07、P5-08 等功能增强保留，并用成功率、轮次、token 与时延数据证明收益；具体技术子项可按数据调整。
+- 用户能在一个任务边界内查看变更、审批与验证结果，继续修复或撤回；未完成和未验证状态不得显示为已验证成功。
+- 工作台关键路径有前端 E2E；断网与刷新可恢复，纯键盘可完成审批，窄窗口和亮暗主题可用。
+
+### 5.1 后续多入口候选（不属于当前出口）
+
+先稳定本地 API v1，再增加 CLI 与 VS Code / JetBrains 薄插件；它们只是同一智能体能力和任务数据的客户端入口。是否调整中间工作区或三栏布局留到 Phase 6 评估，不与现有 `WorkbenchDock` 重复建设。
 
 ---
 
@@ -184,15 +230,18 @@ lint / build / test
 
 ### 6.1 数据库迁移
 
-V15 已被邮箱唯一索引占用，Phase 4 的运行状态表应使用 **V16** 或下一条实际未占用版本，不再沿用旧规划中的 `V15__add_agent_run.sql`。
+V15 已被邮箱唯一索引占用；Phase 4 的运行状态表已使用 **V16**，不再沿用旧规划中的 `V15__add_agent_run.sql`。后续迁移必须选择实际未占用版本。
 
 | 版本 | 内容 | 说明 |
 |---|---|---|
-| V16 | `agent_run` / `agent_run_event` | 运行状态与事件流，实施前再次检查迁移目录 |
+| V16 | `agent_run` / `agent_run_event` | 已落地；保留为契约说明，不再作为待实施迁移 |
+| V19 | `code_index` | P5-04 桌面端可选持久缓存，未实施前索引仅存内存；实施前检查实际未占用版本 |
+| V20 | `halfvec` 量化列与必要索引 | 仅 P5-07 证明体积或检索性能瓶颈后启用，不与混合检索捆绑 |
+| 下一条未占用版本 | 暂不需要（P5-14 已复用 `AgentRun.requestJson` 保存 turnId） | P5-13、P5-14 均复用 Run/Event、审批与 `PendingFileChange`，未新增 Task/ChangeSet 表；后续默认先复用现有结构 |
 
 原则：
 
-1. 不直接修改已执行的 V1～V15，避免 Flyway 校验失败。
+1. 不直接修改任何已经执行的迁移，避免 Flyway 校验失败；实施前检查迁移目录与真实库历史。
 2. 云端与桌面端共用 PostgreSQL 方言和 `db/migration`。
 3. 同时覆盖全新库与存量库；大版本升级前自动备份数据目录。
 4. 新增表带 `created_at` / `updated_at`。
@@ -248,8 +297,8 @@ V15 已被邮箱唯一索引占用，Phase 4 的运行状态表应使用 **V16**
 
 | 项 | 当前差距 | 目标 |
 |---|---|---|
-| 命令执行 | 已有白名单与应用层校验，无完整 OS 沙箱 | 桌面 OS 沙箱，云端不执行 |
-| 运行与审批状态 | 仍有进程内存状态 | run 持久化、重启恢复、云端可共享 run/stop |
+| 命令执行 | Windows Job Object 已落地；macOS/Linux 沙箱暂缓 | 持续验收 Windows 约束；其他平台恢复时独立实现，云端不执行 |
+| 运行与审批状态 | Run/审批已持久化；双实例唤醒与互斥、桌面壳重启恢复仍待验收 | 剩余场景行为明确，状态不丢、审批不重复，云端可共享 run/stop |
 | 本地密钥与 token | 数据目录文件与权限收紧 | 评估 OS 凭据库，保持无额外原生依赖时的安全替代 |
 | 审计 | 部分链路可追踪 | 按 run 导出、可追溯 |
 | 依赖安全 | 历史扫描已完成，持续门禁待发布流水线补齐 | CI 阻断 Critical |
@@ -297,8 +346,9 @@ V15 已被邮箱唯一索引占用，Phase 4 的运行状态表应使用 **V16**
 
 ### 质量
 
-- 核心评测达到基线，连续两个版本不下降。
-- p95 首 token、任务成功率和关键错误可监控、可定位。
+- 组件级评测与真实 ReAct 端到端评测分别达到各自基线，不能用前者代替后者。
+- p95 首 token、任务成功率、验证覆盖率、无进展停止和关键错误可监控、可定位。
+- 编程任务的修改、诊断、verify、审批与撤回结果可审查；未验证状态明确可见。
 - 安装、更新、回滚和异常场景均有真实验收记录。
 
 ### 安全
@@ -314,20 +364,27 @@ V15 已被邮箱唯一索引占用，Phase 4 的运行状态表应使用 **V16**
 
 ---
 
-## 12. 执行顺序与后续 PR
+## 12. 执行顺序与后续批次
+
+已完成的 Phase 3 主体、Phase 4 基础、P5-01～03、P5-05、P5-06 和 P5-13 不再进入执行队列。Phase 5 两条轨道可以并行，各自按以下顺序推进：
 
 ```text
-P3-04 新包回归 → 开源许可证 / GitHub / SignPath → Release 验收
-  → P3-05 自动更新与回滚
-  → P3-06 / P3-07 / P3-08 可拆分并行
-  → Phase 4 安全可靠性
-Phase 5 评测与质量工作可并行，但先建立基线
+智能体能力 A1：P5-05 LSP → P5-06 Verify（已完成）
+智能体能力 A2：P5-04 代码索引（repo map + 符号索引/增量缓存，已完成）→ P5-04 收益量化 → P5-07 RAG 混合检索/RRF/引用（已完成）→ P5-07 模型 reranker 与量化
+智能体能力 A3：P5-08 并行只读工具（已完成）
+工作台体验 B1：P5-14 任务级交付 + P5-10-3 长任务进度 + P5-10-2 审批效率 + P5-11-1 前端 E2E（已完成）
+工作台体验 B2：P5-09 / P5-10 剩余项
+工作台体验 B3：P5-11-2 体验指标（已完成）→ P5-11-3 长会话性能
+Windows 发布收尾与 Phase 4 剩余风险：独立并行跟踪
 ```
 
-| 后续 PR | 内容 | 依赖 |
+| 后续批次 | 内容 | 依赖 / 决策原则 |
 |---|---|---|
-| PR-09a | 新安装器回归、LICENSE、GitHub Release 与 SignPath 接入 | 当前 P3-04 基线 |
-| PR-09b | 自动更新、N-1 升级与失败回滚 | PR-09a |
-| PR-09c | 崩溃诊断、发布流水线和合规 | 可按模块拆分，与 PR-09b 协调 |
-| PR-10 | 运行状态机、审批持久化、SSE 续传和幂等 | 既有能力门控；迁移使用 V16 |
-| PR-11 | 评测集与 CI 质量门禁 | 既有双端基线 |
+| A1 | LSP 诊断与 Verify 验证回路（已完成） | 已复用 P5-01～03 与 P5-13 的真实循环、完成状态和无进展检测；保留 ReAct，未重写为多智能体 |
+| A2 | 代码索引、repo map、混合检索、引用与 rerank | 功能目标保留；halfvec 与模型 rerank 由评测数据决定 |
+| A3 | 并行只读工具（已完成） | 已确认串行只读是瓶颈；并发上限由 Runtime 批规模与 fixture p95 定为默认 3，写入与命令仍串行审批 |
+| B1 | 任务级 ChangeSet、验证结果、继续修复、整体撤回、长任务进度和关键路径 E2E | 复用 P5-12 与现有 Run/PendingFileChange，不先重建领域模型；P5-11-1 的 E2E 在浏览器层用 Playwright route 仿真后端，未启动真实 Spring 进程 |
+| B2 | 视觉、审批与无障碍剩余项 | 只补剩余列，不重做已完成能力 |
+| B3 | 体验指标与长会话性能 | P5-11-2 已完成本地异常、Web Vitals、Run/恢复采样和当前用户后端聚合；下一步用真实长会话剖析决定按帧合并、Markdown 增量渲染或虚拟滚动 |
+| 发布收尾 | Windows 签名、干净机器完整任务、诊断导出与合规确认 | 不阻塞 Phase 5；macOS/Linux 暂缓 |
+| Phase 6 候选 | 本地 API、CLI、IDE 薄插件与工作区布局再评估 | Phase 5 核心闭环稳定后另立验收，不 fork VS Code |

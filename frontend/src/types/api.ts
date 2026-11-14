@@ -1,10 +1,14 @@
-import type { ApprovalRequest, PlanSnapshot } from './chat';
+import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, PlanSnapshot, VerifyInfo } from './chat';
 
 /** 待审批项：SSE 事件 + 归属会话，用于切会话时不串卡片；resolved 存在表示已被处理（用户/超时/停止） */
 export interface PendingApproval extends ApprovalRequest {
   sessionId: number | null;
   /** 已被处理：APPROVE = 用户批准，REJECT = 用户拒绝 / 超时 / 停止生成。undefined = 还在等决策 */
   resolved?: 'APPROVE' | 'REJECT';
+  /** P5-10-2：决策来源，SSE 事件到达后以服务端为准 */
+  resolvedSource?: ApprovalDecisionSource;
+  /** P5-10-2：批量允许时的批次 id */
+  batchId?: string;
 }
 
 /** 后端统一响应信封 */
@@ -51,6 +55,8 @@ export interface SessionInfo {
   model?: string;
   reasoning?: string;
   permission?: string;
+  /** P5-12-2：该会话最近一轮的状态（RUNNING / WAITING_APPROVAL / SUCCEEDED / FAILED / CANCELLED），无记录时为空 */
+  lastRunState?: string;
 }
 
 /** 项目（工作区）：资料与对话的归属容器 */
@@ -79,7 +85,7 @@ export interface FileNode {
 export interface MessageTrace {
   thinking?: string;
   tools?: ToolInvocation[];
-  sources?: { id: number; name: string; score: number; content?: string }[];
+  sources?: { id: number; name: string; score: number; content?: string; chunkId?: number; chunkIndex?: number }[];
   changes?: FileChange[];
   /** 本轮 Agent 提交的任务计划快照（切回会话时还原计划面板） */
   plan?: PlanSnapshot;
@@ -87,6 +93,12 @@ export interface MessageTrace {
   turnId?: string;
   /** 本轮从开始到完成回答的耗时（毫秒），用于「已完成，用时…」 */
   durationMs?: number;
+  /** 本轮任务的验证与完成状态 */
+  completion?: CompletionInfo;
+  /** P5-05：最近一批变更文件诊断，用于展示编译检查结果 */
+  diagnostics?: DiagnosticsInfo;
+  /** P5-06：最近一次项目验证结果 */
+  verify?: VerifyInfo;
 }
 
 /** 会话历史消息（后端返回） */
@@ -179,6 +191,136 @@ export interface PendingFileChange {
   createTime: string;
 }
 
+/** P5-14：任务级 ChangeSet 状态 */
+export type ChangeSetStatus =
+  | 'EMPTY'
+  | 'RUNNING'
+  | 'WAITING_APPROVAL'
+  | 'STOPPED'
+  | 'FAILED'
+  | 'INCOMPLETE'
+  | 'UNVERIFIED'
+  | 'VERIFIED'
+  | 'ACCEPTED'
+  | 'COMPLETED';
+
+export interface ChangeSetCommand {
+  name?: string | null;
+  command?: string | null;
+  exitCode?: number | null;
+  timedOut?: boolean | null;
+  required?: boolean | null;
+  outputTail?: string | null;
+}
+
+export interface ChangeSetVerification {
+  status: string;
+  label: string;
+  message?: string | null;
+  runId?: number | null;
+  turnId?: string | null;
+  failureFingerprint?: string | null;
+  commands: ChangeSetCommand[];
+}
+
+export interface ChangeSetApprovalItem {
+  approvalId: string;
+  tool?: string | null;
+  decision?: string | null;
+  runId?: number | null;
+  turnId?: string | null;
+}
+
+export interface ChangeSetApprovalSummary {
+  requested: number;
+  resolved: number;
+  items: ChangeSetApprovalItem[];
+}
+
+export interface ChangeSetCompletion {
+  status?: string | null;
+  reason?: string | null;
+  message?: string | null;
+  filesChanged?: boolean | null;
+}
+
+export interface ChangeSetDiagnostics {
+  provider?: string | null;
+  available?: boolean | null;
+  analyzedFiles?: number | null;
+  totalCount?: number | null;
+  turnId?: string | null;
+  diagnostics: Array<Record<string, unknown>>;
+}
+
+export interface ChangeSetRun {
+  runId: number;
+  turnId?: string | null;
+  state: string;
+  prompt?: string | null;
+  createTime?: string | null;
+  endTime?: string | null;
+  completion?: ChangeSetCompletion | null;
+  verification: ChangeSetVerification;
+  diagnostics?: ChangeSetDiagnostics | null;
+  approvals: ChangeSetApprovalItem[];
+  files: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface ChangeSetChange {
+  id: number;
+  runId?: number | null;
+  turnId?: string | null;
+  filePath: string;
+  action: string;
+  source: string;
+  additions?: number | null;
+  deletions?: number | null;
+  diffText?: string | null;
+  status: 'PENDING' | 'REVERTED' | 'ACCEPTED';
+  createTime?: string | null;
+}
+
+export interface ChangeSetTotals {
+  files: number;
+  additions: number;
+  deletions: number;
+  pending: number;
+  accepted: number;
+  reverted: number;
+}
+
+export interface ChangeSetView {
+  sessionId: number;
+  projectId?: number | null;
+  runFilter?: number | null;
+  status: ChangeSetStatus;
+  statusLabel: string;
+  accepted: boolean;
+  verification: ChangeSetVerification;
+  approvals: ChangeSetApprovalSummary;
+  totals: ChangeSetTotals;
+  runs: ChangeSetRun[];
+  changes: ChangeSetChange[];
+  continuePrompt: string;
+}
+
+export interface ChangeSetConflict {
+  id: number;
+  filePath?: string | null;
+  reason: string;
+}
+
+export interface RevertResult {
+  ok: boolean;
+  count: number;
+  failed: number;
+  skippedAccepted: number;
+  conflicts: ChangeSetConflict[];
+}
+
 /** 聊天界面消息（前端 UI 模型）；hint 为附件提示条 */
 export interface UiMessage {
   id: number;
@@ -196,7 +338,7 @@ export interface UiMessage {
   /** 用户主动停止生成（保留已生成内容，不算失败） */
   stopped?: boolean;
   /** 本次回答参考了哪些资料 */
-  sources?: { id: number; name: string; score: number; content?: string }[];
+  sources?: { id: number; name: string; score: number; content?: string; chunkId?: number; chunkIndex?: number }[];
   /** 本次回答改动了哪些工作区文件 */
   changes?: FileChange[];
   /** 本轮 Agent 提交的任务计划（实时更新；为空表示没有计划） */
@@ -205,6 +347,12 @@ export interface UiMessage {
   turnId?: string;
   /** 本轮耗时（毫秒）：生成中用开始时间计时，完成后固定，历史消息从 trace 还原 */
   durationMs?: number;
+  /** 本轮任务的验证与完成状态 */
+  completion?: CompletionInfo;
+  /** P5-05：最近一批变更文件诊断 */
+  diagnostics?: DiagnosticsInfo;
+  /** P5-06：最近一次项目验证结果 */
+  verify?: VerifyInfo;
 }
 
 /**
@@ -256,5 +404,40 @@ export interface SessionStats {
     status: string;
     costMs: number;
     argsSummary: string;
+    /** P5-12-3：该次调用改动的文件与增删行数（仅文件类工具有值） */
+    path?: string | null;
+    additions?: number | null;
+    deletions?: number | null;
   }[];
+  /** P4-07：会话 token 用量，来自后端 agent_run 汇总；无运行时为空 */
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+/** P5-11-2：当前用户的 Agent 体验审计聚合；null 表示没有样本。 */
+export interface AgentExperienceMetrics {
+  generatedAt: string;
+  windowRuns: number;
+  firstToken: {
+    p95Ms: number | null;
+    sampleCount: number;
+  };
+  tool: {
+    failureRate: number | null;
+    totalCount: number;
+    failedCount: number;
+    scope: string;
+  };
+  approval: {
+    averageWaitMs: number | null;
+    sampleCount: number;
+  };
+  tokens: {
+    averageTotalTokens: number | null;
+    totalTokens: number;
+    sampleCount: number;
+  };
 }

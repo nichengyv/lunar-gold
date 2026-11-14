@@ -98,6 +98,35 @@ jobs:
             --config.directories.output="$env:GITHUB_WORKSPACE\release\installer"
           if ($LASTEXITCODE -ne 0) { throw "electron-builder NSIS 构建失败" }
 
+      - name: Stage and verify compliance files
+        shell: powershell
+        run: |
+          $source = "$env:GITHUB_WORKSPACE\build\legal"
+          $unpacked = "${{ runner.temp }}\desktop-pack\win-unpacked\resources\legal"
+          $release = "$env:GITHUB_WORKSPACE\release\legal"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $names = @(
+            'LICENSE', 'NOTICE', 'NOTICE.en', 'PRIVACY.md', 'PRIVACY.en.md', 'TERMS.md', 'TERMS.en.md',
+            'SBOM.json', 'SBOM.frontend.json', 'SBOM.desktop.json', 'SBOM.runtime.json', 'THIRD-PARTY-LICENSES.txt'
+          )
+          foreach ($name in $names) {
+            $sourceFile = Join-Path $source $name
+            $unpackedFile = Join-Path $unpacked $name
+            if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) { throw "合规 staging 缺少 $name" }
+            if (-not (Test-Path -LiteralPath $unpackedFile -PathType Leaf)) { throw "unpacked 缺少合规文件 $name" }
+            if ((Get-FileHash -LiteralPath $sourceFile).Hash -ne (Get-FileHash -LiteralPath $unpackedFile).Hash) {
+              throw "unpacked 合规文件哈希不一致：$name"
+            }
+            Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $release $name) -Force
+          }
+          foreach ($name in @('SBOM.json', 'SBOM.frontend.json', 'SBOM.desktop.json', 'SBOM.runtime.json')) {
+            $bom = Get-Content -LiteralPath (Join-Path $release $name) -Raw | ConvertFrom-Json
+            if ($bom.bomFormat -ne 'CycloneDX' -or @($bom.components).Count -eq 0) { throw "Release SBOM 校验失败：$name" }
+          }
+          if ((Get-Item -LiteralPath (Join-Path $release 'THIRD-PARTY-LICENSES.txt')).Length -eq 0) {
+            throw '第三方许可合集为空'
+          }
+
       - name: Verify signatures (only when signing is enabled)
         if: env.SIGNPATH_API_TOKEN != ''
         shell: powershell
@@ -193,7 +222,7 @@ jobs:
           [System.IO.File]::AppendAllText($env:GITHUB_ENV, "VERSION=$v`n", (New-Object System.Text.UTF8Encoding($false)))
           Write-Host "发布版本：$v"
 
-      - name: Create draft release
+      - name: Create draft release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
           # workflow_dispatch 在分支上触发时 github.ref_name 是分支名，
@@ -205,10 +234,31 @@ jobs:
           # 因此这里不标 prerelease，除非标签里带 rc/beta 之类测试标识
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') }}
           generate_release_notes: true
-          # 签名流程会删除签名后失配的 blockmap，此处置为 false 避免误判失败
+          # 仅安装器步骤允许可选 blockmap 缺配；合规文件在下一步严格逐项匹配。
           fail_on_unmatched_files: false
           files: |
             release/installer/LunarGold-Setup-*.exe
             release/installer/*.blockmap
             release/installer/latest.yml
             release/installer/SHA256SUMS.txt
+
+      - name: Upload compliance files
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Lunar Gold v${{ env.VERSION }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            release/legal/LICENSE
+            release/legal/NOTICE
+            release/legal/NOTICE.en
+            release/legal/PRIVACY.md
+            release/legal/PRIVACY.en.md
+            release/legal/TERMS.md
+            release/legal/TERMS.en.md
+            release/legal/SBOM.json
+            release/legal/SBOM.frontend.json
+            release/legal/SBOM.desktop.json
+            release/legal/SBOM.runtime.json
+            release/legal/THIRD-PARTY-LICENSES.txt

@@ -10,6 +10,7 @@ import com.capsule.agentkey.mcp.McpHealthMonitor;
 import com.capsule.agentkey.repository.PendingFileChangeRepository;
 import com.capsule.agentkey.repository.ProjectRepository;
 import com.capsule.agentkey.service.CapabilityService;
+import com.capsule.agentkey.service.ChangeSetService;
 import com.capsule.agentkey.service.FolderPickerService;
 import com.capsule.agentkey.service.ProjectService;
 import com.capsule.agentkey.service.WorkspaceFileService;
@@ -119,33 +120,31 @@ class CapabilityGuardControllerTest {
     @Test
     void 云端文件审查接口返回404() throws Exception {
         PendingFileChangeRepository changeRepository = mock(PendingFileChangeRepository.class);
-        WorkspaceFileService workspaceFileService = mock(WorkspaceFileService.class);
-        ProjectRepository projectRepository = mock(ProjectRepository.class);
+        ChangeSetService changeSetService = mock(ChangeSetService.class);
         MockMvc mockMvc = mockMvc(new FileReviewController(
-                changeRepository, workspaceFileService, projectRepository), "cloud");
+                changeRepository, changeSetService), "cloud");
 
         mockMvc.perform(get("/api/file-changes").param("projectId", "1"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
 
-        verifyNoInteractions(changeRepository, workspaceFileService, projectRepository);
+        verifyNoInteractions(changeRepository, changeSetService);
     }
 
     @Test
     void 桌面端文件审查接口正常执行() throws Exception {
         PendingFileChangeRepository changeRepository = mock(PendingFileChangeRepository.class);
-        WorkspaceFileService workspaceFileService = mock(WorkspaceFileService.class);
-        ProjectRepository projectRepository = mock(ProjectRepository.class);
+        ChangeSetService changeSetService = mock(ChangeSetService.class);
         when(changeRepository.findByProjectIdAndStatusOrderByCreateTimeDesc(1L, "PENDING"))
                 .thenReturn(List.of());
         MockMvc mockMvc = mockMvc(new FileReviewController(
-                changeRepository, workspaceFileService, projectRepository), "desktop");
+                changeRepository, changeSetService), "desktop");
 
         mockMvc.perform(get("/api/file-changes").param("projectId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
 
-        verifyNoInteractions(workspaceFileService, projectRepository);
+        verifyNoInteractions(changeSetService);
     }
 
     @Test

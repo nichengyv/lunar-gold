@@ -67,6 +67,12 @@ public class WebFetchTool implements BaseTool {
         return "fetch_webpage";
     }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() {
+        return true;
+    }
+
     @Override
     public String getDescription() {
         return "抓取指定网页的正文内容。当用户提供了具体URL、或需要读取某篇文章、文档、" +

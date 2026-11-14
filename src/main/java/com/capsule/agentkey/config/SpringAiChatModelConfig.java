@@ -8,6 +8,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -32,32 +33,72 @@ public class SpringAiChatModelConfig {
      */
     private final ObservationRegistry observationRegistry;
 
+    /**
+     * P4-06：跨 Provider 的备选模型必须显式配置。
+     * 旧实现把「所有已知模型」都当 fallback，但同一把 DeepSeek 密钥去打
+     * moonshot/qwen 只会得到 400，属于无效请求；默认改为空，需要时再配。
+     */
+    private final List<String> fallbackModels;
+    private final int maxAttempts;
+    private final long retryBackoffMs;
+    private final long idleTimeoutSeconds;
+    private final long syncTimeoutSeconds;
+
     public SpringAiChatModelConfig(
             @Value("${agent.spring-ai.base-url:https://api.deepseek.com}") String baseUrl,
             @Value("${agent.spring-ai.completions-path:/v1/chat/completions}") String completionsPath,
+            @Value("${agent.spring-ai.fallback-models:}") String fallbackModels,
+            @Value("${agent.spring-ai.max-attempts:3}") int maxAttempts,
+            @Value("${agent.spring-ai.retry-backoff-ms:500}") long retryBackoffMs,
+            @Value("${agent.spring-ai.idle-timeout-seconds:60}") long idleTimeoutSeconds,
+            @Value("${agent.spring-ai.sync-timeout-seconds:60}") long syncTimeoutSeconds,
             ObservationRegistry observationRegistry) {
         this.baseUrl = baseUrl.replaceAll("/+$", "")
                 + completionsPath.replaceFirst("/chat/completions/?$", "");
+        this.fallbackModels = parseModels(fallbackModels);
+        this.maxAttempts = Math.max(1, maxAttempts);
+        this.retryBackoffMs = Math.max(0L, retryBackoffMs);
+        this.idleTimeoutSeconds = Math.max(1L, idleTimeoutSeconds);
+        this.syncTimeoutSeconds = Math.max(1L, syncTimeoutSeconds);
         this.observationRegistry = observationRegistry;
     }
 
-    /**
-     * D2: 给定模型名，返回 fallback 备选模型列表。
-     * 默认策略：任何 DeepSeek 模型失败 → 切 Moonshot/Qwen；非 DeepSeek 模型失败 → 切 DeepSeek。
-     * 可通过 agent.spring-ai.fallback-map 配置覆盖（格式: "deepseek-chat=moonshot-v1-8k,qwen-plus; qwen-max=deepseek-chat"）。
-     */
+    private static List<String> parseModels(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    /** 熔断与重试的隔离维度：同一个 base-url 视为同一个 Provider */
+    public String providerId() {
+        return baseUrl;
+    }
+
+    /** 给定模型名，返回显式配置的 fallback 备选模型（已排除自身） */
     public List<String> fallbackModelsFor(String model) {
-        // D2: 目前硬编码 fallback——后续可以从配置文件/数据库 settings 动态读
-        // 先做一个简单的互补策略：任何模型失败后尝试其他主流模型
-        List<String> allKnown = List.of(
-                "deepseek-chat", "deepseek-reasoner", "deepseek-pro",
-                "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k",
-                "qwen-plus", "qwen-turbo", "qwen-max",
-                "glm-4", "glm-4-plus"
-        );
-        return allKnown.stream()
+        return fallbackModels.stream()
                 .filter(m -> !m.equals(model))
-                .collect(java.util.stream.Collectors.toList());
+                .toList();
+    }
+
+    public int maxAttempts() {
+        return maxAttempts;
+    }
+
+    public long retryBackoffMs() {
+        return retryBackoffMs;
+    }
+
+    public long idleTimeoutSeconds() {
+        return idleTimeoutSeconds;
+    }
+
+    public long syncTimeoutSeconds() {
+        return syncTimeoutSeconds;
     }
 
     /**

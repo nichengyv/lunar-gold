@@ -1,0 +1,124 @@
+Lunar Gold (金月)
+Copyright 2026 杨俊懿 (Junyi Yang)
+
+中文版：NOTICE
+
+This product includes software developed by third parties. The sections below
+list the components bundled in the Windows installer (LunarGold-Setup-x.y.z.exe)
+and the licenses under which they are distributed. Four machine-readable
+inventories (CycloneDX 1.6) ship with the installer: SBOM.json (Java backend and
+all transitive dependencies), SBOM.frontend.json (frontend production
+dependencies), SBOM.desktop.json (desktop shell production dependencies) and
+SBOM.runtime.json (Electron, trimmed JRE, PostgreSQL and pgvector runtimes).
+The complete third-party license and copyright texts are in
+THIRD-PARTY-LICENSES.txt.
+
+Lunar Gold itself is licensed under the Apache License, Version 2.0
+(see LICENSE). This NOTICE does not change any third-party license.
+
+================================================================================
+1. Application shell and updater (desktop)
+================================================================================
+
+Electron 43.3.0 ................................ MIT
+  Bundles Chromium and Node.js:
+  Chromium ........................................ BSD-3-Clause and other
+                                                    open-source licenses
+  Node.js ......................................... MIT
+electron-updater 6.8.11 .......................... MIT
+  with its transitive packages (builder-util-runtime, fs-extra, js-yaml,
+  lazy-val, lodash.escaperegexp, lodash.isequal, semver, tiny-typed-emitter
+  and their dependencies), each distributed under MIT, ISC or BSD terms.
+Electron language packs (en-US, zh-CN, zh-TW) ..... MIT
+
+================================================================================
+2. Bundled runtimes
+================================================================================
+
+Eclipse Temurin JDK 21 runtime, trimmed with jlink
+  ................................................ GPL-2.0 WITH Classpath
+                                                    Exception
+PostgreSQL 16.11 (Windows x64 runtime) ........... PostgreSQL License
+pgvector 0.8.7 (vector extension for PostgreSQL) . PostgreSQL License
+
+================================================================================
+3. Backend (Java / Spring) components
+================================================================================
+
+The backend jar contains 243 Maven components. SBOM.json lists every component,
+version and declared license. Grouped by declared license:
+
+  Apache-2.0 (202 components), including:
+    Spring Boot 4.1.2, Spring Framework, Spring Security, Spring Data,
+    Spring AI 2.0.2 (including the MCP client), Flyway, Hibernate ORM and
+    Validator, Tomcat embed, Jackson, Netty, Reactor, Micrometer / Prometheus
+    client, Log4j API, OkHttp, Okio, Apache PDFBox, Apache POI, Apache Tika
+    Core, Swagger / springdoc, Byte Buddy, Kotlin standard library,
+    embedded-postgres (io.zonky.test)
+
+  MIT (12):
+    checker-qual, jsoup, jtokkit, jul-to-slf4j, lettuce-core, lombok,
+    mcp, mcp-core, mcp-json-jackson3, redis-authx-core, slf4j-api,
+    webjars-locator-lite
+
+  BSD-3-Clause (9):
+    angus-activation, antlr4-runtime, curvesapi, istack-commons-runtime,
+    jakarta.activation-api, jakarta.xml.bind-api, jaxb-core, jaxb-runtime, txw2
+
+  EPL-2.0 (7):
+    aspectjweaver, junit-jupiter, junit-jupiter-api, junit-jupiter-engine,
+    junit-jupiter-params, junit-platform-commons, junit-platform-engine
+
+  EPL-2.0 / BSD-3-Clause (1):
+    jakarta.persistence-api
+
+  EPL-2.0 / GPL-2.0-with-classpath-exception (2):
+    jakarta.annotation-api, jakarta.transaction-api
+
+  EPL-2.0 / GPL-2.0-with-classpath-exception / BSD-3-Clause (2):
+    angus-mail, jakarta.mail-api
+
+  EPL-2.0 / LGPL-2.1-only (2):
+    logback-classic, logback-core
+
+  BSD-2-Clause (1): postgresql (JDBC driver)
+  BSD-4-Clause (1): ST4
+  BSD licence (1): antlr-runtime
+  CC0-1.0 / BSD-2-Clause (1): HdrHistogram
+  0BSD (1): xz
+  MIT-0 (1): reactive-streams
+
+Notes:
+  - junit-jupiter and junit-platform are resolved as compile-scope through
+    spring-boot-starter-test in Spring Boot 4 and are therefore present in the
+    packaged jar. They are test tooling and are not used at runtime.
+  - embedded-postgres-binaries-windows-amd64 (test scope) is listed in SBOM.json
+    but is not included in the installer; the shipped PostgreSQL runtime is
+    built by scripts/build-pg-runtime.ps1.
+
+================================================================================
+4. Frontend libraries
+================================================================================
+
+Vue 3.5, Vue Router 4.6, Pinia 2.3, Element Plus 2.14, axios 1.20,
+marked 15, jsencrypt 3.5, CodeMirror 6 and @codemirror packages,
+@codemirror/theme-one-dark ........................ MIT
+highlight.js 11 .................................. BSD-3-Clause
+DOMPurify 3 ...................................... MPL-2.0 OR Apache-2.0
+
+================================================================================
+5. License texts and source
+================================================================================
+
+- Apache License 2.0: LICENSE
+- Component inventories: SBOM.json, SBOM.frontend.json, SBOM.desktop.json,
+  SBOM.runtime.json
+- Third-party license and copyright texts: THIRD-PARTY-LICENSES.txt
+- Upstream source and license texts: the project repositories of each component
+  (Maven Central for the Java components, npm for the JavaScript packages,
+  github.com/electron/electron, adoptium.net, postgresql.org,
+  github.com/pgvector/pgvector, github.com/andreiramani/pgvector_pgsql_windows).
+
+If you redistribute an installer built from this repository, keep this NOTICE,
+the LICENSE file and the third-party license texts that apply to the components
+you ship.

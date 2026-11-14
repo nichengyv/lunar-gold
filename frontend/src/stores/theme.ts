@@ -2,12 +2,24 @@ import { defineStore } from 'pinia';
 
 const THEME_KEY = 'theme';
 const FONT_KEY = 'fontSize';
+/** 默认主题从亮色改为深色，老版本会把默认值自动写进 localStorage，需要一次性区分 */
+const THEME_VERSION_KEY = 'themeVersion';
+const THEME_VERSION = '2';
+
+/** 读取初始主题：v2 之前留下的值不算用户选择，统一按新的深色默认 */
+export function resolveInitialDark(): boolean {
+  const stored = localStorage.getItem(THEME_KEY);
+  const version = localStorage.getItem(THEME_VERSION_KEY);
+  if (version !== THEME_VERSION) return true;
+  return stored !== 'light';
+}
 
 function applyTheme(isDark: boolean) {
   const root = document.documentElement;
   root.setAttribute('data-theme', isDark ? 'dark' : 'light');
   root.classList.toggle('dark', isDark);
   localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+  localStorage.setItem(THEME_VERSION_KEY, THEME_VERSION);
 }
 
 function applyFont(size: 'small' | 'medium' | 'large') {
@@ -21,7 +33,8 @@ function applyFont(size: 'small' | 'medium' | 'large') {
 
 export const useThemeStore = defineStore('theme', {
   state: () => ({
-    isDark: (localStorage.getItem(THEME_KEY) || 'light') === 'dark',
+    // 默认深色：开发者工具的使用场景多在编辑器旁边，亮色太刺眼；用户手动切换后以 localStorage 为准
+    isDark: resolveInitialDark(),
     fontSize: (localStorage.getItem(FONT_KEY) as 'small' | 'medium' | 'large') || 'medium'
   }),
   actions: {

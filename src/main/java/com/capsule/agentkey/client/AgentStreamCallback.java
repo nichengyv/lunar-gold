@@ -22,4 +22,11 @@ public interface AgentStreamCallback {
     void onComplete();//流式全部结束
 
     void onError(Throwable t);//网络、解析、业务异常
+
+    /**
+     * P4-07：本次模型调用消耗的 token。
+     * 部分 provider 只在最后一个分片返回 usage，因此可能一次都不触发；
+     * 用 default 实现保证既有回调不受影响。
+     */
+    default void onUsage(long promptTokens, long completionTokens) {}
 }

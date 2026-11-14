@@ -1,6 +1,7 @@
 package com.capsule.agentkey.service;
 
 import com.capsule.agentkey.exception.BusinessException;
+import com.capsule.agentkey.service.sandbox.ProcessSandbox;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +25,7 @@ class CommandServiceIntegrationTest {
         // 工作目录就用项目根
         workDir = Paths.get("d:/test-code/agent-gateway-v3");
         WorkspaceFileService ws = new WorkspaceFileService();
-        svc = new CommandService(ws);
+        svc = new CommandService(ws, ProcessSandbox.NONE);
 
         Field f = CommandService.class.getDeclaredField("enabled");
         f.setAccessible(true);

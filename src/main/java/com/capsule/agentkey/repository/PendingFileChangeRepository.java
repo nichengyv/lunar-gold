@@ -16,6 +16,12 @@ public interface PendingFileChangeRepository extends JpaRepository<PendingFileCh
     List<PendingFileChange> findBySessionIdAndTurnIdAndStatusOrderByCreateTimeDesc(
             Long sessionId, String turnId, String status);
 
+    /** P5-14：任务级交付视图按会话取全部变更，新的在前；同时间按 id 倒序保证逆序撤回 */
+    List<PendingFileChange> findBySessionIdOrderByCreateTimeDescIdDesc(Long sessionId);
+
+    /** P5-14：按会话 + 状态取变更，新的在前 */
+    List<PendingFileChange> findBySessionIdAndStatusOrderByCreateTimeDescIdDesc(Long sessionId, String status);
+
     /** 批量保留/撤销：按 projectId 改所有 PENDING */
     long countByProjectIdAndStatus(Long projectId, String status);
 }

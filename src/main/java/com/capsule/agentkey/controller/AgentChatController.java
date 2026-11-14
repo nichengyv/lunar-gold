@@ -2,7 +2,9 @@ package com.capsule.agentkey.controller;
 
 import com.capsule.agentkey.config.Capability;
 import com.capsule.agentkey.config.RequiresCapability;
+import com.capsule.agentkey.dto.ApprovalBatchRequest;
 import com.capsule.agentkey.dto.ApprovalDecisionRequest;
+import com.capsule.agentkey.dto.ApprovalHistoryItem;
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.ChatRequest;
 import com.capsule.agentkey.dto.ChatSessionStats;
@@ -12,6 +14,7 @@ import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.service.AgentExperienceMetricsService;
 import com.capsule.agentkey.service.AgentPolicy;
 import com.capsule.agentkey.service.AgentPolicyResolver;
 import com.capsule.agentkey.service.ApiKeyService;
@@ -44,8 +47,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api/agent")
@@ -62,13 +70,41 @@ public class AgentChatController {
     private final VisionService visionService;
     /** D3 可观测性：MeterRegistry 用于查 Agent 工具调用 Timer */
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AgentExperienceMetricsService experienceMetricsService;
     private final ContextSummaryService contextSummaryService;
     private final AgentPolicyResolver policyResolver;
     /** 第六十八批 A2：工具审批登记表 */
     private final com.capsule.agentkey.service.ToolApprovalRegistry toolApprovalRegistry;
     /** 批次 B2：会话级自动记忆 */
     private final com.capsule.agentkey.service.SessionMemoryExtractionService memoryService;
+    private final com.capsule.agentkey.service.AgentRunService agentRunService;
+    /** P5-01：提示词版本目录，用于把本轮版本写入 run 事件 */
+    private final com.capsule.agentkey.service.PromptCatalog promptCatalog;
     private final Executor agentStreamExecutor;
+
+    /** P5-10-3：预算上限，随 usage 事件下发给前端；0 表示不限制 */
+    @org.springframework.beans.factory.annotation.Value("${agent.budget.max-tokens-per-run:0}")
+    private long maxTokensPerRun = 0L;
+
+    @org.springframework.beans.factory.annotation.Value("${agent.budget.max-seconds-per-run:0}")
+    private long maxSecondsPerRun = 0L;
+
+    /** P4-04：SSE 心跳间隔；Nginx/网关通常 60s 空闲断连，15s 足够安全 */
+    private static final long SSE_HEARTBEAT_SECONDS = 15L;
+
+    /** P5-10：回答内容的断点检查点间隔；太小会把事件表写爆，太大丢字多 */
+    private static final long CONTENT_CHECKPOINT_INTERVAL_MS = 800L;
+    /** P5-10：单个检查点累计正文上限，超长回答只保证前 2 万字可恢复 */
+    private static final int CONTENT_CHECKPOINT_LIMIT = 20000;
+
+    /** P4-04：心跳线程与业务线程隔离，单线程足够（写 SSE 不阻塞） */
+    private static final ScheduledExecutorService SSE_HEARTBEAT =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "sse-heartbeat");
+                t.setDaemon(true);
+                return t;
+            });
 
     public AgentChatController(ApiKeyService apiKeyService,
                                ReActAgentService agentService,
@@ -81,6 +117,8 @@ public class AgentChatController {
                                AgentPolicyResolver policyResolver,
                                com.capsule.agentkey.service.ToolApprovalRegistry toolApprovalRegistry,
                                com.capsule.agentkey.service.SessionMemoryExtractionService memoryService,
+                               com.capsule.agentkey.service.AgentRunService agentRunService,
+                               com.capsule.agentkey.service.PromptCatalog promptCatalog,
                                @Qualifier("agentStreamExecutor") Executor agentStreamExecutor,
                                io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.apiKeyService = apiKeyService;
@@ -94,6 +132,8 @@ public class AgentChatController {
         this.policyResolver = policyResolver;
         this.toolApprovalRegistry = toolApprovalRegistry;
         this.memoryService = memoryService;
+        this.agentRunService = agentRunService;
+        this.promptCatalog = promptCatalog;
         this.agentStreamExecutor = agentStreamExecutor;
         this.meterRegistry = meterRegistry;
     }
@@ -123,25 +163,13 @@ public class AgentChatController {
         boolean useRag = request.isUseRag();
         List<Long> attachmentIds = request.getAttachmentIds();
         Long userId = getCurrentUserId();
+        if (request.getClientRequestId() != null
+                && agentRunService.findByIdempotent(userId, request.getClientRequestId()).isPresent()) {
+            throw new BusinessException("该请求已提交，请勿重复执行");
+        }
 
         //Nginx 默认会缓冲 SSE，置 no 让事件实时下发
         response.setHeader("X-Accel-Buffering", "no");
-
-        // SSE 不设固定总时长：多轮审批可能超过 180 秒，审批本身由 ToolApprovalRegistry 独立超时。
-        // 客户端断开仍通过写出异常或 /chat/stop 置位，不会放任工具继续执行。
-        SseEmitter emitter = new SseEmitter(0L);
-
-        //B3：断连标记——任一 SSE 写出抛异常即置位，ReAct 循环在每轮开始前检查该标记并中止
-        AtomicBoolean clientDisconnected = new AtomicBoolean(false);
-
-        emitter.onTimeout(() -> {
-            clientDisconnected.set(true);
-            log.warn("SSE 超时，中止 LLM 调用 [userId={}]", userId);
-        });
-        emitter.onError(t -> {
-            clientDisconnected.set(true);
-            log.warn("SSE 连接错误 [userId={}]: {}", userId, t.getMessage());
-        });
 
         //———— 准备阶段（仍在请求线程上，失败直接抛 4xx/5xx 给前端，不走 SSE） ————
         Long finalSessionId = sessionId;
@@ -185,6 +213,64 @@ public class AgentChatController {
         }
         final Long chatSessionId = finalSessionId;
         final Long projectId = effectiveProjectId;
+        // P5-14：本轮执行 id 提前生成并写入 requestJson，建立 runId ↔ turnId 的持久映射，
+        // 供任务级 ChangeSet 按 Run 聚合与撤回；SSE 下发的仍是同一个值。
+        final String turnId = "turn-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        final com.capsule.agentkey.service.AgentRunService.CreateResult runCreation;
+        try {
+            Map<String, Object> runRequest = new LinkedHashMap<>();
+            runRequest.put("prompt", prompt == null ? "" : prompt);
+            runRequest.put("model", policy.model());
+            runRequest.put("turnId", turnId);
+            runCreation = agentRunService.create(userId, chatSessionId, projectId,
+                    request.getClientRequestId(), mapper.writeValueAsString(runRequest));
+        } catch (Exception e) {
+            throw new BusinessException("无法创建运行记录，请稍后重试");
+        }
+        // 并发请求可能越过入口预检后才命中已提交记录，此时不能再次保存消息或调度执行
+        if (!runCreation.created()) {
+            throw new BusinessException("该请求已提交，请勿重复执行");
+        }
+        final Long runId = runCreation.run().getId();
+
+        // P5-01：记录本轮实际使用的提示词版本（scenario -> id@version），排查回答差异时先看这里
+        try {
+            Map<String, Object> promptPayload = new LinkedHashMap<>(promptCatalog.describe());
+            agentRunService.appendEvent(runId,
+                    com.capsule.agentkey.entity.AgentRunEvent.EventType.PROMPT_LOADED,
+                    promptPayload);
+        } catch (Exception e) {
+            log.warn("记录提示词版本失败: runId={}, {}", runId, e.getMessage());
+        }
+
+        // SSE 不设固定总时长：多轮审批可能超过 180 秒，审批本身由 ToolApprovalRegistry 独立超时。
+        // 客户端断开仍通过写出异常或 /chat/stop 置位，不会放任工具继续执行。
+        TrackedEmitter emitter = new TrackedEmitter(0L);
+
+        //B3：断连标记——任一 SSE 写出抛异常即置位，ReAct 循环在每轮开始前检查该标记并中止
+        AtomicBoolean clientDisconnected = new AtomicBoolean(false);
+
+        // P4-04：心跳注释帧保活；连接结束后必须取消，否则会一直往已关闭的 emitter 写。
+        // 注意在准备阶段之后才创建，避免参数校验失败时留下永不取消的定时任务。
+        ScheduledFuture<?> heartbeat = SSE_HEARTBEAT.scheduleAtFixedRate(() -> {
+            try {
+                emitter.heartbeat();
+            } catch (Exception e) {
+                clientDisconnected.set(true);
+            }
+        }, SSE_HEARTBEAT_SECONDS, SSE_HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+
+        emitter.onCompletion(() -> heartbeat.cancel(false));
+        emitter.onTimeout(() -> {
+            heartbeat.cancel(false);
+            clientDisconnected.set(true);
+            log.warn("SSE 超时，中止 LLM 调用 [userId={}]", userId);
+        });
+        emitter.onError(t -> {
+            heartbeat.cancel(false);
+            clientDisconnected.set(true);
+            log.warn("SSE 连接错误 [userId={}]: {}", userId, t.getMessage());
+        });
 
         String fileContext = "";
         if (attachmentIds != null && !attachmentIds.isEmpty()) {
@@ -221,6 +307,7 @@ public class AgentChatController {
             realApiKey = apiKeyService.getDecryptedKey(userId, "DEEPSEEK");
         } catch (Exception e) {
             //用户未配置 Key：通过 SSE 通道下发错误事件后正常关闭，前端按协议处理即可
+            markRunFailed(runId, "API_KEY_MISSING", e.getMessage());
             sendEventQuietly(emitter, "error", e.getMessage(), clientDisconnected);
             emitter.complete();
             return emitter;
@@ -244,6 +331,14 @@ public class AgentChatController {
             java.util.concurrent.atomic.AtomicLong lastToolResultAt = new java.util.concurrent.atomic.AtomicLong(0);
             java.util.concurrent.atomic.AtomicLong toolCostMsSum = new java.util.concurrent.atomic.AtomicLong(0);
             java.util.concurrent.atomic.AtomicLong firstChunkAt = new java.util.concurrent.atomic.AtomicLong(0);
+            // P5-10：上一次正文检查点的时间；断线后前端靠它重放已生成内容
+            java.util.concurrent.atomic.AtomicLong lastContentCheckpointAt = new java.util.concurrent.atomic.AtomicLong(0);
+            // P4-07：本轮 token 累计；用量只落库一次，避免多处收尾重复累加
+            java.util.concurrent.atomic.AtomicLong turnPromptTokens = new java.util.concurrent.atomic.AtomicLong(0);
+            java.util.concurrent.atomic.AtomicLong turnCompletionTokens = new java.util.concurrent.atomic.AtomicLong(0);
+            // P5-10-3：本轮已完成的模型轮次，用于向前端展示轮次预算
+            AtomicInteger turnRounds = new AtomicInteger(0);
+            AtomicBoolean usagePersisted = new AtomicBoolean(false);
             StringBuilder traceThinking = new StringBuilder();
             List<Map<String, Object>> traceTools = new ArrayList<>();
             List<Map<String, Object>> traceSources = new ArrayList<>();
@@ -251,11 +346,22 @@ public class AgentChatController {
             // 第六十八批 A1：本轮任务计划的最新快照，随助手消息 trace 落库
             java.util.concurrent.atomic.AtomicReference<Map<String, Object>> tracePlan =
                     new java.util.concurrent.atomic.AtomicReference<>();
-            // 第六十八批 A3：本轮执行 id，本轮所有文件改动共享，前端据此「撤回本轮」
-            String turnId = "turn-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            // P5-13：交付状态独立于 Run 生命周期，随消息轨迹与 run.resultJson 持久化
+            java.util.concurrent.atomic.AtomicReference<Map<String, Object>> traceCompletion =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            // P5-05：最近一批变更文件诊断，随消息轨迹落库供历史会话还原
+            java.util.concurrent.atomic.AtomicReference<Map<String, Object>> traceDiagnostics =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            // P5-06：最近一次项目验证结果，随消息轨迹落库供历史会话与断线重放还原
+            java.util.concurrent.atomic.AtomicReference<Map<String, Object>> traceVerify =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicReference<String> runResultJson =
+                    new java.util.concurrent.atomic.AtomicReference<>();
             try {
+                agentRunService.start(runId);
                 //先告诉前端 sessionId，前端用它把后续流式消息挂到正确的会话上
                 sendEvent(emitter, "session_id", String.valueOf(chatSessionId));
+                sendEventQuietly(emitter, "run_id", String.valueOf(runId), clientDisconnected);
                 //本轮 id 用于按轮次撤回文件改动；失败也不影响主流程
                 sendEventQuietly(emitter, "turn_id", turnId, clientDisconnected);
 
@@ -329,6 +435,9 @@ public class AgentChatController {
                                                 item.put("name", s.fileName());
                                                 item.put("score", Math.round(s.score() * 100) / 100.0);
                                                 item.put("content", s.content());
+                                                // P5-07：引用可定位到具体切片
+                                                if (s.chunkId() != null) item.put("chunkId", s.chunkId());
+                                                if (s.chunkIndex() != null) item.put("chunkIndex", s.chunkIndex());
                                                 return item;
                                             })
                                             .toList();
@@ -370,6 +479,13 @@ public class AgentChatController {
                                     data.put("args", arguments);
                                     data.put("status", "calling");
                                     sendEvent(emitter, "tool_call", mapper.writeValueAsString(data));
+                                    // P4-04：工具调用落事件表，断线后客户端可凭 runId + sinceSeq 重放
+                                    Map<String, Object> persisted = new LinkedHashMap<>();
+                                    persisted.put("tool", toolName);
+                                    persisted.put("args", truncateForTrace(arguments, 1000));
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.TOOL_CALL,
+                                            persisted);
                                 } catch (IOException e) {
                                     clientDisconnected.set(true);
                                     log.error("发送 tool_call 事件失败（客户端可能已断开）", e);
@@ -401,6 +517,15 @@ public class AgentChatController {
                                     data.put("costMs", result.getCostMs());
                                     data.put("status", "done");
                                     sendEvent(emitter, "tool_result", mapper.writeValueAsString(data));
+                                    // P4-04：工具结果只落摘要，避免整份文件把事件表撑大
+                                    Map<String, Object> persisted = new LinkedHashMap<>();
+                                    persisted.put("tool", toolName);
+                                    persisted.put("success", result.isSuccess());
+                                    persisted.put("content", truncateForTrace(result.getContent(), 1000));
+                                    persisted.put("error", truncateForTrace(result.getError(), 500));
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.TOOL_RESULT,
+                                            persisted);
                                 } catch (IOException e) {
                                     clientDisconnected.set(true);
                                     log.error("发送 tool_result 事件失败（客户端可能已断开）", e);
@@ -454,6 +579,7 @@ public class AgentChatController {
                             public void onApprovalRequired(String approvalId, String tool,
                                                            com.capsule.agentkey.dto.ApprovalPreview preview,
                                                            String risk, long expiresAt) {
+                                agentRunService.pauseForApproval(runId, approvalId, tool);
                                 try {
                                     // 审批卡片只收到可读摘要（路径/命令/改了多少行），不下发裸参数 JSON
                                     Map<String, Object> data = new HashMap<>();
@@ -470,11 +596,16 @@ public class AgentChatController {
                             }
 
                             @Override
-                            public void onApprovalResolved(String approvalId, String decision) {
+                            public void onApprovalResolved(String approvalId, String decision,
+                                                           String source, String batchId) {
+                                agentRunService.resumeAfterApproval(runId, decision, source, batchId);
                                 try {
                                     Map<String, Object> data = new HashMap<>();
                                     data.put("approvalId", approvalId);
                                     data.put("decision", decision);
+                                    // P5-10-2：前端据此展示来源；批量审批带同一 batchId
+                                    data.put("source", source);
+                                    if (batchId != null) data.put("batchId", batchId);
                                     sendEvent(emitter, "approval_resolved", mapper.writeValueAsString(data));
                                 } catch (IOException e) {
                                     clientDisconnected.set(true);
@@ -483,9 +614,21 @@ public class AgentChatController {
                             }
 
                             @Override
+                            public void onUsage(long promptTokens, long completionTokens) {
+                                // P4-07：模型多次调用会分多次上报，这里只累加，终态时统一落库
+                                turnPromptTokens.addAndGet(promptTokens);
+                                turnCompletionTokens.addAndGet(completionTokens);
+                                // P5-10-3：每轮实时下发预算进度，前端不需要等到结束才知道用了多少
+                                turnRounds.incrementAndGet();
+                                sendUsageEvent(emitter, turnPromptTokens, turnCompletionTokens,
+                                        turnRounds.get(), policy.reasoning().maxToolRounds(), traceStartedAt);
+                            }
+
+                            @Override
                             public void onChunk(String chunk) {
+                                long now = System.currentTimeMillis();
                                 // 第五十六批：记录回答阶段起始时间
-                                if (firstChunkAt.get() == 0) firstChunkAt.set(System.currentTimeMillis());
+                                if (firstChunkAt.get() == 0) firstChunkAt.set(now);
                                 fullResponse.append(chunk);
                                 try {
                                     //按 JSON 下发：答案里的换行/冒号不会被 SSE 行协议截断
@@ -496,19 +639,169 @@ public class AgentChatController {
                                     clientDisconnected.set(true);
                                     log.error("写入 content 失败（客户端可能已断开）", e);
                                 }
+                                // P5-10：按固定间隔把「累计正文」落成检查点，
+                                // 前端断线/刷新后可凭 runId 重放到断点位置，而不是整段重答
+                                long last = lastContentCheckpointAt.get();
+                                if ((last == 0 || now - last >= CONTENT_CHECKPOINT_INTERVAL_MS)
+                                        && lastContentCheckpointAt.compareAndSet(last, now)) {
+                                    Map<String, Object> checkpoint = new LinkedHashMap<>();
+                                    checkpoint.put("text", truncateForTrace(fullResponse.toString(), CONTENT_CHECKPOINT_LIMIT));
+                                    checkpoint.put("length", fullResponse.length());
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.MODEL_CHUNK,
+                                            checkpoint);
+                                }
+                            }
+
+                            @Override
+                            public void onCompletion(ReActAgentService.Completion completion) {
+                                try {
+                                    Map<String, Object> data = new LinkedHashMap<>();
+                                    data.put("status", completion.status().name());
+                                    data.put("reason", completion.reason());
+                                    data.put("message", completion.message());
+                                    data.put("filesChanged", completion.filesChanged());
+                                    traceCompletion.set(data);
+                                    runResultJson.set(mapper.writeValueAsString(data));
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.COMPLETION,
+                                            data);
+                                    sendEvent(emitter, "completion", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 completion 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onDiagnostics(
+                                    com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics) {
+                                try {
+                                    Map<String, Object> data = new LinkedHashMap<>();
+                                    data.put("runId", runId);
+                                    data.put("turnId", turnId);
+                                    data.put("provider", diagnostics.provider());
+                                    data.put("available", diagnostics.available());
+                                    data.put("analyzedFiles", diagnostics.analyzedFiles());
+                                    data.put("totalCount", diagnostics.totalCount());
+                                    data.put("truncated", diagnostics.truncated());
+                                    data.put("at", System.currentTimeMillis());
+                                    var ctx = com.capsule.agentkey.tool.WorkspaceContext.get();
+                                    data.put("fileVersion", ctx == null ? "" : ctx.diagnosticsFileVersion());
+                                    List<Map<String, Object>> items = new ArrayList<>();
+                                    for (com.capsule.agentkey.diagnostics.Diagnostic item
+                                            : diagnostics.diagnostics()) {
+                                        Map<String, Object> entry = new LinkedHashMap<>();
+                                        entry.put("file", item.file());
+                                        entry.put("line", item.line());
+                                        entry.put("column", item.column());
+                                        entry.put("severity", item.severity().name());
+                                        entry.put("message", item.message());
+                                        items.add(entry);
+                                    }
+                                    data.put("diagnostics", items);
+                                    traceDiagnostics.set(data);
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.DIAGNOSTICS,
+                                            data);
+                                    sendEvent(emitter, "diagnostics", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 diagnostics 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onVerify(com.capsule.agentkey.verify.VerifyResult verify) {
+                                try {
+                                    Map<String, Object> data = new LinkedHashMap<>();
+                                    data.put("runId", runId);
+                                    data.put("turnId", turnId);
+                                    data.put("status", verify.status().name());
+                                    data.put("configured", verify.configured());
+                                    data.put("attempt", verify.attempt());
+                                    data.put("maxAttempts", verify.maxAttempts());
+                                    data.put("configPath", verify.configPath());
+                                    // 项目配置命令视为预授权；Run Event 即持久审计记录，不弹审批卡
+                                    data.put("authorization", "project-config");
+                                    data.put("message", verify.message());
+                                    data.put("failureFingerprint", verify.failureFingerprint());
+                                    data.put("at", System.currentTimeMillis());
+                                    List<Map<String, Object>> items = new ArrayList<>();
+                                    for (com.capsule.agentkey.verify.VerifyResult.CommandOutcome item
+                                            : verify.commands()) {
+                                        Map<String, Object> entry = new LinkedHashMap<>();
+                                        entry.put("name", item.name());
+                                        entry.put("command", item.command());
+                                        entry.put("cwd", item.cwd());
+                                        entry.put("required", item.required());
+                                        entry.put("exitCode", item.exitCode());
+                                        entry.put("timedOut", item.timedOut());
+                                        entry.put("durationMs", item.durationMs());
+                                        entry.put("skipped", item.skipped());
+                                        entry.put("outputTail", item.outputTail());
+                                        items.add(entry);
+                                    }
+                                    data.put("commands", items);
+                                    traceVerify.set(data);
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.VERIFY,
+                                            data);
+                                    sendEvent(emitter, "verify", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 verify 事件失败（客户端可能已断开）", e);
+                                }
+                            }
+
+                            @Override
+                            public void onNoProgress(ReActAgentService.NoProgress noProgress) {
+                                try {
+                                    Map<String, Object> data = new LinkedHashMap<>();
+                                    data.put("reason", noProgress.reason());
+                                    data.put("toolName", noProgress.toolName());
+                                    data.put("repeatCount", noProgress.repeatCount());
+                                    data.put("stagnantRounds", noProgress.stagnantRounds());
+                                    data.put("message", noProgress.message());
+                                    appendRunEvent(runId,
+                                            com.capsule.agentkey.entity.AgentRunEvent.EventType.NO_PROGRESS,
+                                            data);
+                                    sendEvent(emitter, "no_progress", mapper.writeValueAsString(data));
+                                } catch (IOException e) {
+                                    clientDisconnected.set(true);
+                                    log.error("发送 no_progress 事件失败（客户端可能已断开）", e);
+                                }
                             }
 
                             @Override
                             public void onComplete() {
                                 //客户端已断开 → 不发 done 事件也不持久化半截回复，避免污染历史
                                 if (clientDisconnected.get()) {
+                                    persistRunUsage(runId, turnPromptTokens, turnCompletionTokens, usagePersisted);
+                                    // 断开时补写最后一个正文检查点，把最后不到 1s 的内容也保住
+                                    if (fullResponse.length() > 0) {
+                                        Map<String, Object> checkpoint = new LinkedHashMap<>();
+                                        checkpoint.put("text", truncateForTrace(fullResponse.toString(), CONTENT_CHECKPOINT_LIMIT));
+                                        checkpoint.put("length", fullResponse.length());
+                                        appendRunEvent(runId,
+                                                com.capsule.agentkey.entity.AgentRunEvent.EventType.MODEL_CHUNK,
+                                                checkpoint);
+                                    }
+                                    markRunCancelled(runId, "client disconnected");
                                     log.info("客户端已断开，丢弃未完成回复 [sessionId={}]", chatSessionId);
                                     //仍要结束异步请求，否则要挂到超时（默认 180s）才释放
                                     emitter.complete();
                                     return;
                                 }
                                 try {
-                                    sendEvent(emitter, "done", "[DONE]");
+                                    sendUsageEvent(emitter, turnPromptTokens, turnCompletionTokens,
+                                            turnRounds.get(), policy.reasoning().maxToolRounds(), traceStartedAt);
+                                    try {
+                                        sendEvent(emitter, "done", "[DONE]");
+                                    } catch (IOException e) {
+                                        clientDisconnected.set(true);
+                                        throw e;
+                                    }
                                     if (fullResponse.length() > 0) {
                                         // 轨迹只随完整回答落库；断线丢弃半截回复时也不留残缺轨迹
                                         Map<String, Object> trace = new HashMap<>();
@@ -521,6 +814,12 @@ public class AgentChatController {
                                         // 第六十八批 A1：计划随轨迹落库，切回旧会话可还原计划面板
                                         Map<String, Object> plan = tracePlan.get();
                                         if (plan != null) trace.put("plan", plan);
+                                        Map<String, Object> completion = traceCompletion.get();
+                                        if (completion != null) trace.put("completion", completion);
+                                        Map<String, Object> diagnostics = traceDiagnostics.get();
+                                        if (diagnostics != null) trace.put("diagnostics", diagnostics);
+                                        Map<String, Object> verify = traceVerify.get();
+                                        if (verify != null) trace.put("verify", verify);
                                         // 第六十八批 A3：本轮 id 随轨迹落库，切回历史消息也能撤回该轮
                                         trace.put("turnId", turnId);
                                         // 耗时随轨迹落库，切回历史会话也能显示「已完成，用时…」
@@ -580,16 +879,31 @@ public class AgentChatController {
                                 } catch (Exception e) {
                                     log.error("SSE 完成处理失败", e);
                                 } finally {
+                                    persistRunUsage(runId, turnPromptTokens, turnCompletionTokens, usagePersisted);
+                                    Map<String, Object> completion = traceCompletion.get();
+                                    boolean agentCancelled = completion != null
+                                            && "CANCELLED".equals(completion.get("reason"));
+                                    if (clientDisconnected.get() || agentCancelled) {
+                                        markRunCancelled(runId, agentCancelled ? "agent cancelled" : "client disconnected");
+                                    } else {
+                                        markRunSucceeded(runId, runResultJson.get());
+                                    }
                                     emitter.complete();
                                 }
                             }
 
                             @Override
                             public void onError(Throwable t) {
+                                persistRunUsage(runId, turnPromptTokens, turnCompletionTokens, usagePersisted);
+                                boolean budgetExceeded = t instanceof com.capsule.agentkey.exception.TokenBudgetExceededException;
+                                markRunFailed(runId,
+                                        budgetExceeded ? "TOKEN_BUDGET_EXCEEDED" : "AGENT_EXECUTION_FAILED",
+                                        t.getMessage());
                                 //真实异常只进日志；下发给用户的是一句能看懂的话
                                 log.error("Agent 执行错误", t);
                                 try {
-                                    sendEvent(emitter, "error", "这次回答没有完成，请稍后再试一次");
+                                    sendEvent(emitter, "error",
+                                            budgetExceeded ? t.getMessage() : "这次回答没有完成，请稍后再试一次");
                                 } catch (Exception ignore) {
                                     //连接已断，无需再发
                                 } finally {
@@ -598,9 +912,15 @@ public class AgentChatController {
                             }
                         });
             } catch (Exception e) {
+                persistRunUsage(runId, turnPromptTokens, turnCompletionTokens, usagePersisted);
+                boolean budgetExceeded = e instanceof com.capsule.agentkey.exception.TokenBudgetExceededException;
+                markRunFailed(runId,
+                        budgetExceeded ? "TOKEN_BUDGET_EXCEEDED" : "AGENT_EXECUTION_FAILED",
+                        e.getMessage());
                 log.error("流式聊天执行异常", e);
                 try {
-                    sendEvent(emitter, "error", "这次回答没有完成，请稍后再试一次");
+                    sendEvent(emitter, "error",
+                            budgetExceeded ? e.getMessage() : "这次回答没有完成，请稍后再试一次");
                 } catch (Exception ignore) {
                     //连接已断
                 } finally {
@@ -612,6 +932,148 @@ public class AgentChatController {
         });
 
         return emitter;
+    }
+
+    /** 运行落库失败不能覆盖原始聊天错误，也不能把终态再次迁移。 */
+    private void markRunSucceeded(Long runId, String resultJson) {
+        try {
+            agentRunService.findById(runId).ifPresent(run -> {
+                if (!com.capsule.agentkey.entity.AgentRun.isTerminal(run.getState())) {
+                    agentRunService.succeed(runId, resultJson);
+                }
+            });
+        } catch (Exception e) {
+            log.error("更新运行成功状态失败: runId={}", runId, e);
+        }
+    }
+
+    private void markRunFailed(Long runId, String code, String message) {
+        try {
+            agentRunService.findById(runId).ifPresent(run -> {
+                if (!com.capsule.agentkey.entity.AgentRun.isTerminal(run.getState())) {
+                    agentRunService.fail(runId, code, message);
+                }
+            });
+        } catch (Exception e) {
+            log.error("更新运行失败状态失败: runId={}", runId, e);
+        }
+    }
+
+    private void markRunCancelled(Long runId, String reason) {
+        try {
+            agentRunService.findById(runId).ifPresent(run -> {
+                if (!com.capsule.agentkey.entity.AgentRun.isTerminal(run.getState())) {
+                    agentRunService.cancel(runId, reason);
+                }
+            });
+        } catch (Exception e) {
+            log.error("更新运行取消状态失败: runId={}", runId, e);
+        }
+    }
+
+    /** P4-07：用量只落库一次；失败只告警，不影响对话结果 */
+    private void persistRunUsage(Long runId, AtomicLong prompt, AtomicLong completion,
+                                 AtomicBoolean once) {
+        if (!once.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            agentRunService.recordUsage(runId, prompt.get(), completion.get());
+        } catch (Exception e) {
+            log.warn("记录 token 用量失败 [runId={}]: {}", runId, e.getMessage());
+        }
+    }
+
+    /**
+     * P4-07 / P5-10-3：把本轮用量与预算进度下发给前端。
+     * round / maxRounds / maxTokens / elapsedMs / maxElapsedMs 为 P5-10-3 新增字段，
+     * 旧前端忽略即可；旧后端不发这些字段时前端按「不限/—」降级。
+     */
+    private void sendUsageEvent(SseEmitter emitter, AtomicLong prompt, AtomicLong completion,
+                                int round, int maxRounds, long startedAt) {
+        long p = prompt.get();
+        long c = completion.get();
+        if (p <= 0 && c <= 0) {
+            return;
+        }
+        try {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("promptTokens", p);
+            data.put("completionTokens", c);
+            data.put("totalTokens", p + c);
+            data.put("round", round);
+            data.put("maxRounds", maxRounds);
+            data.put("maxTokens", maxTokensPerRun);
+            data.put("elapsedMs", Math.max(0L, System.currentTimeMillis() - startedAt));
+            data.put("maxElapsedMs", maxSecondsPerRun > 0 ? maxSecondsPerRun * 1000L : 0L);
+            sendEvent(emitter, "usage", mapper.writeValueAsString(data));
+        } catch (Exception e) {
+            log.debug("下发 usage 事件失败（客户端可能已断开）: {}", e.getMessage());
+        }
+    }
+
+    /** 运行事件落库失败不能中断聊天流，只记录告警 */
+    private void appendRunEvent(Long runId,
+                                com.capsule.agentkey.entity.AgentRunEvent.EventType type,
+                                Map<String, Object> payload) {
+        try {
+            agentRunService.appendEvent(runId, type, payload);
+        } catch (Exception e) {
+            log.warn("写入运行事件失败 [runId={}, type={}]: {}", runId, type, e.getMessage());
+        }
+    }
+
+    /**
+     * P4-04：断线续传入口。
+     * 客户端带着最后收到的 seq 重连，只取增量事件；同时拿到运行终态，
+     * 若运行已结束，可直接用现有消息接口拉取完整回答。
+     */
+    @GetMapping("/runs/{runId}/events")
+    public ApiResponse<Map<String, Object>> runEvents(@PathVariable Long runId,
+                                                      @RequestParam(value = "sinceSeq", required = false) Integer sinceSeq) {
+        Long userId = getCurrentUserId();
+        com.capsule.agentkey.entity.AgentRun run = agentRunService.findByIdAndUserId(runId, userId)
+                .orElseThrow(() -> new BusinessException("运行不存在或不属于当前用户"));
+        List<Map<String, Object>> events = agentRunService.findEvents(runId, sinceSeq).stream()
+                .map(e -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("seq", e.getSeq());
+                    item.put("type", e.getEventType().name());
+                    item.put("payload", e.getPayload());
+                    item.put("createTime", e.getCreateTime());
+                    return item;
+                })
+                .toList();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("runId", run.getId());
+        result.put("state", run.getState().name());
+        result.put("errorCode", run.getErrorCode());
+        result.put("errorMessage", run.getErrorMessage());
+        result.put("promptTokens", run.getPromptTokens());
+        result.put("completionTokens", run.getCompletionTokens());
+        result.put("totalTokens", run.getTotalTokens());
+        result.put("events", events);
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * P5-10：刷新恢复入口。
+     * 页面刷新后前端不知道当前还有哪一轮在跑，先查这里拿到 runId，再用上面的接口重放事件。
+     */
+    @GetMapping("/runs/running")
+    public ApiResponse<List<Map<String, Object>>> runningRuns() {
+        Long userId = getCurrentUserId();
+        List<Map<String, Object>> list = agentRunService.findRunningByUser(userId).stream()
+                .map(run -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("runId", run.getId());
+                    item.put("sessionId", run.getSessionId());
+                    item.put("state", run.getState().name());
+                    item.put("createTime", run.getCreateTime());
+                    return item;
+                })
+                .toList();
+        return ApiResponse.success(list);
     }
 
     /**
@@ -649,6 +1111,50 @@ public class AgentChatController {
     }
 
     /**
+     * P5-10-2：批量允许当前会话的低风险写入审批。
+     * 只允许 APPROVE；高危、跨会话、越权 ID 整批拒绝，不提供批量拒绝或会话记忆。
+     */
+    @PostMapping("/approvals/batch")
+    @RequiresCapability(Capability.APPROVAL)
+    public ApiResponse<Map<String, Object>> respondApprovalBatch(@RequestBody ApprovalBatchRequest request) {
+        Long userId = getCurrentUserId();
+        Long sessionId = request.getSessionId();
+        if (sessionId == null) {
+            throw new BusinessException("缺少会话 id");
+        }
+        // 先校验会话归属，避免拿别人的 sessionId 批量批准
+        chatService.getOwnedSession(sessionId, userId);
+        com.capsule.agentkey.service.ToolApprovalRegistry.BatchResult result =
+                toolApprovalRegistry.resolveBatch(userId, sessionId, request.getApprovalIds());
+        if (!result.accepted()) {
+            throw new BusinessException(result.reason());
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("batchId", result.batchId());
+        data.put("resolvedIds", result.resolvedIds());
+        return ApiResponse.success(data);
+    }
+
+    /** P5-10-2：会话内已处理审批历史；先校验会话归属，不返回原始参数 */
+    @GetMapping("/sessions/{sessionId}/approvals")
+    public ApiResponse<List<ApprovalHistoryItem>> sessionApprovals(@PathVariable Long sessionId) {
+        Long userId = getCurrentUserId();
+        chatService.getOwnedSession(sessionId, userId);
+        List<ApprovalHistoryItem> items = toolApprovalRegistry.history(sessionId, userId).stream()
+                .map(saved -> new ApprovalHistoryItem(
+                        saved.getApprovalId(),
+                        saved.getToolName(),
+                        saved.getRisk(),
+                        saved.getState(),
+                        saved.getDecisionSource(),
+                        saved.getDecisionTime(),
+                        saved.getCreateTime(),
+                        saved.isRememberSession()))
+                .toList();
+        return ApiResponse.success(items);
+    }
+
+    /**
      * 发送 SSE 事件。
      * SseEmitter 内部已按 SSE 协议格式化多行 data，无需像手写流那样逐行加 "data: " 前缀。
      */
@@ -676,13 +1182,55 @@ public class AgentChatController {
         }
     }
 
+    /**
+     * P4-04：自动带自增事件 id 的 SseEmitter。
+     *
+     * <p>SSE 协议允许客户端用 Last-Event-ID / 自身记录的 seq 续传；
+     * 这里统一在发送时注入 id，业务侧不需要逐个事件手工编号。
+     * 心跳用注释帧（不会被当成消息），也不占用事件 id。
+     */
+    private static final class TrackedEmitter extends SseEmitter {
+
+        private final AtomicLong eventId = new AtomicLong();
+
+        private TrackedEmitter(long timeout) {
+            super(timeout);
+        }
+
+        @Override
+        public void send(SseEventBuilder builder) throws IOException {
+            super.send(builder.id(String.valueOf(eventId.incrementAndGet())));
+        }
+
+        /** 注释帧保活：部分网关/代理会丢弃注释，但不会影响事件 id 的连续性 */
+        private void heartbeat() throws IOException {
+            super.send(SseEmitter.event().comment("ping"));
+        }
+    }
+
     @GetMapping("/sessions")
-    public ApiResponse<List<ChatSession>> listSessions(
+    public ApiResponse<List<Map<String, Object>>> listSessions(
             @RequestParam(value = "projectId", required = false) Long projectId) {
-        //List<ChatSession>规定了查询结果是列表
         Long userId = getCurrentUserId();
-        return ApiResponse.success(chatService.listSessions(
-                userId, projectService.resolveProjectId(userId, projectId)));
+        List<ChatSession> sessions = chatService.listSessions(
+                userId, projectService.resolveProjectId(userId, projectId));
+        // P5-12-2：带上每个会话最近一轮的状态，侧栏据此显示状态点
+        Map<Long, String> lastStates = agentRunService.lastRunStatesBySession(
+                userId, sessions.stream().map(ChatSession::getId).toList());
+        List<Map<String, Object>> list = sessions.stream().map(s -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("projectId", s.getProjectId());
+            item.put("title", s.getTitle());
+            item.put("model", s.getModel());
+            item.put("reasoning", s.getReasoning());
+            item.put("permission", s.getPermission());
+            item.put("createTime", s.getCreateTime());
+            item.put("updateTime", s.getUpdateTime());
+            item.put("lastRunState", lastStates.get(s.getId()));
+            return item;
+        }).toList();
+        return ApiResponse.success(list);
     }
 
     @GetMapping("/sessions/{sessionId}/messages")
@@ -710,7 +1258,11 @@ public class AgentChatController {
      */
     @GetMapping("/sessions/{sessionId}/stats")
     public ApiResponse<ChatSessionStats> sessionStats(@PathVariable Long sessionId) {
-        return ApiResponse.success(chatService.aggregateStats(sessionId, getCurrentUserId()));
+        Long userId = getCurrentUserId();
+        ChatSessionStats stats = chatService.aggregateStats(sessionId, userId);
+        // P4-07：token 用量来自 agent_run，与 trace 聚合分开merge
+        stats.setUsage(agentRunService.usageBySession(sessionId, userId));
+        return ApiResponse.success(stats);
     }
 
     @PatchMapping("/sessions/{sessionId}")
@@ -771,6 +1323,12 @@ public class AgentChatController {
             log.error("上传聊天附件系统异常 [userId={}]", userId, e);
             return ApiResponse.fail(ErrorCode.INTERNAL_ERROR, "上传失败: " + e.getMessage());
         }
+    }
+
+    /** P5-11-2：当前用户的体验指标；Run/审批使用最近 100 条窗口，工具 Timer 为进程累计。 */
+    @GetMapping("/metrics/experience")
+    public ApiResponse<AgentExperienceMetricsService.ExperienceMetrics> experienceMetrics() {
+        return ApiResponse.success(experienceMetricsService.getMetrics(getCurrentUserId()));
     }
 
     /**

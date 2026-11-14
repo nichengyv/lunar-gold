@@ -391,6 +391,9 @@ public class ChatService {
                 roundsWithSegments++;
             }
 
+            // P5-12-3：本轮工具条目按名称索引，供 changes 反查挂到具体调用行
+            Map<String, ChatSessionStats.ToolTimelineEntry> roundEntryByName = new java.util.HashMap<>();
+
             // tools 数组
             JsonNode tools = root.get("tools");
             if (tools != null && tools.isArray()) {
@@ -424,6 +427,8 @@ public class ChatService {
                     String args = tool.path("args").asText("{}");
                     entry.setArgsSummary(args.length() > 80 ? args.substring(0, 80) + "…" : args);
                     timeline.add(entry);
+                    // 同名工具多次调用时挂到最近一次（变更事件紧跟其工具调用）
+                    roundEntryByName.put(name, entry);
                 }
             }
 
@@ -444,6 +449,15 @@ public class ChatService {
                     facc.source = source;
                     facc.additions += adds;
                     facc.deletions += dels;
+
+                    // P5-12-3：把本次变更挂到产生它的工具调用行——时间线里直接看到「改了哪个文件、动了多少行」。
+                    // MCP 工具的 change.source 固定为 "mcp"，按 mcp_ 前缀回找最近一条未挂文件的调用。
+                    ChatSessionStats.ToolTimelineEntry origin = resolveChangeOrigin(roundEntryByName, source);
+                    if (origin != null && origin.getPath() == null) {
+                        origin.setPath(path);
+                        origin.setAdditions(adds);
+                        origin.setDeletions(dels);
+                    }
                 }
             }
         }
@@ -513,6 +527,19 @@ public class ChatService {
         stats.setTimeline(timeline);
 
         return stats;
+    }
+
+    /** P5-12-3：按变更来源找到本轮对应的工具调用行（MCP 的 source 固定为 mcp，需按前缀回找） */
+    private ChatSessionStats.ToolTimelineEntry resolveChangeOrigin(
+            Map<String, ChatSessionStats.ToolTimelineEntry> byName, String source) {
+        if ("mcp".equals(source)) {
+            return byName.entrySet().stream()
+                    .filter(e -> e.getKey().startsWith("mcp_") && e.getValue().getPath() == null)
+                    .map(Map.Entry::getValue)
+                    .reduce((first, second) -> second)
+                    .orElse(null);
+        }
+        return byName.get(source);
     }
 
     /** P95：排序后取 ceil(n * 0.95) - 1 位 */

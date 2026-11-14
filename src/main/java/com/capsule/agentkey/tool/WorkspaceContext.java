@@ -33,11 +33,61 @@ public class WorkspaceContext {
     private boolean planChanged;
     /** D1: 用户消息里声明的文件范围约束——scope 列表非空时，文件类工具只能在这些路径下操作；空 = 不限制 */
     private List<String> scope = List.of();
+    /** P5-05：最近一批变更文件的诊断结果，供完成判定与前端验证摘要复用 */
+    private com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics;
+    /** P5-05：最近一批诊断指纹，用于识别连续相同诊断 */
+    private String diagnosticsFingerprint = "";
+    /** P5-05：诊断对应的文件版本（mtime:size），用于关联诊断与具体内容 */
+    private String diagnosticsFileVersion = "";
+    /** P5-06：最近一次项目验证结果，供完成判定与前端验证摘要复用 */
+    private com.capsule.agentkey.verify.VerifyResult verify;
+    /**
+     * P5-08：本轮会话级工具统计（tool → [calls, success, fail]）。
+     * 放在上下文而非线程 ThreadLocal，并行只读工具在子线程 dispatch 时仍能累计到同一份统计。
+     */
+    private final java.util.Map<String, int[]> toolStats;
 
     public WorkspaceContext(Long userId, Long projectId, AtomicBoolean cancelled) {
         this.userId = userId;
         this.projectId = projectId;
         this.cancelled = cancelled;
+        this.toolStats = new java.util.concurrent.ConcurrentHashMap<>();
+    }
+
+    /** P5-08：并行只读工具的子上下文——共享取消标记、scope 与统计，文件变更缓冲各自独立 */
+    private WorkspaceContext(WorkspaceContext parent) {
+        this.userId = parent.userId;
+        this.projectId = parent.projectId;
+        this.cancelled = parent.cancelled;
+        this.sessionId = parent.sessionId;
+        this.turnId = parent.turnId;
+        this.scope = parent.scope;
+        this.toolStats = parent.toolStats;
+    }
+
+    /** P5-08：派生一个可安全交给工作线程的上下文；无父上下文时返回 null */
+    public WorkspaceContext child() {
+        return new WorkspaceContext(this);
+    }
+
+    /** P5-08：在指定上下文中执行任务，结束后恢复线程原有上下文（线程池复用必须清理） */
+    public static <T> T callIn(WorkspaceContext context, java.util.function.Supplier<T> action) {
+        WorkspaceContext previous = HOLDER.get();
+        HOLDER.set(context);
+        try {
+            return action.get();
+        } finally {
+            if (previous == null) {
+                HOLDER.remove();
+            } else {
+                HOLDER.set(previous);
+            }
+        }
+    }
+
+    /** P5-08：会话级工具统计；无上下文时调用方自行降级 */
+    public java.util.Map<String, int[]> toolStats() {
+        return toolStats;
     }
 
     public Long userId() { return userId; }
@@ -95,6 +145,24 @@ public class WorkspaceContext {
         this.scope = scope == null ? List.of() : List.copyOf(scope);
     }
 
+
+    public com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics() { return diagnostics; }
+    public void setDiagnostics(com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics) {
+        this.diagnostics = diagnostics;
+    }
+    public String diagnosticsFingerprint() { return diagnosticsFingerprint; }
+    public void setDiagnosticsFingerprint(String fingerprint) {
+        this.diagnosticsFingerprint = fingerprint == null ? "" : fingerprint;
+    }
+    public String diagnosticsFileVersion() { return diagnosticsFileVersion; }
+    public void setDiagnosticsFileVersion(String version) {
+        this.diagnosticsFileVersion = version == null ? "" : version;
+    }
+
+    public com.capsule.agentkey.verify.VerifyResult verify() { return verify; }
+    public void setVerify(com.capsule.agentkey.verify.VerifyResult verify) {
+        this.verify = verify;
+    }
 
     public static void set(Long userId, Long projectId) {
         set(userId, projectId, null);

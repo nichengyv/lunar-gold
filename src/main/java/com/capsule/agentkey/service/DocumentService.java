@@ -4,6 +4,8 @@ import com.capsule.agentkey.entity.Document;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.repository.DocumentChunkRepository;
 import com.capsule.agentkey.repository.DocumentRepository;
+import com.capsule.agentkey.service.rag.RagCandidate;
+import com.capsule.agentkey.service.rag.Reranker;
 import com.capsule.agentkey.util.FileUploadValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +24,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -38,6 +41,8 @@ public class DocumentService {
     private final VectorStoreService vectorStoreService;
     private final DocumentProcessingService processingService;
     private final ProjectService projectService;
+    /** P5-07：向量 + 词法召回结果融合（默认 RRF），后续可替换为模型 reranker */
+    private final Reranker reranker;
 
     // 文件存储目录（生产环境建议改为 OSS 或独立存储服务）
     private final Path uploadDir = Paths.get(System.getProperty("user.dir"), "uploads", "documents");
@@ -49,18 +54,32 @@ public class DocumentService {
     @Value("${rag.gate-score:0.55}")
     private float gateScore;
 
+    /** P5-07 混合检索开关；关闭时行为与原来的单路向量检索完全一致 */
+    @Value("${rag.hybrid-enabled:true}")
+    private boolean hybridEnabled;
+
+    /** 词法召回的片段级下限（pg_trgm word_similarity） */
+    @Value("${rag.lexical-min-score:0.3}")
+    private float lexicalMinScore;
+
+    /** 词法召回的整轮门槛：向量未达门槛但精确词命中足够强时仍使用资料 */
+    @Value("${rag.lexical-gate-score:0.35}")
+    private float lexicalGateScore;
+
     public DocumentService(DocumentRepository documentRepository,
                            DocumentChunkRepository chunkRepository,
                            EmbeddingService embeddingService,
                            VectorStoreService vectorStoreService,
                            DocumentProcessingService processingService,
-                           ProjectService projectService) {
+                           ProjectService projectService,
+                           Reranker reranker) {
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
         this.embeddingService = embeddingService;
         this.vectorStoreService = vectorStoreService;
         this.processingService = processingService;
         this.projectService = projectService;
+        this.reranker = reranker;
         try {
             Files.createDirectories(uploadDir);
         } catch (IOException e) {
@@ -162,9 +181,10 @@ public class DocumentService {
 
     /**
      * 引用的资料：只暴露用户能理解的字段，前端用于在回答下方展示出处。
-     * 额外带 content：让前端点击时能展开原文片段，实现"有据可依"的助手体验。
+     * P5-07 补充 chunkId / chunkIndex，引用可定位到具体切片；页码因解析器暂未保留版式而不提供。
      */
-    public record Source(Long documentId, String fileName, float score, String content) {
+    public record Source(Long documentId, Long chunkId, Integer chunkIndex,
+                         String fileName, float score, String content) {
     }
 
     /**
@@ -217,9 +237,10 @@ public class DocumentService {
 
     /**
      * RAG 检索：只检索当前项目内的知识库，避免不同项目的资料互相串味。
+     * P5-07 起同时走向量召回与 pg_trgm 词法召回，再由 {@link Reranker}（默认 RRF）融合。
      * 两道门槛避免"答非所问却标出处"：
-     * 1) 单片段相关度低于 minScore 丢弃；
-     * 2) 最高分都低于 gateScore 时，判定本次问题与资料无关，整体不使用知识库。
+     * 1) 单片段相关度低于 minScore / lexicalMinScore 丢弃；
+     * 2) 向量最高分低于 gateScore 且词法最高分低于 lexicalGateScore 时，判定本轮问题与资料无关。
      */
     public RagResult retrieveContext(Long userId, Long projectId, String query, int topK) throws Exception {
         return retrieveContext(userId, projectId, query, topK, List.of());
@@ -235,44 +256,84 @@ public class DocumentService {
         float[] queryVec = embeddingService.embedSingle(apiKey, query);
 
         boolean targeted = documentIds != null && !documentIds.isEmpty();
-        List<VectorStoreService.SearchResult> results = targeted
+        List<VectorStoreService.SearchResult> vectorResults = targeted
                 ? vectorStoreService.searchForProject(userId, projectId, queryVec, topK, minScore, documentIds)
                 : vectorStoreService.searchForProject(userId, projectId, queryVec, topK, minScore);
+        List<VectorStoreService.SearchResult> lexicalResults = hybridEnabled
+                ? vectorStoreService.searchLexicalForProject(userId, projectId, query, topK,
+                        lexicalMinScore, targeted ? documentIds : null)
+                : List.of();
 
-        if (results.isEmpty()) return RagResult.empty();
+        if (vectorResults.isEmpty() && lexicalResults.isEmpty()) return RagResult.empty();
 
-        float topScore = results.get(0).score();
-        if (!targeted && topScore < gateScore) {
-            log.info("知识库最高相关度 {} 未达门槛 {}，本轮不引用资料", String.format("%.2f", topScore), gateScore);
+        float topScore = vectorResults.isEmpty() ? 0f : vectorResults.get(0).score();
+        float topLexical = lexicalResults.isEmpty() ? 0f : lexicalResults.get(0).score();
+        if (!targeted && topScore < gateScore && topLexical < lexicalGateScore) {
+            log.info("知识库相关度未达门槛（向量 {} / 词法 {}），本轮不引用资料",
+                    String.format("%.2f", topScore), String.format("%.2f", topLexical));
             return RagResult.empty();
         }
 
-        log.info("RAG 命中片段相关度: {}", results.stream()
-                .map(r -> String.format("%.2f", r.score()))
-                .collect(java.util.stream.Collectors.joining(", ")));
+        List<RagCandidate> fused = hybridEnabled
+                ? reranker.rerank(toCandidates(vectorResults, true), toCandidates(lexicalResults, false), topK)
+                : toCandidates(vectorResults, true);
+        if (fused.isEmpty()) return RagResult.empty();
 
-        // 片段里没有文件名，按 documentId 回查一次拿展示用的出处
-        List<Long> docIds = results.stream().map(VectorStoreService.SearchResult::documentId).distinct().toList();
+        log.info("RAG 命中（向量 {} 条 / 词法 {} 条），融合后 {} 条，相关度: {}",
+                vectorResults.size(), lexicalResults.size(), fused.size(),
+                fused.stream()
+                        .map(r -> String.format("%.2f", r.displayScore()))
+                        .collect(java.util.stream.Collectors.joining(", ")));
+
+        // 片段里没有文件名，按 documentId 回查一次拿展示用的出处；chunkIndex 同理
+        List<Long> docIds = fused.stream().map(RagCandidate::documentId).distinct().toList();
         Map<Long, String> names = new HashMap<>();
         documentRepository.findAllById(docIds)
                 .forEach(d -> names.put(d.getId(), d.getFileName()));
+        Map<Long, Integer> chunkIndexes = chunkIndexes(fused);
 
         StringBuilder sb = new StringBuilder("【知识库检索结果】\n");
-        for (int i = 0; i < results.size(); i++) {
-            VectorStoreService.SearchResult r = results.get(i);
+        for (int i = 0; i < fused.size(); i++) {
+            RagCandidate r = fused.get(i);
             sb.append("--- 片段 ").append(i + 1).append(" (相关度: ")
-              .append(String.format("%.2f", r.score())).append(") ---\n")
+              .append(String.format("%.2f", r.displayScore())).append(") ---\n")
               .append(r.content()).append("\n\n");
         }
 
         //同一份资料可能命中多个片段，出处按文档去重并保留最高分（同时带上该片段的原文，前端可展开查看）
         Map<Long, Source> byDoc = new LinkedHashMap<>();
-        for (VectorStoreService.SearchResult r : results) {
+        for (RagCandidate r : fused) {
             byDoc.merge(r.documentId(),
-                    new Source(r.documentId(), names.getOrDefault(r.documentId(), "未知资料"),
-                            r.score(), r.content()),
+                    new Source(r.documentId(), r.chunkId(), chunkIndexes.get(r.chunkId()),
+                            names.getOrDefault(r.documentId(), "未知资料"),
+                            r.displayScore(), r.content()),
                     (a, b) -> a.score() >= b.score() ? a : b);
         }
         return new RagResult(sb.toString(), new ArrayList<>(byDoc.values()));
+    }
+
+    private static List<RagCandidate> toCandidates(List<VectorStoreService.SearchResult> hits, boolean vector) {
+        List<RagCandidate> candidates = new ArrayList<>(hits.size());
+        for (VectorStoreService.SearchResult hit : hits) {
+            candidates.add(new RagCandidate(hit.chunkId(), hit.documentId(), hit.content(),
+                    vector ? hit.score() : 0f,
+                    vector ? 0f : hit.score()));
+        }
+        return candidates;
+    }
+
+    private Map<Long, Integer> chunkIndexes(List<RagCandidate> fused) {
+        List<Long> chunkIds = fused.stream()
+                .map(RagCandidate::chunkId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (chunkIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Integer> indexes = new HashMap<>();
+        chunkRepository.findAllById(chunkIds)
+                .forEach(chunk -> indexes.put(chunk.getId(), chunk.getChunkIndex()));
+        return indexes;
     }
 }

@@ -114,8 +114,34 @@ try {
     if (-not $SkipInstall) { & npm ci; Assert-NativeSuccess '桌面壳 npm ci 失败' }
     $builder = Join-Path $repo 'desktop\node_modules\.bin\electron-builder.cmd'
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
+
+    Write-Step '生成 SBOM 与第三方许可文件'
+    & (Join-Path $PSScriptRoot 'build-compliance.ps1') -MavenCmd $MavenCmd
+
     & $builder --dir --publish never "--config.directories.output=$PackRoot"
     Assert-NativeSuccess 'electron-builder unpacked 构建失败'
+
+    $legalSource = Join-Path $buildDir 'legal'
+    $packagedLegal = Join-Path $unpacked 'resources\legal'
+    $legalNames = @(
+        'LICENSE', 'NOTICE', 'NOTICE.en', 'PRIVACY.md', 'PRIVACY.en.md', 'TERMS.md', 'TERMS.en.md',
+        'SBOM.json', 'SBOM.frontend.json', 'SBOM.desktop.json', 'SBOM.runtime.json', 'THIRD-PARTY-LICENSES.txt'
+    )
+    foreach ($name in $legalNames) {
+        $sourceFile = Join-Path $legalSource $name
+        $packagedFile = Join-Path $packagedLegal $name
+        Assert-File $sourceFile "合规 staging 缺少 $name"
+        Assert-File $packagedFile "unpacked 缺少合规文件 $name"
+        if ((Get-FileHash -LiteralPath $sourceFile).Hash -ne (Get-FileHash -LiteralPath $packagedFile).Hash) {
+            throw "unpacked 合规文件与 staging 哈希不一致：$name"
+        }
+    }
+    foreach ($name in @('SBOM.json', 'SBOM.frontend.json', 'SBOM.desktop.json', 'SBOM.runtime.json')) {
+        $bom = Get-Content -LiteralPath (Join-Path $packagedLegal $name) -Raw | ConvertFrom-Json
+        if ($bom.bomFormat -ne 'CycloneDX' -or @($bom.components).Count -eq 0) {
+            throw "unpacked SBOM 校验失败：$name"
+        }
+    }
 
     # --dir 不产出 app-update.yml（它只在正式打包目标创建时才写），
     # 而 CI 是先 --dir、签名 exe、再 --prepackaged 出安装包，跳过这一步会导致装好的应用读不到更新源。

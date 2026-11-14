@@ -27,4 +27,6 @@ public class ChatRequest {
     private String reasoning;
     /** 工作权限：READ_ONLY / WRITE / EXECUTE；为空沿用会话配置，新会话继承项目默认 */
     private String permission;
+    /** 客户端请求幂等键；同一用户重复提交时拒绝再次执行 */
+    private String clientRequestId;
 }

@@ -14,7 +14,7 @@
           <span>{{ tab.label }}</span>
         </button>
         <div class="nav-spacer"></div>
-        <div class="nav-version">Lunar Gold {{ version }}</div>
+        <div class="nav-version">Lunar Gold {{ displayVersion }}</div>
       </nav>
 
       <!-- 右侧内容区 -->
@@ -79,24 +79,6 @@
               </table>
             </div>
 
-            <div class="card">
-              <h3><Icon name="info" :size="15" /> 关于</h3>
-              <div class="about-row">
-                <span class="about-label">版本</span>
-                <span class="about-value">{{ version }}</span>
-              </div>
-              <div class="about-row">
-                <span class="about-label">后端状态</span>
-                <span class="about-value">
-                  <span class="status-dot" :class="health?.status === 'UP' ? 'up' : 'down'"></span>
-                  {{ health?.status === 'UP' ? '在线' : '离线' }}
-                </span>
-              </div>
-              <div class="about-row" v-if="health">
-                <span class="about-label">运行时长</span>
-                <span class="about-value">{{ formatUptime(health.uptimeMs) }}</span>
-              </div>
-            </div>
           </div>
         </template>
 
@@ -243,6 +225,50 @@
           </div>
         </template>
 
+        <!-- ============ tab: 体验诊断 ============ -->
+        <template v-else-if="activeTab === 'diagnostics'">
+          <div class="section diagnostics-section">
+            <h2 class="section-title">体验诊断</h2>
+            <p class="section-desc">在本地定位页面异常、连接中断和 Agent 等待，不自动上传任何体验数据</p>
+            <ExperienceDiagnosticsPanel />
+          </div>
+        </template>
+
+        <!-- ============ tab: 应用信息 ============ -->
+        <template v-else-if="activeTab === 'about'">
+          <div class="section">
+            <h2 class="section-title">应用信息</h2>
+            <p class="section-desc">查看当前版本、运行环境和本地服务状态</p>
+
+            <div class="card">
+              <h3><Icon name="info" :size="15" /> Lunar Gold</h3>
+              <div class="about-row">
+                <span class="about-label">应用版本</span>
+                <span class="about-value">{{ displayVersion }}</span>
+              </div>
+              <div class="about-row">
+                <span class="about-label">后端版本</span>
+                <span class="about-value">{{ meta.info?.version || '—' }}</span>
+              </div>
+              <div class="about-row">
+                <span class="about-label">部署模式</span>
+                <span class="about-value">{{ deploymentMode }}</span>
+              </div>
+              <div class="about-row">
+                <span class="about-label">后端状态</span>
+                <span class="about-value">
+                  <span class="status-dot" :class="health?.status === 'UP' ? 'up' : health ? 'down' : ''"></span>
+                  {{ health?.status === 'UP' ? '在线' : health ? '离线' : '未获取' }}
+                </span>
+              </div>
+              <div class="about-row">
+                <span class="about-label">运行时长</span>
+                <span class="about-value">{{ health ? formatUptime(health.uptimeMs) : '—' }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
       </div>
     </div>
   </div>
@@ -261,6 +287,7 @@ import * as settingsApi from '../api/settings';
 import * as mcpApi from '../api/mcp';
 import { encryptPassword } from '../utils/crypto';
 import RulesPanel from '../components/RulesPanel.vue';
+import ExperienceDiagnosticsPanel from '../components/ExperienceDiagnosticsPanel.vue';
 import KeysView from './KeysView.vue';
 import Icon from '../components/Icon.vue';
 import type { ModelInfo, HealthInfo, ChatDefaults } from '../api/settings';
@@ -272,7 +299,15 @@ const theme = useThemeStore();
 const auth = useAuthStore();
 const meta = useMetaStore();
 
-const version = '1.0.0';
+const displayVersion = computed(() => {
+  if (meta.mode === 'DESKTOP') return meta.desktopAppVersion || '未知';
+  return meta.info?.version || '—';
+});
+const deploymentMode = computed(() => {
+  if (meta.mode === 'DESKTOP') return '桌面端';
+  if (meta.mode === 'CLOUD') return 'Web / 云端';
+  return '未知';
+});
 
 const BASE_TABS = [
   { id: 'chat', label: '对话默认', icon: 'cpu' },
@@ -281,6 +316,8 @@ const BASE_TABS = [
   { id: 'mcp', label: 'MCP 工具', icon: 'plug' },
   { id: 'appearance', label: '外观', icon: 'palette' },
   { id: 'account', label: '账号安全', icon: 'user' },
+  { id: 'diagnostics', label: '体验诊断', icon: 'alert' },
+  { id: 'about', label: '应用信息', icon: 'info' },
 ] as const;
 
 /**
@@ -656,9 +693,9 @@ kbd {
   font-weight: 500;
   margin: 0 2px;
 }
-.scope-chip.global { background: rgba(99,102,241,0.12); color: #6366f1; }
-.scope-chip.project { background: rgba(16,185,129,0.12); color: #10b981; }
-.scope-chip.session { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.scope-chip.global { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.scope-chip.project { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.scope-chip.session { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
 .scope-arrow { color: var(--text-tertiary); margin: 0 2px; font-size: 12px; }
 
 .option-sub {
@@ -704,15 +741,15 @@ kbd {
 .mcp-info { flex: 1; min-width: 0; }
 .mcp-name { font-weight: 600; font-size: 13px; }
 .mcp-status-text { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
-.fail-count { color: #f59e0b; }
-.mcp-error { font-size: 11px; color: #ef4444; margin-top: 4px; width: 100%; }
+.fail-count { color: var(--warning); }
+.mcp-error { font-size: 11px; color: var(--danger); margin-top: 4px; width: 100%; }
 
 .mcp-dot {
   width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
 }
-.mcp-dot.mcp-up { background: #22c55e; }
-.mcp-dot.mcp-down { background: #ef4444; }
-.mcp-dot.mcp-unknown { background: #eab308; }
+.mcp-dot.mcp-up { background: var(--success); }
+.mcp-dot.mcp-down { background: var(--danger); }
+.mcp-dot.mcp-unknown { background: var(--warning); }
 
 .loading, .empty {
   text-align: center;
@@ -773,6 +810,6 @@ kbd {
   margin-right: 4px;
   vertical-align: middle;
 }
-.status-dot.up { background: #22c55e; }
-.status-dot.down { background: #ef4444; }
+.status-dot.up { background: var(--success); }
+.status-dot.down { background: var(--danger); }
 </style>

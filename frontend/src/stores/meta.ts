@@ -2,6 +2,11 @@ import { defineStore } from 'pinia';
 import * as metaApi from '../api/meta';
 import type { Capability, MetaInfo } from '../types/api';
 
+const DESKTOP_VERSION_KEY = 'lunargold.desktopAppVersion';
+const queryVersion = new URLSearchParams(window.location.search).get('appVersion');
+if (queryVersion) sessionStorage.setItem(DESKTOP_VERSION_KEY, queryVersion);
+const desktopAppVersion = queryVersion || sessionStorage.getItem(DESKTOP_VERSION_KEY);
+
 /**
  * 部署能力 store：应用启动时拉取一次 /api/meta，之后所有入口只按能力渲染。
  * 拉取失败时不隐藏任何入口（后端仍会按能力门控返回 404），避免网络抖动导致整站不可用。
@@ -10,7 +15,8 @@ export const useMetaStore = defineStore('meta', {
   state: () => ({
     info: null as MetaInfo | null,
     loaded: false,
-    loading: null as Promise<MetaInfo | null> | null
+    loading: null as Promise<MetaInfo | null> | null,
+    desktopAppVersion
   }),
   getters: {
     mode: (state) => state.info?.mode ?? null,

@@ -27,6 +27,13 @@ public class ChatSessionStats {
     /** 工具调用完整时间线（带时间戳） */
     private List<ToolTimelineEntry> timeline;
 
+    /**
+     * P4-07：会话 token 用量汇总（来自 agent_run）。
+     * key：promptTokens / completionTokens / totalTokens。
+     * 统计源与上面的 trace 不同，所以单独一块，不混进 Overview。
+     */
+    private Map<String, Long> usage;
+
     @Data
     public static class Overview {
         /** 总消息数（assistant 消息数 = ReAct 轮次数） */
@@ -119,5 +126,11 @@ public class ChatSessionStats {
         private long costMs;
         /** 调用参数（截断） */
         private String argsSummary;
+        /** P5-12-3：该次调用改动的文件（仅文件类工具，未改动为 null） */
+        private String path;
+        /** P5-12-3：该次调用新增行数 */
+        private Integer additions;
+        /** P5-12-3：该次调用删除行数 */
+        private Integer deletions;
     }
 }

@@ -253,7 +253,7 @@ function truncate(s: string, n: number) {
 .rule-toggle.on { background: var(--primary); }
 .rule-toggle-thumb {
   width: 14px; height: 14px; border-radius: 7px;
-  background: #fff; position: absolute; top: 2px; left: 2px;
+  background: var(--surface); position: absolute; top: 2px; left: 2px;
   transition: left 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 .rule-toggle.on .rule-toggle-thumb { left: 16px; }
@@ -269,7 +269,7 @@ function truncate(s: string, n: number) {
   display: flex; align-items: center; justify-content: center;
 }
 .rule-action-btn:hover { background: var(--surface-3, rgba(0,0,0,0.08)); }
-.rule-action-btn.danger:hover { color: #ef4444; }
+.rule-action-btn.danger:hover { color: var(--danger); }
 .rule-add-card {
   justify-content: center; gap: 6px; cursor: pointer;
   color: var(--text-secondary); font-size: 12px;

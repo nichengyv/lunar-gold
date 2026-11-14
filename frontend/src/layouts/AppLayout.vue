@@ -1,18 +1,11 @@
 <template>
   <div class="app">
-    <aside class="sidebar" :class="{ open: sidebarOpen, collapsed: sidebarCollapsed }">
+    <aside class="sidebar" :class="{ open: sidebarOpen, collapsed: sidebarCollapsed, 'is-explorer': isExplorerMode }">
       <div class="sidebar-header">
-        <Icon name="bot" :size="18" />
+        <Icon name="logo" :size="22" />
         <span class="brand-text">Lunar Gold</span>
-        <button
-          class="collapse-btn"
-          :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
-          @click="toggleCollapse"
-        >
-          <Icon :name="sidebarCollapsed ? 'chevrons-right' : 'chevrons-left'" :size="15" />
-        </button>
       </div>
-      <nav class="sidebar-nav">
+      <nav v-if="!isExplorerMode" class="sidebar-nav">
         <router-link
           v-for="item in navItems"
           :key="item.page"
@@ -27,28 +20,16 @@
         </router-link>
       </nav>
 
-      <button class="new-session-btn" title="新会话" @click="onNewSession">
-        <Icon name="plus" :size="14" /> <span class="new-session-text">新会话</span>
+      <button v-if="!isExplorerMode" class="new-session-btn" title="新任务" @click="onNewSession">
+        <Icon name="plus" :size="14" /> <span class="new-session-text">新任务</span>
       </button>
 
-      <!-- 工作区区域：会话列表 / 资源管理器，同一层级切换 -->
+      <!-- 工作区区域：任务列表 / 资源管理器，同一层级切换 -->
       <div class="ws-section">
         <div class="ws-section-header">
-          <div v-if="hasLocalWorkspace" class="side-switch">
-            <button
-              class="side-switch-btn"
-              :class="{ active: sideTab === 'sessions' }"
-              @click="sideTab = 'sessions'"
-            >会话</button>
-            <button
-              class="side-switch-btn"
-              :class="{ active: sideTab === 'files' }"
-              @click="sideTab = 'files'"
-            >文件</button>
-          </div>
-          <span v-else class="ws-section-plain">会话</span>
+          <span class="ws-section-plain">{{ isExplorerMode ? '资源管理器' : '任务' }}</span>
           <div v-if="sideTab === 'sessions'" class="ws-section-actions">
-            <button class="ws-action" title="搜索工作区/会话" @click="wsSearchOpen = !wsSearchOpen">
+            <button class="ws-action" title="搜索工作区/任务" @click="wsSearchOpen = !wsSearchOpen">
               <Icon name="search" :size="14" />
             </button>
             <button v-if="hasLocalWorkspace" class="ws-action" title="新建工作区" @click="onCreateWorkspace">
@@ -65,7 +46,7 @@
               ref="wsSearchEl"
               v-model="wsKeyword"
               type="text"
-              placeholder="搜索工作区或会话..."
+              placeholder="搜索工作区或任务..."
               @keydown="onSearchKeydown"
             >
             <button v-if="wsKeyword" class="ws-search-clear" title="清空" @click="wsKeyword = ''">
@@ -84,7 +65,7 @@
             class="ws-content-hit"
             @click="onOpenContentHit(h)"
           >
-            <span class="ws-content-session">{{ h.sessionTitle || `会话${h.sessionId}` }}</span>
+            <span class="ws-content-session">{{ h.sessionTitle || `任务${h.sessionId}` }}</span>
             <span class="ws-content-snippet">
               <span
                 v-for="(part, i) in highlightParts(h.snippet)"
@@ -109,7 +90,7 @@
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="settings">工作区设置</el-dropdown-item>
-                    <el-dropdown-item command="newSession">在此新建会话</el-dropdown-item>
+                    <el-dropdown-item command="newSession">在此新建任务</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -118,7 +99,7 @@
               <button class="ws-del" title="删除工作区" @click.stop="onDeleteWorkspace(p)">
                 <Icon name="trash" :size="13" />
               </button>
-              <button class="ws-new-session" title="在此新建会话" @click.stop="onNewSessionIn(p)">
+              <button class="ws-new-session" title="在此新建任务" @click.stop="onNewSessionIn(p)">
                 <Icon name="plus" :size="14" />
               </button>
             </div>
@@ -151,20 +132,28 @@
                 </el-dropdown>
                 <div class="session-title" title="双击重命名">
                   <span
-                    v-for="(part, i) in highlightParts(s.title || `会话${s.id}`)"
+                    v-for="(part, i) in highlightParts(s.title || `任务${s.id}`)"
                     :key="i"
                     :class="{ 'match-hit': part.hit }"
                   >{{ part.text }}</span>
                 </div>
-                <div class="session-time">{{ formatDateTime(s.updateTime) }}</div>
+                <span
+                  v-if="sessionRunMeta(s)"
+                  class="session-dot"
+                  :class="sessionRunClass(s)"
+                  :title="sessionRunTitle(s)"
+                ></span>
+                <div class="session-time" :title="formatDateTime(s.updateTime)">{{
+                  formatRelativeTime(s.updateTime)
+                }}</div>
               </div>
               <div v-if="matchedSessions(p.id).length === 0" class="session-empty">
-                {{ sessionsOf(p.id).length === 0 ? '暂无会话' : '没有匹配的会话' }}
+                {{ sessionsOf(p.id).length === 0 ? '暂无任务' : '没有匹配的任务' }}
               </div>
             </div>
           </div>
           <div v-if="filteredProjects.length === 0" class="session-empty">
-            {{ wsKeyword ? '没有匹配的工作区或会话' : '还没有工作区，点右上角 ＋ 新建' }}
+            {{ wsKeyword ? '没有匹配的工作区或任务' : '还没有工作区，点右上角 ＋ 新建' }}
           </div>
         </div>
         </template>
@@ -197,12 +186,32 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="menu-toggle" @click="sidebarOpen = !sidebarOpen" title="展开/收起侧栏">
+          <button class="menu-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
             <Icon name="menu" :size="18" />
           </button>
           <span class="page-title">{{ pageTitle }}</span>
         </div>
         <div class="topbar-right">
+          <!-- 主侧栏：在「导航栏」与「项目结构资源管理器」之间切换 -->
+          <button
+            v-if="hasLocalWorkspace"
+            class="icon-btn"
+            :class="{ active: isExplorerMode }"
+            :title="isExplorerMode ? '返回导航栏' : '打开工作区资源管理器'"
+            @click="toggleExplorer"
+          >
+            <Icon name="panel-left" :size="16" />
+          </button>
+          <!-- 任务详情侧边栏：打开/收起右侧工作台 -->
+          <button
+            v-if="route.name === 'chat'"
+            class="icon-btn"
+            :class="{ active: chat.dockOpen }"
+            title="任务详情侧边栏"
+            @click="toggleTaskDock"
+          >
+            <Icon name="panel" :size="16" />
+          </button>
           <button class="icon-btn" :title="theme.isDark ? '切换到浅色' : '切换到深色'" @click="theme.toggle()">
             <Icon :name="theme.isDark ? 'sun' : 'moon'" :size="16" />
           </button>
@@ -259,7 +268,7 @@
         <div class="ws-field" style="margin-top:16px">
           <label>默认工作权限</label>
           <p class="dialog-hint">
-            新会话默认继承这里的权限；会话头仍可为单个会话临时调整。未设置时按「手动审批」处理。
+            新任务默认继承这里的权限；单个任务仍可临时调整。未设置时按「手动审批」处理。
           </p>
           <el-select v-model="permissionDraft" style="width:100%">
             <el-option label="未设置（按手动审批）" value="" />
@@ -314,12 +323,12 @@ import { useChatStore } from '../stores/chat';
 import { useMetaStore } from '../stores/meta';
 import { useProjectStore } from '../stores/project';
 import { useThemeStore } from '../stores/theme';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, formatRelativeTime } from '../utils/format';
 import * as workspaceApi from '../api/workspace';
 import * as agentApi from '../api/agent';
 import WorkspaceFileTree from '../components/WorkspaceFileTree.vue';
 import Icon from '../components/Icon.vue';
-import type { FileNode, MessageSearchHit, ProjectInfo } from '../types/api';
+import type { FileNode, MessageSearchHit, ProjectInfo, SessionInfo } from '../types/api';
 
 const route = useRoute();
 const router = useRouter();
@@ -345,6 +354,18 @@ function toggleCollapse() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
   localStorage.setItem(COLLAPSE_KEY, sidebarCollapsed.value ? '1' : '0');
   autoCollapsed = false;
+}
+
+/**
+ * 顶栏侧栏按钮：桌面端切换「收起/展开」，移动端切换浮层显隐。
+ * 原来侧栏头里的「<<」按钮已删，统一走这里。
+ */
+function toggleSidebar() {
+  if (window.innerWidth < 769) {
+    sidebarOpen.value = !sidebarOpen.value;
+  } else {
+    toggleCollapse();
+  }
 }
 
 function onWindowResize() {
@@ -373,6 +394,39 @@ const expanded = reactive<Record<number, boolean>>({});
 
 // 侧栏两个同级面板：会话列表 / 资源管理器
 const sideTab = ref<'sessions' | 'files'>('sessions');
+/** 资源管理器模式：顶栏按钮唤出，替代原来的「任务/文件」切换按钮 */
+const isExplorerMode = computed(() => hasLocalWorkspace.value && sideTab.value === 'files');
+
+/** 主侧栏按钮：导航栏 ↔ 资源管理器；收起状态下先展开 */
+function toggleExplorer() {
+  if (sidebarCollapsed.value) {
+    sidebarCollapsed.value = false;
+    localStorage.setItem(COLLAPSE_KEY, '0');
+    autoCollapsed = false;
+  }
+  sideTab.value = sideTab.value === 'files' ? 'sessions' : 'files';
+  sidebarOpen.value = true;
+}
+
+/** 任务详情侧边栏：收起前先确认未保存的编辑内容 */
+async function toggleTaskDock() {
+  if (!chat.dockOpen) {
+    chat.openDock(chat.dockTab);
+    return;
+  }
+  if (chat.editorDirty) {
+    try {
+      await ElMessageBox.confirm('工作台里还有未保存的改动，收起后会丢失。', '未保存的改动', {
+        confirmButtonText: '放弃改动并收起',
+        cancelButtonText: '继续编辑',
+        type: 'warning'
+      });
+    } catch {
+      return;
+    }
+  }
+  chat.closeDock();
+}
 /** 编辑器里当前激活的文件，用于资源管理器里高亮 */
 const editingPath = computed(() => chat.activeFilePath);
 
@@ -453,6 +507,29 @@ function matchedSessions(projectId: number) {
   const proj = project.projects.find((p) => p.id === projectId);
   if (proj && proj.name.toLowerCase().includes(kw)) return list;
   return list.filter((s) => (s.title || '').toLowerCase().includes(kw));
+}
+
+// ——— P5-12-2：任务状态点（运行中 / 待审批 / 已完成 / 失败）———
+const RUN_STATE_META: Record<string, { cls: string; text: string }> = {
+  RUNNING: { cls: 'running', text: '运行中' },
+  WAITING_APPROVAL: { cls: 'waiting', text: '待审批' },
+  SUCCEEDED: { cls: 'done', text: '已完成' },
+  FAILED: { cls: 'failed', text: '失败' },
+  CANCELLED: { cls: 'cancelled', text: '已停止' }
+};
+
+/** 运行中的轮次优先（runs/running 实时态），其次用会话列表里最近一轮的终态 */
+function sessionRunMeta(s: SessionInfo): { cls: string; text: string } | null {
+  return RUN_STATE_META[chat.runningRunMap[s.id] || s.lastRunState || ''] || null;
+}
+
+function sessionRunClass(s: SessionInfo): string {
+  const meta = sessionRunMeta(s);
+  return meta ? `is-${meta.cls}` : '';
+}
+
+function sessionRunTitle(s: SessionInfo): string {
+  return sessionRunMeta(s)?.text || '';
 }
 
 const filteredProjects = computed(() => {
@@ -572,6 +649,8 @@ onMounted(async () => {
     console.warn('[Project] 加载失败', e);
   }
   await chat.loadAllSessions();
+  // P5-12-2：侧栏状态点需要知道哪些任务还在跑（非对话页进入时也刷新一次）
+  chat.refreshRunningRuns();
   // C2: 拉用户设置的默认值（默认模型/推理档位/权限），否则前端硬编码值不会同步后端
   chat.fetchDefaults();
   // 刷新/首屏：拉审查流，避免待审查的文件变更卡片消失（仅桌面端有文件审查）
@@ -655,7 +734,7 @@ function onSessionCommand(command: string, id: number, title?: string) {
 /** 在指定工作区下新建会话（先切到该工作区，避免会话落到别的项目里） */
 async function onNewSessionIn(p: ProjectInfo) {
   if (chat.isProcessing) {
-    ElMessage.warning('当前回答还在生成中，请稍后再新建会话');
+    ElMessage.warning('当前回答还在生成中，请稍后再新建任务');
     return;
   }
   if (p.id !== project.currentProjectId) {
@@ -746,7 +825,7 @@ async function onSwitchSession(id: number, p?: ProjectInfo) {
   // 侧栏可以点开任意工作区下的会话，先把工作区切过去，避免上下文串味
   if (p && p.id !== project.currentProjectId) {
     if (chat.isProcessing) {
-      ElMessage.warning('当前回答还在生成中，请稍后再切换会话');
+      ElMessage.warning('当前回答还在生成中，请稍后再切换任务');
       return;
     }
     if (!(await closeEditorBeforeProjectSwitch())) return;
@@ -762,7 +841,7 @@ async function onSwitchSession(id: number, p?: ProjectInfo) {
 /** 正文命中项：切到对应工作区/会话，并滚动到命中的那条消息 */
 async function onOpenContentHit(hit: MessageSearchHit) {
   if (chat.isProcessing) {
-    ElMessage.warning('当前回答还在生成中，请稍后再打开其他会话');
+    ElMessage.warning('当前回答还在生成中，请稍后再打开其他任务');
     return;
   }
   const p = project.projects.find((x) => x.id === hit.projectId);
@@ -773,7 +852,7 @@ async function onOpenContentHit(hit: MessageSearchHit) {
 
 async function onDeleteSession(id: number) {
   try {
-    await ElMessageBox.confirm('确定删除该会话？', '提示', { type: 'warning' });
+    await ElMessageBox.confirm('确定删除该任务？', '提示', { type: 'warning' });
   } catch {
     return;
   }
@@ -788,7 +867,7 @@ async function onDeleteWorkspace(p: ProjectInfo) {
   }
   try {
     await ElMessageBox.confirm(
-      `确定删除工作区「${p.name}」？其下所有会话和资料会一并删除，磁盘上的文件夹不会被删除。`,
+      `确定删除工作区「${p.name}」？其下所有任务和资料会一并删除，磁盘上的文件夹不会被删除。`,
       '删除工作区',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
     );
@@ -818,7 +897,7 @@ async function onRenameSession(id: number, current: string | undefined) {
     return;
   }
   try {
-    const { value } = await ElMessageBox.prompt('给这个对话起个更好找的名字', '重命名会话', {
+    const { value } = await ElMessageBox.prompt('给这个任务起个更好找的名字', '重命名任务', {
       confirmButtonText: '保存',
       cancelButtonText: '取消',
       inputValue: current || '',
@@ -862,23 +941,6 @@ async function onLogout() {
 .ws-del,
 .ws-new-session,
 .menu-toggle { justify-content: center; }
-
-/* 折叠按钮：展开态靠右，收起态跟图标一起居中 */
-.collapse-btn {
-    margin-left: auto;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: var(--radius-sm, 6px);
-    background: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s;
-}
-.collapse-btn:hover { background: var(--surface-hover); color: var(--text); }
 
 .sidebar { transition: width 0.2s ease; }
 
@@ -948,7 +1010,6 @@ async function onLogout() {
     .sidebar.collapsed .sidebar-nav { padding: 10px 6px; }
     .sidebar.collapsed .new-session-btn { margin: 0 6px 8px; }
     .sidebar.collapsed .sidebar-footer { padding: 12px 6px; }
-    .sidebar.collapsed .collapse-btn { margin-left: 0; }
     .sidebar.collapsed .nav-item,
     .sidebar.collapsed .new-session-btn { justify-content: center; padding-left: 0; padding-right: 0; }
     .sidebar.collapsed .sidebar-footer { justify-content: center; }
@@ -1004,12 +1065,12 @@ async function onLogout() {
   margin-right: 6px;
   vertical-align: middle;
 }
-.mcp-dot.mcp-up { background: #22c55e; }
-.mcp-dot.mcp-down { background: #ef4444; }
-.mcp-dot.mcp-unknown { background: #eab308; }
+.mcp-dot.mcp-up { background: var(--success); }
+.mcp-dot.mcp-down { background: var(--danger); }
+.mcp-dot.mcp-unknown { background: var(--warning); }
 .mcp-server-error {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--danger);
   line-height: 1.4;
 }
 .mcp-server-fails {

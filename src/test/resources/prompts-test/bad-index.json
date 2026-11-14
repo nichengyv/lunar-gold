@@ -1,0 +1,12 @@
+{
+  "prompts": [
+    {
+      "id": "agent-system",
+      "version": "v1",
+      "scenario": "agent",
+      "path": "prompts-test/agent-v1.md",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "default": true
+    }
+  ]
+}

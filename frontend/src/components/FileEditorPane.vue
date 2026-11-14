@@ -399,7 +399,7 @@ async function relocate() {
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(230, 162, 60, 0.15);
-  color: #e6a23c;
+  color: var(--warning);
 }
 .fe-actions {
   display: flex;
@@ -424,7 +424,7 @@ async function relocate() {
 .fe-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .fe-btn.primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   border-color: var(--primary);
 }
 .fe-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }

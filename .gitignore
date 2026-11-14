@@ -47,3 +47,6 @@ data/
 *.log
 # 构建时把 TEMP/TMP 指向工作区内临时目录，避免 esbuild 清理系统 Temp 失败
 /.tmp/
+# 评测运行时生成的报告
+eval/reports/
+eval/runtime-reports/

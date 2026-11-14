@@ -70,6 +70,8 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/public-key",
                                 "/api/meta",
+                                // P5-01：提示词热重载，控制器内部再校验回环地址
+                                "/api/admin/prompts/**",
                                 // 桌面端本地令牌引导接口：仅回环地址 + 来源白名单，见 DesktopTokenController
                                 "/api/desktop/token",
                                 "/",

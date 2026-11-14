@@ -16,6 +16,12 @@ public class CurrentTimeTool implements BaseTool {
         return "get_current_time";
     }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() {
+        return true;
+    }
+
     @Override
     public String getDescription() {
         return "获取当前日期和时间。当用户问'现在几点''今天几号''现在是什么时间'等问题时调用。";

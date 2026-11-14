@@ -1,5 +1,6 @@
 import http, { unwrap } from './http';
-import type { ApiResponse, HistoryMessage, MessageSearchHit, SessionInfo, SessionStats } from '../types/api';
+import type { AgentExperienceMetrics, ApiResponse, HistoryMessage, MessageSearchHit, SessionInfo, SessionStats } from '../types/api';
+import type { ApprovalBatchResult, ApprovalHistoryItem } from '../types/chat';
 
 export function listSessions(projectId?: number): Promise<SessionInfo[]> {
   return http
@@ -11,6 +12,48 @@ export function listSessions(projectId?: number): Promise<SessionInfo[]> {
 
 export function getSessionMessages(sessionId: number): Promise<HistoryMessage[]> {
   return http.get<never, ApiResponse<HistoryMessage[]>>(`/api/agent/sessions/${sessionId}/messages`).then(unwrap);
+}
+
+/** P5-10：运行中落库的离散事件（工具调用、正文检查点等） */
+export interface RunEventItem {
+  seq: number;
+  type: string;
+  /** 后端存的是原始 JSON 字符串，需要自己 parse */
+  payload: string | null;
+  createTime?: string;
+}
+
+export interface RunEventsResult {
+  runId: number;
+  /** QUEUED / RUNNING / WAITING_APPROVAL / SUCCEEDED / FAILED / CANCELLED */
+  state: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  events: RunEventItem[];
+}
+
+/** P5-10：断线续传 / 刷新恢复入口；sinceSeq 为空表示从头取 */
+export function getRunEvents(runId: number, sinceSeq?: number): Promise<RunEventsResult> {
+  return http
+    .get<never, ApiResponse<RunEventsResult>>(`/api/agent/runs/${runId}/events`, {
+      params: sinceSeq != null ? { sinceSeq } : undefined
+    })
+    .then(unwrap);
+}
+
+export interface RunningRunItem {
+  runId: number;
+  sessionId: number | null;
+  state: string;
+  createTime?: string;
+}
+
+/** P5-10：刷新后恢复——当前用户仍在运行（含等待审批）的轮次 */
+export function listRunningRuns(): Promise<RunningRunItem[]> {
+  return http.get<never, ApiResponse<RunningRunItem[]>>('/api/agent/runs/running').then(unwrap);
 }
 
 /** 消息全文搜索：按会话归并返回正文命中片段 */
@@ -58,6 +101,11 @@ export function getMetrics(): Promise<any> {
   return http.get<never, ApiResponse<any>>('/api/agent/metrics').then(unwrap);
 }
 
+/** P5-11-2：当前用户既有 Run、审批和工具审计数据的只读体验聚合。 */
+export function getExperienceMetrics(): Promise<AgentExperienceMetrics> {
+  return http.get<never, ApiResponse<AgentExperienceMetrics>>('/api/agent/metrics/experience').then(unwrap);
+}
+
 /** 第六十八批 A2：提交危险工具调用的审批结果 */
 export function respondApproval(
   approvalId: string,
@@ -66,6 +114,20 @@ export function respondApproval(
 ): Promise<void> {
   return http
     .post<never, ApiResponse<void>>(`/api/agent/approvals/${approvalId}`, { decision, remember })
+    .then(unwrap);
+}
+
+/** P5-10-2：批量允许当前会话的低风险写入审批，只返回实际完成的审批 */
+export function approveBatch(sessionId: number, approvalIds: string[]): Promise<ApprovalBatchResult> {
+  return http
+    .post<never, ApiResponse<ApprovalBatchResult>>('/api/agent/approvals/batch', { sessionId, approvalIds })
+    .then(unwrap);
+}
+
+/** P5-10-2：会话内已处理审批历史 */
+export function getSessionApprovals(sessionId: number): Promise<ApprovalHistoryItem[]> {
+  return http
+    .get<never, ApiResponse<ApprovalHistoryItem[]>>(`/api/agent/sessions/${sessionId}/approvals`)
     .then(unwrap);
 }
 

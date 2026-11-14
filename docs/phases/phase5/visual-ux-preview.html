@@ -1,0 +1,886 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 5 视觉与体验预览 · Lunar Gold</title>
+<style>
+/* ============ 设计 token（P5-09 提案：唯一入口，亮暗两套） ============ */
+:root{
+  --bg:#f0f2f5; --surface:#ffffff; --surface-hover:#f5f6f8; --surface-2:#f8f9fa;
+  --border:#e0e0e0; --border-strong:#c9ccd1;
+  --primary:#1a73e8; --primary-hover:#1557b0; --primary-light:#e8f0fe;
+  --text:#202124; --text-secondary:#5f6368; --text-tertiary:#80868b;
+  --danger:#d93025; --danger-bg:#fce8e8; --success:#188038; --success-bg:#e6f4ea;
+  --warning:#b26a00; --warning-bg:#fff4e0;
+  --code-bg:#f6f8fa; --code-border:#e5e7eb;
+  --diff-add-bg:#e6f4ea; --diff-del-bg:#fce8e8;
+  --skeleton-a:#eceff3; --skeleton-b:#f7f9fb;
+
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-pill:999px;
+  --fs-xs:11px; --fs-sm:12px; --fs-base:14px; --fs-lg:16px; --fs-xl:20px;
+  --lh-base:1.6; --lh-tight:1.35;
+  --dur-fast:.15s; --dur-base:.2s;
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg:0 10px 25px rgba(0,0,0,.12);
+  --focus-ring:0 0 0 3px color-mix(in srgb, var(--primary) 26%, transparent);
+}
+[data-theme="dark"]{
+  --bg:#0d1117; --surface:#161b22; --surface-hover:#1f242c; --surface-2:#0d1117;
+  --border:#30363d; --border-strong:#484f58;
+  --primary:#58a6ff; --primary-hover:#79b8ff; --primary-light:#1f6feb33;
+  --text:#c9d1d9; --text-secondary:#8b949e; --text-tertiary:#7d8590;
+  --danger:#f85149; --danger-bg:#3d1e1e; --success:#3fb950; --success-bg:#12301f;
+  --warning:#d29922; --warning-bg:#3a2c12;
+  --code-bg:#0d1117; --code-border:#30363d;
+  --diff-add-bg:#12301f; --diff-del-bg:#3d1e1e;
+  --skeleton-a:#1b2129; --skeleton-b:#242c35;
+  --shadow:0 1px 3px rgba(0,0,0,.4);
+  --shadow-lg:0 12px 28px rgba(0,0,0,.5);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Roboto,sans-serif;
+  font-size:var(--fs-base); line-height:var(--lh-base);
+  background:var(--bg); color:var(--text);
+  transition:background var(--dur-base),color var(--dur-base);
+}
+body.reduce-motion *,body.reduce-motion *::before,body.reduce-motion *::after{
+  animation-duration:.001s!important; animation-iteration-count:1!important;
+  transition-duration:.001s!important; scroll-behavior:auto!important;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.muted{color:var(--text-secondary)}
+.kbd{display:inline-block;min-width:20px;padding:1px 6px;border:1px solid var(--border);border-bottom-width:2px;
+  border-radius:var(--radius-sm);background:var(--surface-2);font-size:var(--fs-xs);font-family:ui-monospace,Consolas,monospace;color:var(--text-secondary)}
+
+/* ============ 顶栏 ============ */
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;
+  padding:10px var(--space-5);background:var(--surface);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:30px;height:30px;border-radius:9px;background:var(--primary);color:#fff;
+  display:grid;place-items:center;font-size:12px;font-weight:700;letter-spacing:.5px}
+.brand strong{display:block;font-size:var(--fs-base);line-height:1.3}
+.brand .muted{font-size:var(--fs-xs)}
+.tabs{display:flex;gap:4px;padding:3px;background:var(--surface-2);border-radius:var(--radius-pill);margin-left:auto}
+.tab{padding:6px 14px;border-radius:var(--radius-pill);font-size:var(--fs-sm);color:var(--text-secondary)}
+.tab:hover{color:var(--text)}
+.tab.active{background:var(--surface);color:var(--primary);font-weight:600;box-shadow:var(--shadow)}
+.tools{display:flex;gap:8px}
+
+/* ============ 通用 ============ */
+.wrap{max-width:1120px;margin:0 auto;padding:var(--space-5) var(--space-4) 64px}
+.panel[hidden]{display:none!important}
+.block{margin-bottom:var(--space-6)}
+.block-h{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+.block-h h2{font-size:var(--fs-lg);font-weight:650}
+.tag{font-size:var(--fs-xs);padding:1px 8px;border-radius:var(--radius-pill);
+  background:var(--primary-light);color:var(--primary);font-weight:600}
+.lead{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:var(--space-3);max-width:78ch}
+.lead b{color:var(--text)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:var(--shadow)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)}
+.row{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.between{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--radius-sm);
+  border:1px solid var(--border);background:var(--surface);font-size:var(--fs-sm);transition:background var(--dur-fast),border-color var(--dur-fast)}
+.btn:hover{background:var(--surface-hover)}
+.btn:focus-visible{outline:none;box-shadow:var(--focus-ring);border-color:var(--primary)}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,var(--border))}
+.btn-sm{padding:3px 9px;font-size:var(--fs-xs)}
+.chip{font-size:var(--fs-xs);padding:1px 8px;border-radius:var(--radius-pill);background:var(--surface-2);
+  color:var(--text-secondary);border:1px solid var(--border)}
+.note{margin-top:10px;padding:8px 10px;border-left:3px solid var(--primary);background:var(--surface-2);
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0;font-size:var(--fs-sm);color:var(--text-secondary)}
+.note b{color:var(--text)}
+
+/* ============ 1. token / 暗色 ============ */
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)}
+.swatch{border-radius:var(--radius-md);padding:14px;background:#161b22;border:1px solid var(--border);
+  display:flex;flex-direction:column;gap:8px;min-height:96px;justify-content:center}
+.swatch span{font-size:var(--fs-sm);font-weight:600}
+.swatch em{font-style:normal;font-size:var(--fs-xs);color:#8b949e}
+.swatch.bad em{color:#f85149}
+.swatch.good em{color:#3fb950}
+.token-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.token-table th,.token-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+.token-table th{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:600}
+.token-table code{font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-xs);
+  background:var(--surface-2);padding:1px 5px;border-radius:4px}
+.pill-ok{color:var(--success);font-size:var(--fs-xs);font-weight:600}
+.pill-bad{color:var(--danger);font-size:var(--fs-xs);font-weight:600}
+
+/* ============ 2. 加载 / 空 / 错误 ============ */
+.skeleton{height:12px;border-radius:6px;background:var(--skeleton-a);position:relative;overflow:hidden}
+.skeleton+.skeleton{margin-top:8px}
+.skeleton.w80{width:80%} .skeleton.w60{width:60%} .skeleton.w40{width:40%}
+.skeleton::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,var(--skeleton-b),transparent);
+  animation:shimmer 1.3s infinite}
+@keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.sk-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px}
+.sk-avatar{width:26px;height:26px;border-radius:50%;background:var(--skeleton-a);flex:0 0 auto;
+  position:relative;overflow:hidden}
+.sk-avatar::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,var(--skeleton-b),transparent);animation:shimmer 1.3s infinite}
+.sk-lines{flex:1}
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:12px 8px}
+.empty-ico{width:44px;height:44px;border-radius:14px;background:var(--primary-light);color:var(--primary);
+  display:grid;place-items:center;font-size:18px;font-weight:700}
+.empty h3{font-size:var(--fs-base);font-weight:600}
+.empty p{font-size:var(--fs-sm);color:var(--text-secondary);max-width:30ch}
+.sugs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+.sug{font-size:var(--fs-xs);padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-pill);
+  background:var(--surface);color:var(--text-secondary)}
+.sug:hover{border-color:var(--primary);color:var(--primary)}
+.error-card{border:1px solid color-mix(in srgb,var(--danger) 45%,var(--border));background:var(--danger-bg);
+  border-radius:var(--radius-md);padding:12px}
+.error-card h4{font-size:var(--fs-sm);color:var(--danger);display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.error-card p{font-size:var(--fs-sm);color:var(--text-secondary)}
+.err-code{font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-xs);
+  background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);padding:1px 6px;border-radius:4px}
+.spinner{width:13px;height:13px;border:2px solid color-mix(in srgb,var(--primary) 30%,transparent);
+  border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tool-running{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-md);background:var(--surface-2);font-size:var(--fs-sm)}
+.tool-running .el{font-size:var(--fs-xs);color:var(--text-tertiary);margin-left:auto}
+
+/* ============ 3. 消息密度与排版 ============ */
+.chat-demo{display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;gap:10px}
+.avatar{width:26px;height:26px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  font-size:11px;font-weight:700;background:var(--primary-light);color:var(--primary)}
+.msg.user .avatar{background:var(--text);color:var(--surface)}
+.bubble{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:10px 12px;font-size:var(--fs-base);max-width:100%}
+.msg.user .bubble{background:var(--primary-light);border-color:transparent}
+details.fold{border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2)}
+details.fold summary{list-style:none;cursor:pointer;padding:7px 10px;display:flex;align-items:center;gap:8px;
+  font-size:var(--fs-sm);color:var(--text-secondary);user-select:none}
+details.fold summary::-webkit-details-marker{display:none}
+details.fold summary::before{content:'▸';font-size:10px;transition:transform var(--dur-fast)}
+details.fold[open] summary::before{transform:rotate(90deg)}
+details.fold summary:hover{color:var(--text)}
+details.fold .fold-body{padding:0 12px 10px;font-size:var(--fs-sm);color:var(--text-secondary);
+  border-top:1px dashed var(--border);padding-top:8px}
+details.fold summary .fold-meta{margin-left:auto;font-size:var(--fs-xs);color:var(--text-tertiary)}
+.tool-line{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--text-secondary)}
+.tool-line code{font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-xs);color:var(--text);
+  background:var(--surface-2);padding:1px 5px;border-radius:4px}
+.code-block{border:1px solid var(--code-border);border-radius:var(--radius-md);overflow:hidden;background:var(--code-bg)}
+.code-head{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--surface-2);
+  border-bottom:1px solid var(--code-border);font-size:var(--fs-xs);color:var(--text-secondary)}
+.code-head .lang{font-weight:600;color:var(--text)}
+.code-head .copy{margin-left:auto}
+.code-body{padding:10px 12px;font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-sm);
+  line-height:1.6;overflow:auto;white-space:pre;color:var(--text)}
+.tk-k{color:#a626a4}.tk-s{color:#50a14f}.tk-f{color:#4078f2}
+[data-theme="dark"] .tk-k{color:#c678dd}[data-theme="dark"] .tk-s{color:#98c379}[data-theme="dark"] .tk-f{color:#61afef}
+.dtable{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.dtable th,.dtable td{padding:5px 8px;border-bottom:1px solid var(--border);text-align:left}
+.dtable th{color:var(--text-secondary);font-size:var(--fs-xs);font-weight:600;background:var(--surface-2)}
+.diff{border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-sm)}
+.diff-h{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--surface-2);border-bottom:1px solid var(--border);
+  font-family:inherit;font-size:var(--fs-xs);color:var(--text-secondary)}
+.diff-h .stat{font-family:ui-monospace,Consolas,monospace}
+.add{color:var(--success)}.del{color:var(--danger)}
+.diff-line{padding:1px 10px;white-space:pre;overflow:auto}
+.diff-line.a{background:var(--diff-add-bg)}
+.diff-line.d{background:var(--diff-del-bg)}
+.msg-actions{display:flex;gap:6px;opacity:0;transition:opacity var(--dur-fast)}
+.msg:hover .msg-actions,.msg:focus-within .msg-actions{opacity:1}
+.icon-btn{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;
+  font-size:12px;color:var(--text-secondary);border:1px solid transparent}
+.icon-btn:hover{background:var(--surface-hover);border-color:var(--border);color:var(--text)}
+.icon-btn:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.cite{display:flex;gap:8px;align-items:center;padding:6px 9px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--surface);font-size:var(--fs-xs);color:var(--text-secondary)}
+.cite b{color:var(--text);font-weight:600}
+
+/* ============ 4. 响应式 ============ */
+.resp-controls{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-secondary)}
+input[type=range]{accent-color:var(--primary);width:220px}
+.app-frame{width:1200px;max-width:100%;height:300px;display:flex;overflow:hidden;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--bg);
+  transition:width var(--dur-base)}
+.af-sidebar{width:172px;flex:0 0 auto;background:var(--surface);border-right:1px solid var(--border);
+  padding:8px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.af-logo{font-size:var(--fs-xs);font-weight:700;color:var(--primary);padding:2px 6px 8px}
+.af-item{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:6px;
+  font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
+.af-item.on{background:var(--primary-light);color:var(--primary);font-weight:600}
+.af-ico{width:16px;text-align:center;flex:0 0 auto;font-size:11px}
+.af-main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.af-head{height:34px;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--surface);
+  border-bottom:1px solid var(--border);font-size:var(--fs-xs);color:var(--text-secondary)}
+.af-body{flex:1;padding:10px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.af-bubble{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 9px;
+  font-size:var(--fs-xs);color:var(--text-secondary);max-width:88%}
+.af-bubble.me{align-self:flex-end;background:var(--primary-light);border-color:transparent;color:var(--text)}
+.af-input{margin:0 10px 10px;height:34px;border:1px solid var(--border);border-radius:8px;background:var(--surface);
+  display:flex;align-items:center;gap:6px;padding:0 8px;font-size:var(--fs-xs);color:var(--text-tertiary)}
+.af-dock{width:200px;flex:0 0 auto;background:var(--surface);border-left:1px solid var(--border);
+  padding:8px;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.af-dock-h{font-size:var(--fs-xs);color:var(--text-tertiary);padding:0 4px 4px;border-bottom:1px solid var(--border)}
+.af-dock-row{font-size:var(--fs-xs);color:var(--text-secondary);padding:3px 4px}
+[data-bp="md"] .af-sidebar{width:46px}
+[data-bp="md"] .af-logo,[data-bp="md"] .af-label{display:none}
+[data-bp="md"] .af-item{justify-content:center;padding:6px 0}
+[data-bp="md"] .af-dock{display:none}
+[data-bp="sm"] .af-sidebar{display:none}
+[data-bp="sm"] .af-dock{display:none}
+.bp-hint{font-size:var(--fs-xs);color:var(--text-tertiary);margin-top:8px}
+
+/* ============ 体验 1：断线续传 ============ */
+.status-bar{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius-md);
+  border:1px solid var(--border);background:var(--surface-2);font-size:var(--fs-sm);color:var(--text-secondary)}
+.sb-dot{width:7px;height:7px;border-radius:50%;background:var(--success);flex:0 0 auto}
+.status-bar[data-state="reconnect"]{border-color:color-mix(in srgb,var(--warning) 50%,var(--border));background:var(--warning-bg)}
+.status-bar[data-state="reconnect"] .sb-dot{background:var(--warning);animation:pulse 1s infinite}
+.status-bar[data-state="recovered"]{border-color:color-mix(in srgb,var(--success) 50%,var(--border));background:var(--success-bg)}
+.status-bar .sb-act{margin-left:auto}
+@keyframes pulse{50%{opacity:.25}}
+.seq{font-size:var(--fs-xs);color:var(--text-tertiary);font-family:ui-monospace,Consolas,monospace}
+
+/* ============ 体验 2：审批 ============ */
+.approval{border:1px solid color-mix(in srgb,var(--warning) 45%,var(--border));
+  border-left:3px solid var(--warning);border-radius:var(--radius-md);background:var(--surface);padding:12px}
+.approval:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.ap-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.risk{font-size:var(--fs-xs);font-weight:700;padding:1px 8px;border-radius:var(--radius-pill);
+  background:var(--warning-bg);color:var(--warning);border:1px solid color-mix(in srgb,var(--warning) 35%,transparent)}
+.ap-h .ttl{font-size:var(--fs-sm);font-weight:600}
+.countdown{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);
+  font-family:ui-monospace,Consolas,monospace;color:var(--warning)}
+.ring{width:16px;height:16px;border-radius:50%;border:2px solid color-mix(in srgb,var(--warning) 25%,transparent);
+  border-top-color:var(--warning);animation:spin 2.4s linear infinite}
+.ap-meta{font-size:var(--fs-xs);color:var(--text-secondary);font-family:ui-monospace,Consolas,monospace;
+  background:var(--surface-2);padding:4px 8px;border-radius:6px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis}
+.ap-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+.ap-toast{margin-top:10px;font-size:var(--fs-sm);color:var(--success);min-height:20px}
+.ap-batch{display:flex;align-items:center;gap:8px;font-size:var(--fs-xs);color:var(--text-secondary);
+  padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius-md);margin-bottom:8px}
+.ap-batch .btn{margin-left:auto}
+
+/* ============ 体验 3：长任务 ============ */
+.stepper{list-style:none;display:flex;flex-direction:column;gap:0;margin-bottom:12px}
+.stepper li{display:flex;align-items:flex-start;gap:10px;font-size:var(--fs-sm);padding:6px 0;position:relative}
+.stepper li .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);
+  flex:0 0 auto;margin-top:2px;display:grid;place-items:center;font-size:9px;color:var(--text-tertiary);background:var(--surface)}
+.stepper li::after{content:'';position:absolute;left:7px;top:24px;bottom:-2px;width:2px;background:var(--border)}
+.stepper li:last-child::after{display:none}
+.stepper li.done .dot{border-color:var(--success);background:var(--success);color:#fff}
+.stepper li.done::after{background:var(--success)}
+.stepper li.active .dot{border-color:var(--primary);color:var(--primary);box-shadow:0 0 0 4px var(--primary-light)}
+.stepper li.active .st{font-weight:600;color:var(--text)}
+.stepper .st{color:var(--text-secondary)}
+.stepper .st em{font-style:normal;color:var(--text-tertiary);font-size:var(--fs-xs);margin-left:6px}
+.progress{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;border:1px solid var(--border)}
+.progress i{display:block;height:100%;background:var(--primary);border-radius:3px;transition:width .4s}
+
+/* ============ 体验 4：键盘 ============ */
+.shortcut-list{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:var(--fs-sm)}
+.shortcut-list div{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)}
+.shortcut-list span{color:var(--text-secondary)}
+.focus-demo{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* ============ 其他质量 ============ */
+pre.snippet{background:var(--code-bg);border:1px solid var(--code-border);border-radius:var(--radius-md);
+  padding:10px 12px;font-family:ui-monospace,Consolas,monospace;font-size:var(--fs-xs);line-height:1.7;
+  overflow:auto;color:var(--text);max-height:260px}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.kpi-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:10px;background:var(--surface)}
+.kpi-card .lbl{font-size:var(--fs-xs);color:var(--text-secondary)}
+.kpi-card .val{font-size:var(--fs-xl);font-weight:700;line-height:1.3}
+.kpi-card .delta{font-size:var(--fs-xs)}
+.kpi-card .delta.up{color:var(--danger)}
+.kpi-card .delta.down{color:var(--success)}
+.perf{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.perf-box{height:220px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface)}
+.perf-item{height:30px;line-height:18px;padding:6px 10px;border-bottom:1px solid var(--border);
+  font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vs-spacer{position:relative}
+.perf-item.virt{position:absolute;left:0;right:0}
+.perf-stat{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:6px;font-family:ui-monospace,Consolas,monospace}
+.perf-label{font-size:var(--fs-sm);font-weight:600;margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.badge-new{font-size:9px;padding:0 6px;border-radius:var(--radius-pill);background:var(--success-bg);color:var(--success);font-weight:700}
+@media (max-width:900px){
+  .grid2,.grid3,.swatches,.perf,.kpi,.shortcut-list{grid-template-columns:1fr}
+  .tabs{order:3;width:100%;justify-content:center;margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">LG</span>
+    <div>
+      <strong>Phase 5 视觉与体验预览</strong>
+      <span class="muted">静态原型 · 只用于对齐口径，不接真实数据</span>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="visual">视觉优化</button>
+    <button class="tab" data-tab="ux">交互体验</button>
+    <button class="tab" data-tab="other">其他质量点</button>
+  </nav>
+  <div class="tools">
+    <button class="btn btn-ghost" id="motionBtn">减少动效：关</button>
+    <button class="btn btn-ghost" id="themeBtn">切换到暗色</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ==================== 视觉 ==================== -->
+<section class="panel" id="panel-visual">
+
+  <div class="block">
+    <div class="block-h"><h2>1. token 收口与暗色一致性</h2><span class="tag">P5-09</span></div>
+    <p class="lead">现状：颜色散落在 9 个组件里共 59 处硬编码，<b>--fs-base 在 tokens.css（13.5px）与 style.css（14px）重复定义</b>，暗色块缺 --text-tertiary 与 --warning-bg。结果就是暗色下部分次要文字对比度不足、字号口径不一致。目标：tokens.css 成为唯一 token 入口，组件只引用语义变量。</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="between" style="margin-bottom:10px">
+          <strong style="font-size:var(--fs-sm)">暗色下的同一条次要文字</strong>
+          <span class="chip">固定 #161b22 底色</span>
+        </div>
+        <div class="swatches" style="grid-template-columns:1fr">
+          <div class="swatch bad">
+            <span style="color:#5f6368">硬编码 color:#5f6368（组件里直接写死）</span>
+            <em>对比度 2.9:1，低于 WCAG AA 4.5:1</em>
+          </div>
+          <div class="swatch good">
+            <span style="color:#8b949e">var(--text-secondary)（随主题切换）</span>
+            <em>对比度 5.7:1，达标</em>
+          </div>
+        </div>
+        <div class="note"><b>改法：</b>把 59 处 hex 替换为语义变量；补暗色的 --text-tertiary / --warning-bg / --code-bg / diff / focus-ring / skeleton；删除 tokens.css 里被覆盖的重复字号。</div>
+      </div>
+      <div class="card">
+        <strong style="font-size:var(--fs-sm)">P5-09 后的 token 清单（节选）</strong>
+        <table class="token-table" style="margin-top:8px">
+          <thead><tr><th>token</th><th>亮色</th><th>暗色</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td><code>--text-secondary</code></td><td>#5f6368</td><td>#8b949e</td><td class="pill-ok">已有</td></tr>
+            <tr><td><code>--text-tertiary</code></td><td>#80868b</td><td>#7d8590</td><td class="pill-bad">暗色缺失</td></tr>
+            <tr><td><code>--warning-bg</code></td><td>#fff4e0</td><td>#3a2c12</td><td class="pill-bad">未定义</td></tr>
+            <tr><td><code>--focus-ring</code></td><td>primary 26%</td><td>primary 26%</td><td class="pill-bad">未定义</td></tr>
+            <tr><td><code>--fs-base</code></td><td colspan="2">tokens 13.5px / style 14px 双定义</td><td class="pill-bad">冲突</td></tr>
+            <tr><td><code>--diff-add-bg</code></td><td>#e6f4ea</td><td>#12301f</td><td class="pill-bad">未定义</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>2. 加载 / 空 / 错误态体系</h2><span class="tag">P5-09</span></div>
+    <p class="lead">现状：全仓没有骨架屏，切会话是内容直接替换；没有统一空态与错误态组件。目标：三态统一为可复用组件，任何异步区域都有「正在加载 / 没有内容 / 出错了」的明确表达。</p>
+    <div class="grid3">
+      <div class="card">
+        <span class="chip" style="margin-bottom:12px;display:inline-block">加载态</span>
+        <div class="sk-row"><div class="sk-avatar"></div><div class="sk-lines">
+          <div class="skeleton w80"></div><div class="skeleton w60"></div></div></div>
+        <div class="sk-row"><div class="sk-avatar"></div><div class="sk-lines">
+          <div class="skeleton w40"></div><div class="skeleton"></div><div class="skeleton w60"></div></div></div>
+        <div class="tool-running"><span class="spinner"></span>正在读取 src/.../ReActAgentService.java<span class="el">2.4s</span></div>
+      </div>
+      <div class="card">
+        <span class="chip" style="margin-bottom:12px;display:inline-block">空态</span>
+        <div class="empty">
+          <div class="empty-ico">LG</div>
+          <h3>开始一个新任务</h3>
+          <p>描述你想改的代码或想查的资料，我会先给方案再动手。</p>
+          <div class="sugs">
+            <button class="sug">这个仓库怎么启动</button>
+            <button class="sug">找出未使用的接口</button>
+            <button class="sug">给登录补单元测试</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <span class="chip" style="margin-bottom:12px;display:inline-block">错误态</span>
+        <div class="error-card">
+          <h4>这次没能完成</h4>
+          <p>模型服务返回 500，已重试 3 次。你的改动没有丢失。</p>
+          <div class="row" style="margin-top:8px">
+            <span class="err-code">PROVIDER_5XX</span>
+            <button class="btn btn-sm btn-primary" style="margin-left:auto">重试</button>
+            <button class="btn btn-sm">导出诊断</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>3. 消息密度与内容排版</h2><span class="tag">P5-09</span></div>
+    <p class="lead">现状：思考过程、工具输出、代码、diff、引用都平铺在同一条消息里，长回答会把关键结论挤走。目标：分层折叠、统一卡片样式、操作条悬停出现，长内容默认收起。</p>
+    <div class="card">
+      <div class="chat-demo">
+        <div class="msg user">
+          <div class="avatar">我</div>
+          <div class="bubble">把 ReActAgentService 里的工具循环改成支持只读并发，并跑一下相关测试。</div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar">AI</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+            <details class="fold">
+              <summary>思考过程<span class="fold-meta">4.2s</span></summary>
+              <div class="fold-body">先确认工具循环位置（L504-L543 是串行 for），再看 BaseTool 是否已有只读标记，然后决定并发边界。</div>
+            </details>
+
+            <details class="fold" open>
+              <summary>工具调用 · 3 次<span class="fold-meta">共 2.8s</span></summary>
+              <div class="fold-body">
+                <div class="tool-line" style="margin-bottom:6px"><span class="add">✓</span> read_file <code>ReActAgentService.java</code><span style="margin-left:auto;font-size:var(--fs-xs);color:var(--text-tertiary)">0.6s</span></div>
+                <div class="tool-line" style="margin-bottom:6px"><span class="add">✓</span> read_file <code>BaseTool.java</code><span style="margin-left:auto;font-size:var(--fs-xs);color:var(--text-tertiary)">0.4s</span></div>
+                <div class="tool-line"><span class="add">✓</span> edit_file <code>ReActAgentService.java</code><span style="margin-left:auto;font-size:var(--fs-xs);color:var(--text-tertiary)">1.8s</span></div>
+              </div>
+            </details>
+
+            <div class="bubble" style="background:var(--surface);border-color:var(--border)">
+              改完了：只读工具走有界线程池（默认 4 并发），写操作与命令仍串行并保留审批。下面是核心改动。
+            </div>
+
+            <div class="code-block">
+              <div class="code-head"><span class="lang">java</span><span>ReActAgentService.java</span><button class="btn btn-sm copy">复制</button></div>
+              <div class="code-body"><span class="tk-k">List</span>&lt;ToolCall&gt; reads = calls.stream()
+    .filter(c -&gt; registry.get(c.name()).isReadOnly())
+    .toList();
+<span class="tk-k">CompletableFuture</span>.allOf(reads.stream()
+    .map(c -&gt; <span class="tk-f">runAsync</span>(() -&gt; execute(c), pool))
+    .toArray(CompletableFuture[]::<span class="tk-k">new</span>));</div>
+            </div>
+
+            <table class="dtable">
+              <thead><tr><th>指标</th><th>改动前</th><th>改动后</th></tr></thead>
+              <tbody>
+                <tr><td>3 个只读工具耗时</td><td>2.8s</td><td>1.1s</td></tr>
+                <tr><td>写操作是否仍串行</td><td>是</td><td>是</td></tr>
+              </tbody>
+            </table>
+
+            <div class="diff">
+              <div class="diff-h"><span>ReActAgentService.java</span><span class="stat"><span class="add">+3</span> <span class="del">-1</span></span><button class="btn btn-sm" style="margin-left:auto">查看完整改动</button></div>
+              <div class="diff-line d">- for (ObjectNode call : streamedToolCalls) {</div>
+              <div class="diff-line a">+ List&lt;ObjectNode&gt; reads = partitionReadOnly(streamedToolCalls);</div>
+              <div class="diff-line a">+ runConcurrently(reads, 4);</div>
+              <div class="diff-line a">+ runSerialWrites(streamedToolCalls);</div>
+            </div>
+
+            <div class="row">
+              <div class="cite"><b>出处 1</b> docs/phases/phase5/plan.md · L136-L140</div>
+              <div class="cite"><b>出处 2</b> src/.../ToolRegistry.java</div>
+            </div>
+
+            <div class="row" style="justify-content:space-between">
+              <div class="msg-actions">
+                <button class="icon-btn" title="复制">⧉</button>
+                <button class="icon-btn" title="重试">↻</button>
+                <button class="icon-btn" title="引用">❝</button>
+              </div>
+              <span class="seq">turn 12 · 34 条事件</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note"><b>密度档位：</b>紧凑（工具行 24px）/ 舒适（32px）只在 token 层切换 --density-row，不改组件结构。</div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>4. 响应式与窗口自适应</h2><span class="tag">P5-09</span></div>
+    <p class="lead">现状：全站只有一处 <b>@media (min-width: 769px)</b>，窄窗口下侧栏和工作台一起挤压正文。目标：1024 / 768 两级断点，侧栏先图标化再收起，工作台可折叠而不是硬挤。</p>
+    <div class="resp-controls">
+      <span>模拟窗口宽度</span>
+      <input type="range" id="frameW" min="480" max="1200" step="20" value="1200">
+      <span id="frameWLabel" style="font-family:ui-monospace,Consolas,monospace">1200px · 三栏</span>
+    </div>
+    <div class="app-frame" id="appFrame" data-bp="lg">
+      <aside class="af-sidebar">
+        <div class="af-logo">LUNAR GOLD</div>
+        <div class="af-item on"><span class="af-ico">◧</span><span class="af-label">对话</span></div>
+        <div class="af-item"><span class="af-ico">▤</span><span class="af-label">资料库</span></div>
+        <div class="af-item"><span class="af-ico">◈</span><span class="af-label">模型服务</span></div>
+        <div class="af-item"><span class="af-ico">◍</span><span class="af-label">账号</span></div>
+        <div class="af-item"><span class="af-ico">⚙</span><span class="af-label">设置</span></div>
+      </aside>
+      <div class="af-main">
+        <div class="af-head"><span style="font-weight:600;color:var(--text)">改造工具循环</span><span>·</span><span>STANDARD</span><span>·</span><span>需要审批</span></div>
+        <div class="af-body">
+          <div class="af-bubble me">把工具循环改成支持只读并发</div>
+          <div class="af-bubble">已改完 1 个文件，运行测试中…</div>
+          <div class="af-bubble">测试通过（12/12）。</div>
+        </div>
+        <div class="af-input">输入消息，@ 引用文件，/ 打开命令<span style="margin-left:auto">⏎</span></div>
+      </div>
+      <aside class="af-dock">
+        <div class="af-dock-h">工作台</div>
+        <div class="af-dock-row">文件 · 改动 · 指标</div>
+        <div class="af-dock-row">ReActAgentService.java</div>
+        <div class="af-dock-row">BaseTool.java</div>
+        <div class="af-dock-row">ToolRegistry.java</div>
+      </aside>
+    </div>
+    <div class="bp-hint" id="bpHint">≥1024：三栏并排</div>
+  </div>
+
+</section>
+
+<!-- ==================== 交互体验 ==================== -->
+<section class="panel" id="panel-ux" hidden>
+
+  <div class="block">
+    <div class="block-h"><h2>1. 断线续传与刷新恢复</h2><span class="tag">P5-10</span></div>
+    <p class="lead">现状：后端已有 <b>GET /api/agent/runs/{runId}/events?sinceSeq=</b> 并支持 Last-Event-ID，但前端是 fetch 手写 SSE，既不记 seq 也不重连，断网或刷新就丢本轮。目标：记录 runId + seq，断流后指数退避重连并补齐事件，界面明确告诉用户处在哪个状态。</p>
+    <div class="card">
+      <div class="status-bar" id="statusBar" data-state="ok">
+        <span class="sb-dot"></span>
+        <span id="sbText">已连接 · 已接收事件 42</span>
+        <span class="seq" id="sbSeq">run #1187 · sinceSeq=42</span>
+        <button class="btn btn-sm sb-act" id="sbBtn">模拟断线</button>
+      </div>
+      <div class="note" id="sbNote"><b>正常：</b>每个事件带自增 seq，前端只记录不展示；用户看不到技术细节。</div>
+      <div class="row" style="margin-top:10px">
+        <span class="chip">1s → 2s → 4s 退避</span>
+        <span class="chip">最多 5 次</span>
+        <span class="chip">补齐后自动续播</span>
+        <span class="chip">5 次失败 → 错误态 + 重试</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>2. 审批流效率</h2><span class="tag">P5-10</span></div>
+    <p class="lead">现状：审批只能鼠标点，多个待审批要逐个处理，倒计时不显眼。目标：支持键盘 A / D / J / K、低风险批量允许、审批历史可回看，倒计时进入 30s 后变红。</p>
+    <div class="card">
+      <div class="ap-batch">
+        <span>3 个待审批 · 其中 2 个低风险</span>
+        <button class="btn btn-sm">允许全部低风险</button>
+      </div>
+      <div class="approval" id="approvalCard" tabindex="0">
+        <div class="ap-h">
+          <span class="risk">高危</span>
+          <span class="ttl">写入文件</span>
+          <span class="countdown"><span class="ring"></span><span id="cdText">02:58</span></span>
+        </div>
+        <div class="ap-meta">src/main/java/com/capsule/agentkey/service/ReActAgentService.java · +3 −1 行</div>
+        <div class="diff" style="margin-bottom:4px">
+          <div class="diff-line d">- for (ObjectNode call : streamedToolCalls) {</div>
+          <div class="diff-line a">+ List&lt;ObjectNode&gt; reads = partitionReadOnly(streamedToolCalls);</div>
+          <div class="diff-line a">+ runConcurrently(reads, 4);</div>
+        </div>
+        <div class="ap-actions">
+          <button class="btn btn-danger" data-act="reject">拒绝 <span class="kbd">D</span></button>
+          <button class="btn">本会话总是允许</button>
+          <button class="btn btn-primary" data-act="approve">允许 <span class="kbd">A</span></button>
+        </div>
+        <div class="ap-toast" id="apToast"></div>
+      </div>
+      <div class="note"><b>试用：</b>先点一下审批卡让它获得焦点，再按 <span class="kbd">A</span> 或 <span class="kbd">D</span>。卡片获得焦点时按 <span class="kbd">J</span> / <span class="kbd">K</span> 可在多个审批间移动。</div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>3. 长任务进度可感知</h2><span class="tag">P5-10</span></div>
+    <p class="lead">现状：只有「正在生成」和一个停止提示，用户不知道当前在第几步、还要多久、哪一步失败了。目标：阶段时间线 + 预算可视化 + 失败分级（可重试 / 需配置 / 需审批）。</p>
+    <div class="card">
+      <ol class="stepper">
+        <li class="done"><span class="dot">✓</span><span class="st">理解需求<em>0.8s</em></span></li>
+        <li class="done"><span class="dot">✓</span><span class="st">读取 3 个文件<em>1.2s</em></span></li>
+        <li class="active"><span class="dot">3</span><span class="st">修改 ReActAgentService.java<em>进行中 · 12s</em></span></li>
+        <li><span class="dot">4</span><span class="st">运行测试<em>待执行</em></span></li>
+        <li><span class="dot">5</span><span class="st">汇总结果<em>待执行</em></span></li>
+      </ol>
+      <div class="progress"><i style="width:52%"></i></div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <span class="muted" style="font-size:var(--fs-xs)">轮次 2/5 · token 8.4k / 20k · 已用 1m12s</span>
+        <button class="btn btn-sm">停止生成 <span class="kbd">Esc</span><span class="kbd">Esc</span></button>
+      </div>
+      <details class="fold" style="margin-top:10px">
+        <summary>工具输出（12 行）<span class="fold-meta">点击展开</span></summary>
+        <div class="fold-body">第 3 个文件匹配到 2 处需要并发改造的位置；已跳过只读判断不成立的调用。</div>
+      </details>
+      <div class="grid3" style="margin-top:10px">
+        <div class="error-card" style="background:var(--warning-bg);border-color:color-mix(in srgb,var(--warning) 45%,var(--border))">
+          <h4 style="color:var(--warning)">可重试</h4><p>模型 503，点重试即可继续</p>
+        </div>
+        <div class="error-card" style="background:var(--warning-bg);border-color:color-mix(in srgb,var(--warning) 45%,var(--border))">
+          <h4 style="color:var(--warning)">需配置</h4><p>未填写模型 Key，去设置页补全</p>
+        </div>
+        <div class="error-card" style="background:var(--warning-bg);border-color:color-mix(in srgb,var(--warning) 45%,var(--border))">
+          <h4 style="color:var(--warning)">需审批</h4><p>命令被策略拦截，等待你确认</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>4. 键盘与无障碍</h2><span class="tag">P5-10</span></div>
+    <p class="lead">现状：全站只有 1 处 aria-label，焦点样式靠浏览器默认，快捷键没有地方可查，动效无法关闭。目标：快捷键可查、焦点可见、流式内容可被屏幕阅读器播报（限流）、尊重 prefers-reduced-motion。</p>
+    <div class="grid2">
+      <div class="card">
+        <strong style="font-size:var(--fs-sm)">快捷键面板（Ctrl + / 唤起）</strong>
+        <div class="shortcut-list" style="margin-top:8px">
+          <div><span>聚焦输入框</span><span class="kbd">Ctrl K</span></div>
+          <div><span>发送</span><span class="kbd">Enter</span></div>
+          <div><span>换行</span><span class="kbd">Shift Enter</span></div>
+          <div><span>停止生成</span><span class="kbd">Esc Esc</span></div>
+          <div><span>审批允许 / 拒绝</span><span class="kbd">A / D</span></div>
+          <div><span>切换审批</span><span class="kbd">J / K</span></div>
+          <div><span>上一条消息</span><span class="kbd">↑</span></div>
+          <div><span>快捷键面板</span><span class="kbd">Ctrl /</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <strong style="font-size:var(--fs-sm)">焦点可见性（按 Tab 试试）</strong>
+        <div class="focus-demo">
+          <button class="btn">普通按钮</button>
+          <button class="btn btn-primary">主要按钮</button>
+          <button class="btn btn-danger">危险按钮</button>
+          <button class="btn">图标按钮</button>
+        </div>
+        <div class="note"><b>统一规则：</b>focus-visible 统一 3px 主色外环，不改变布局；流式文本用 aria-live="polite" 且 300ms 合并播报，避免逐字打断；动效开关跟随系统 prefers-reduced-motion，也可手动关。</div>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ==================== 其他质量点 ==================== -->
+<section class="panel" id="panel-other" hidden>
+
+  <div class="block">
+    <div class="block-h"><h2>1. 前端测试基线</h2><span class="tag">P5-11</span></div>
+    <p class="lead">现状：<b>frontend/package.json 只有 dev / build / preview，全仓没有任何 *.spec.*</b>，改一个按钮或改 SSE 解析只能靠手点。目标：Vitest 覆盖不依赖浏览器的逻辑（SSE 解析、store、审批卡），Playwright 覆盖 4 条关键路径。效果是「改错会红」，不是「多写文件」。</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="perf-label">组件/逻辑单测 <span class="chip">Vitest + @vue/test-utils</span></div>
+<pre class="snippet"><span class="tk-k">it</span>('断流后按 seq 续传，不重复渲染', <span class="tk-k">async</span> () =&gt; {
+  <span class="tk-k">const</span> events = [
+    { seq: 41, type: 'content', data: '{"text":"A"}' },
+    { seq: 42, type: 'content', data: '{"text":"B"}' }
+  ]
+  <span class="tk-k">const</span> seen: string[] = []
+  <span class="tk-k">await</span> parseSSE(streamOf(events), (t, d) =&gt; {
+    <span class="tk-k">if</span> (t === 'content') seen.push(JSON.parse(d).text)
+  })
+  expect(seen).toEqual(['A', 'B'])   <span style="color:var(--text-tertiary)">// 顺序与去重</span>
+})</pre>
+      </div>
+      <div class="card">
+        <div class="perf-label">关键路径 E2E <span class="chip">Playwright</span></div>
+<pre class="snippet"><span class="tk-k">test</span>('发送 → 流式 → 审批 → 完成', <span class="tk-k">async</span> ({ page }) =&gt; {
+  <span class="tk-k">await</span> page.goto('/chat')
+  <span class="tk-k">await</span> page.getByPlaceholder('输入消息').fill('读取 pom.xml')
+  <span class="tk-k">await</span> page.keyboard.press('Enter')
+  <span class="tk-k">await</span> expect(page.getByText('正在生成')).toBeVisible()
+  <span class="tk-k">await</span> page.getByRole('button', { name: /允许/ }).click()
+  <span class="tk-k">await</span> expect(page.getByText('已完成')).toBeVisible()
+})</pre>
+      </div>
+    </div>
+    <div class="note"><b>成本：</b>Vitest 秒级、无浏览器依赖；Playwright 只在 CI 一条 job 跑，失败上传 trace。四条路径：发送与流式、审批允许/拒绝、停止生成、断线重连。</div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>2. 体验可观测性</h2><span class="tag">P5-11</span></div>
+    <p class="lead">现状：前端没有全局错误捕获、没有性能指标；后端已有 MeterRegistry 与 run 事件表，但没有面向体验的汇总。目标：先本地收集（沿用 P3-06 脱敏），再决定是否上传；指标只回答「慢在哪、断在哪、失败在哪」。</p>
+    <div class="kpi">
+      <div class="kpi-card"><div class="lbl">首字时延 p95</div><div class="val">1.8s</div><div class="delta down">↓ 0.4s 较上周</div></div>
+      <div class="kpi-card"><div class="lbl">流中断率</div><div class="val">0.6%</div><div class="delta down">↓ 1.1pp</div></div>
+      <div class="kpi-card"><div class="lbl">工具失败率</div><div class="val">3.2%</div><div class="delta up">↑ 0.5pp</div></div>
+      <div class="kpi-card"><div class="lbl">审批平均等待</div><div class="val">14s</div><div class="delta down">↓ 6s</div></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="between"><strong style="font-size:var(--fs-sm)">首字时延趋势（近 14 天）</strong><span class="chip">数据来源：run 事件 + MeterRegistry</span></div>
+      <svg viewBox="0 0 560 90" style="width:100%;height:90px;margin-top:8px" role="img" aria-label="首字时延趋势">
+        <polyline points="0,62 43,58 86,66 129,50 172,54 215,44 258,48 301,36 344,40 387,30 430,34 473,26 516,28 559,22"
+          fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="0" y1="80" x2="560" y2="80" stroke="#30363d" stroke-width="1"/>
+      </svg>
+      <div class="row" style="margin-top:6px">
+        <span class="chip">window.onerror / unhandledrejection → 本地诊断</span>
+        <span class="chip">LCP / INP / CLS</span>
+        <span class="chip">run 级 token 与时延</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-h"><h2>3. 长会话性能</h2><span class="tag">P5-11</span></div>
+    <p class="lead">现状：消息全量渲染、无虚拟滚动，流式每个 chunk 都触发 Markdown 重渲染。下面是可真实点击的对比：同样 500 条消息，左边全量插入，右边只渲染可视区约 20 条。点按钮看 DOM 节点数与渲染耗时。</p>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn btn-primary" id="perfRun">渲染 500 条消息</button>
+      <span class="muted" style="font-size:var(--fs-xs)">耗时为本页面实测，非估算</span>
+    </div>
+    <div class="perf">
+      <div>
+        <div class="perf-label">现状：全量渲染</div>
+        <div class="perf-box" id="perfFull"></div>
+        <div class="perf-stat" id="fullStat">未渲染</div>
+      </div>
+      <div>
+        <div class="perf-label">方案：虚拟滚动 <span class="badge-new">P5-11</span></div>
+        <div class="perf-box" id="perfVirt"></div>
+        <div class="perf-stat" id="virtStat">未渲染</div>
+      </div>
+    </div>
+    <div class="note"><b>目标：</b>500 条会话首屏 &lt; 300ms、DOM 节点 &lt; 500；流式渲染按帧合并（最多 20 次/秒），Markdown 只重算变化段落。</div>
+  </div>
+
+</section>
+
+</main>
+
+<script>
+/* ---------- 主题 / 动效 / 标签页 ---------- */
+const html = document.documentElement;
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => {
+  const dark = html.getAttribute('data-theme') !== 'dark';
+  html.setAttribute('data-theme', dark ? 'dark' : 'light');
+  themeBtn.textContent = dark ? '切换到亮色' : '切换到暗色';
+});
+
+const motionBtn = document.getElementById('motionBtn');
+let reduce = false;
+motionBtn.addEventListener('click', () => {
+  reduce = !reduce;
+  document.body.classList.toggle('reduce-motion', reduce);
+  motionBtn.textContent = '减少动效：' + (reduce ? '开' : '关');
+});
+
+const tabs = [...document.querySelectorAll('.tab')];
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.toggle('active', x === t));
+  ['visual', 'ux', 'other'].forEach(name => {
+    document.getElementById('panel-' + name).hidden = name !== t.dataset.tab;
+  });
+}));
+
+/* ---------- 响应式模拟 ---------- */
+const frame = document.getElementById('appFrame');
+const slider = document.getElementById('frameW');
+const frameLabel = document.getElementById('frameWLabel');
+const bpHint = document.getElementById('bpHint');
+function applyWidth() {
+  const w = Number(slider.value);
+  frame.style.width = w + 'px';
+  const bp = w >= 1024 ? 'lg' : w >= 768 ? 'md' : 'sm';
+  frame.setAttribute('data-bp', bp);
+  frameLabel.textContent = w + 'px · ' + (bp === 'lg' ? '三栏' : bp === 'md' ? '侧栏图标化' : '侧栏收起');
+  bpHint.textContent = bp === 'lg' ? '≥1024：三栏并排，工作台常驻'
+    : bp === 'md' ? '768–1023：侧栏收为图标，工作台隐藏，正文优先'
+    : '<768：侧栏收起为抽屉，正文全宽';
+}
+slider.addEventListener('input', applyWidth);
+applyWidth();
+
+/* ---------- 断线续传演示 ---------- */
+const statusBar = document.getElementById('statusBar');
+const sbText = document.getElementById('sbText');
+const sbSeq = document.getElementById('sbSeq');
+const sbBtn = document.getElementById('sbBtn');
+const sbNote = document.getElementById('sbNote');
+const sbStates = [
+  { state: 'ok', text: '已连接 · 已接收事件 42', seq: 'run #1187 · sinceSeq=42',
+    btn: '模拟断线', note: '<b>正常：</b>每个事件带自增 seq，前端只记录不展示；用户看不到技术细节。' },
+  { state: 'reconnect', text: '连接中断，正在重连（第 1 次，1s 后）', seq: 'run #1187 · 已缓存 sinceSeq=42',
+    btn: '继续（模拟 2s 后）', note: '<b>重连中：</b>黄色状态条 + 退避计数；用户仍可看到已生成内容，不会误以为任务丢失。' },
+  { state: 'reconnect', text: '重连中 · 续传 sinceSeq=42（1s → 2s → 4s）', seq: 'run #1187 · 第 3 次尝试',
+    btn: '继续（模拟恢复）', note: '<b>续传：</b>带 seq 请求 /events?sinceSeq=42，服务端只补 43 之后的事件。' },
+  { state: 'recovered', text: '已恢复 · 补齐 8 个事件（43–50）', seq: 'run #1187 · sinceSeq=50',
+    btn: '重新开始演示', note: '<b>已恢复：</b>绿色状态条 3s 后自动消失；事件不丢不重，顺序与中断前一致。' },
+  { state: 'ok', text: '已连接 · 已接收事件 42', seq: 'run #1187 · sinceSeq=42',
+    btn: '模拟断线', note: '<b>连续失败 5 次：</b>切错误态并提供「重试」，不会无限重连。' }
+];
+let sbIndex = 0;
+sbBtn.addEventListener('click', () => {
+  sbIndex = (sbIndex + 1) % sbStates.length;
+  const s = sbStates[sbIndex];
+  statusBar.setAttribute('data-state', s.state);
+  sbText.textContent = s.text;
+  sbSeq.textContent = s.seq;
+  sbBtn.textContent = s.btn;
+  sbNote.innerHTML = s.note;
+});
+
+/* ---------- 审批卡：倒计时 + 键盘 ---------- */
+const cdText = document.getElementById('cdText');
+const approvalCard = document.getElementById('approvalCard');
+const apToast = document.getElementById('apToast');
+let remain = 178;
+setInterval(() => {
+  if (remain <= 0) return;
+  remain--;
+  const m = String(Math.floor(remain / 60)).padStart(2, '0');
+  const s = String(remain % 60).padStart(2, '0');
+  cdText.textContent = m + ':' + s;
+  if (remain <= 30) cdText.style.color = 'var(--danger)';
+}, 1000);
+
+function decide(kind) {
+  apToast.textContent = kind === 'approve' ? '已允许，继续执行（可按 Ctrl+Z 撤销本轮改动）' : '已拒绝，本轮不会写入该文件';
+  apToast.style.color = kind === 'approve' ? 'var(--success)' : 'var(--danger)';
+}
+document.querySelectorAll('[data-act]').forEach(b =>
+  b.addEventListener('click', () => decide(b.dataset.act)));
+approvalCard.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'a') { e.preventDefault(); decide('approve'); }
+  if (k === 'd') { e.preventDefault(); decide('reject'); }
+});
+
+/* ---------- 长会话性能：真实对比 ---------- */
+const TOTAL = 500;
+const msgs = Array.from({ length: TOTAL }, (_, i) =>
+  '消息 #' + (i + 1) + ' · 帮我看下 src/services/agent_' + i + '.java 的实现并总结要点');
+const fullBox = document.getElementById('perfFull');
+const virtBox = document.getElementById('perfVirt');
+const fullStat = document.getElementById('fullStat');
+const virtStat = document.getElementById('virtStat');
+const ITEM = 30, VP = 220;
+let virtSpacer = null;
+
+function renderFull() {
+  const t0 = performance.now();
+  fullBox.innerHTML = msgs.map(x => '<div class="perf-item">' + x + '</div>').join('');
+  const cost = performance.now() - t0;
+  fullStat.textContent = 'DOM 节点 ' + fullBox.children.length + ' · 渲染 ' + cost.toFixed(1) + ' ms';
+}
+
+function initVirt() {
+  virtBox.innerHTML = '<div class="vs-spacer"></div>';
+  virtSpacer = virtBox.firstElementChild;
+  virtSpacer.style.height = (TOTAL * ITEM) + 'px';
+  virtBox.scrollTop = 0;
+  renderVirt(0);
+}
+function renderVirt(scrollTop) {
+  const start = Math.max(0, Math.floor(scrollTop / ITEM) - 2);
+  const count = Math.ceil(VP / ITEM) + 4;
+  const end = Math.min(TOTAL, start + count);
+  const t0 = performance.now();
+  virtSpacer.innerHTML = msgs.slice(start, end).map((x, i) =>
+    '<div class="perf-item virt" style="top:' + ((start + i) * ITEM) + 'px">' + x + '</div>').join('');
+  const cost = performance.now() - t0;
+  virtStat.textContent = 'DOM 节点 ' + virtSpacer.children.length + ' · 渲染 ' + cost.toFixed(1) + ' ms';
+}
+virtBox.addEventListener('scroll', () => renderVirt(virtBox.scrollTop));
+
+document.getElementById('perfRun').addEventListener('click', () => {
+  renderFull();
+  initVirt();
+});
+</script>
+</body>
+</html>

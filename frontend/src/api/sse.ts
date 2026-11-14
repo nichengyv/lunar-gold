@@ -3,10 +3,12 @@
  * 后端 /api/agent/chat/stream 是 POST 方式的 SSE 流，原生 EventSource 只支持 GET，
  * 因此必须用 fetch + ReadableStream 手动解析。
  */
-import type { ApprovalRequest, FileChange, PlanSnapshot, SourceRef, StreamPayload } from '../types/chat';
+import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, FileChange, PlanSnapshot, RunUsage, SourceRef, StreamPayload, VerifyInfo } from '../types/chat';
 
 export interface StreamHooks {
   onSessionId?: (id: number) => void;
+  /** P5-10：本轮运行的持久化 id，断线/刷新后凭它拉取已落库事件恢复内容 */
+  onRunId?: (runId: number) => void;
   /** 第六十八批 A3：本轮执行 id，用于「撤回本轮」 */
   onTurnId?: (turnId: string) => void;
   onThinking?: (thought: string) => void;
@@ -17,10 +19,23 @@ export interface StreamHooks {
   /** 危险工具执行前请求审批（write_file / edit_file / run_command） */
   onApprovalRequired?: (approval: ApprovalRequest) => void;
   /** 审批已被处理（用户批准/拒绝、超时自动拒绝、会话停止），前端据此把卡片切到"已处理"态 */
-  onApprovalResolved?: (approvalId: string, decision: 'APPROVE' | 'REJECT') => void;
+  onApprovalResolved?: (
+    approvalId: string,
+    decision: 'APPROVE' | 'REJECT',
+    source?: ApprovalDecisionSource,
+    batchId?: string
+  ) => void;
   onContent?: (fullText: string, chunk: string) => void;
   onSources?: (sources: SourceRef[]) => void;
   onFileChange?: (change: FileChange) => void;
+  /** 本轮任务的完成、未验证或未完成状态 */
+  onCompletion?: (completion: CompletionInfo) => void;
+  /** P5-05：变更文件诊断结果 */
+  onDiagnostics?: (diagnostics: DiagnosticsInfo) => void;
+  /** P5-06：项目验证结果 */
+  onVerify?: (verify: VerifyInfo) => void;
+  /** P5-10-3：本轮 token、轮次与时间预算进度 */
+  onUsage?: (usage: RunUsage) => void;
   onDone?: (fullText: string) => void;
   onError?: (message: string) => void;
 }
@@ -128,6 +143,9 @@ export async function streamChat(
       case 'session_id':
         hooks.onSessionId?.(parseInt(data, 10));
         break;
+      case 'run_id':
+        hooks.onRunId?.(parseInt(data, 10));
+        break;
       case 'turn_id':
         hooks.onTurnId?.(data);
         break;
@@ -181,7 +199,7 @@ export async function streamChat(
       case 'approval_resolved':
         try {
           const obj = JSON.parse(data);
-          hooks.onApprovalResolved?.(obj.approvalId, obj.decision);
+          hooks.onApprovalResolved?.(obj.approvalId, obj.decision, obj.source, obj.batchId);
         } catch {
           /* 忽略解析失败 */
         }
@@ -196,6 +214,36 @@ export async function streamChat(
       case 'file_change':
         try {
           hooks.onFileChange?.(JSON.parse(data) as FileChange);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'completion':
+        try {
+          hooks.onCompletion?.(JSON.parse(data) as CompletionInfo);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'no_progress':
+        break;
+      case 'diagnostics':
+        try {
+          hooks.onDiagnostics?.(JSON.parse(data) as DiagnosticsInfo);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'verify':
+        try {
+          hooks.onVerify?.(JSON.parse(data) as VerifyInfo);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'usage':
+        try {
+          hooks.onUsage?.(JSON.parse(data) as RunUsage);
         } catch {
           /* 忽略解析失败 */
         }

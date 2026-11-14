@@ -1,51 +1,26 @@
-/* ========== CSS 变量 / 主题 ========== */
-:root {
-    --bg: #f0f2f5;
-    --surface: #ffffff;
-    --surface-hover: #f5f6f8;
-    --surface-2: #f8f9fa;
-    --border: #e0e0e0;
-    --primary: #1a73e8;
-    --primary-hover: #1557b0;
-    --primary-light: #e8f0fe;
-    --text: #202124;
-    --text-secondary: #5f6368;
-    --text-tertiary: #9aa0a6;
-    --danger: #d93025;
-    --danger-bg: #fce8e8;
-    --success: #188038;
-    --success-bg: #e6f4ea;
-    --warning: #f9ab00;
-    --sidebar-width: 280px;
-    --header-height: 60px;
-    --radius: 12px;
-    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-    --shadow-lg: 0 10px 25px rgba(0,0,0,0.12);
-    /* 字体变量 —— theme.setFont() 会改这三个；默认 medium */
-    --fs-base: 14px;
-    --fs-sm: 13px;
-    --fs-xs: 12px;
-}
-
-[data-theme="dark"] {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --surface-hover: #1f242c;
-    --surface-2: #0d1117;
-    --border: #30363d;
-    --primary: #58a6ff;
-    --primary-hover: #79b8ff;
-    --primary-light: #1f6feb22;
-    --text: #c9d1d9;
-    --text-secondary: #8b949e;
-    --danger: #f85149;
-    --danger-bg: #3d1e1e;
-    --success: #3fb950;
-    --success-bg: #1e3d2f;
-    --warning: #d29922;
-}
+/* ========== 基础样式 ==========
+ * 颜色 / 间距 / 圆角 / 字号 / 阴影等 token 已在 tokens.css 统一定义（P5-09），
+ * 本文件只保留布局与组件的基础样式，不再声明 :root 变量。 */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* P5-10：键盘导航统一焦点环；:where 保持零优先级，组件样式可覆盖 */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* P5-10：尊重系统「减少动效」偏好，关闭动画与平滑滚动 */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -413,6 +388,24 @@ body {
     flex-shrink: 0;
 }
 
+/* P5-12-2：任务状态点，运行中做呼吸动画，一眼区分普通历史会话 */
+.session-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-secondary);
+}
+.session-dot.is-running { background: var(--primary); animation: session-dot-pulse 1.4s ease-in-out infinite; }
+.session-dot.is-waiting { background: var(--warning); }
+.session-dot.is-done { background: var(--success); }
+.session-dot.is-failed { background: var(--danger); }
+.session-dot.is-cancelled { background: var(--text-secondary); }
+
+@keyframes session-dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .35; }
+}
+
 .new-session-btn {
     margin: 0 8px 8px;
     padding: 8px;
@@ -465,7 +458,7 @@ body {
 .topbar-left { display: flex; align-items: center; gap: 14px; }
 
 .menu-toggle {
-    display: none;
+    display: flex;
     padding: 6px;
     background: none;
     border: none;
@@ -929,6 +922,19 @@ body {
 }
 .msg-action-btn:hover { border-color: var(--primary); color: var(--primary); }
 
+/* P5-10：读屏专用文本，视觉隐藏但保留在无障碍树里 */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* 输入区 */
 .input-bar {
     padding: 12px 20px 10px;
@@ -937,6 +943,49 @@ body {
     flex-direction: column;
     gap: 8px;
     flex-shrink: 0;
+}
+
+/* P5-10：断线续传状态条，位于输入区正上方 */
+.stream-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 20px 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+.stream-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex-shrink: 0;
+}
+.stream-status.is-reconnecting .stream-status-dot {
+    background: var(--warning);
+    animation: stream-pulse 1.2s ease-in-out infinite;
+}
+.stream-status.is-recovered .stream-status-dot { background: var(--success); }
+.stream-status.is-interrupted .stream-status-dot { background: var(--danger); }
+.stream-status-text { flex: 1; min-width: 0; }
+.stream-status-btn {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+}
+.stream-status-btn:hover { border-color: var(--primary); color: var(--primary); }
+@keyframes stream-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .35; }
 }
 
 /* 上排：textarea + 右侧紧凑按钮 */
@@ -984,6 +1033,101 @@ body {
   border-radius: 4px;
 }
 .input-bar-footer .pill-chevron { display: none; }
+
+/* ——— P5-10-3：长任务执行进度（阶段时间线 + 预算） ——— */
+.task-progress {
+  margin: 0 20px 6px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.tp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tp-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.tp-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.tp-current-time {
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+.tp-budget {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tp-stages {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tp-stages::-webkit-scrollbar { display: none; }
+.tp-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.tp-stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.tp-stage.is-active {
+  color: var(--primary);
+  font-weight: 600;
+}
+.tp-stage.is-active .tp-stage-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.tp-stage.is-done {
+  color: var(--text-secondary);
+}
+.tp-stage.is-done .tp-stage-dot { background: var(--success); }
+.tp-stage.is-skipped { opacity: 0.55; }
+.tp-stage-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+.task-progress.is-warning {
+  border-color: var(--warning);
+}
+.task-progress.is-warning .tp-budget {
+  color: var(--warning);
+}
+.tp-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--warning);
+  font-size: 11px;
+}
 
 /* ——— 计划条：输入区上方的任务计划预览 ——— */
 .plan-strip {
@@ -1563,7 +1707,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
     vertical-align: middle;
     transition: all .2s;
 }
-.doc-retry:hover { background: var(--danger); color: #fff; }
+.doc-retry:hover { background: var(--danger); color: var(--on-primary); }
 .doc-retry:disabled { opacity: .5; cursor: not-allowed; }
 
 /* 文件输入框美化 */

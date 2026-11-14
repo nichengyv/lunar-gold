@@ -3,18 +3,11 @@ package com.capsule.agentkey.controller;
 import com.capsule.agentkey.config.Capability;
 import com.capsule.agentkey.config.RequiresCapability;
 import com.capsule.agentkey.entity.PendingFileChange;
-import com.capsule.agentkey.entity.Project;
 import com.capsule.agentkey.repository.PendingFileChangeRepository;
-import com.capsule.agentkey.repository.ProjectRepository;
-import com.capsule.agentkey.service.WorkspaceFileService;
-import lombok.extern.slf4j.Slf4j;
+import com.capsule.agentkey.service.ChangeSetService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,24 +16,20 @@ import java.util.Map;
  * 文件变更审查流 API
  * - 前端输入框上方浮现 "n 个文件改动待审查" 卡片
  * - 列表：文件路径 + 红绿 diff + 撤销/保留按钮
- * - 撤销：用 oldContent 覆盖写回；新文件（oldContent=null）则删除文件
+ * - 撤销：复用 {@link ChangeSetService} 的逆序回滚与外部修改冲突检测
  */
 @RestController
 @RequestMapping("/api/file-changes")
 @RequiresCapability(Capability.APPROVAL)
-@Slf4j
 public class FileReviewController {
 
     private final PendingFileChangeRepository pfcRepo;
-    private final WorkspaceFileService workspaceFileService;
-    private final ProjectRepository projectRepo;
+    private final ChangeSetService changeSetService;
 
     public FileReviewController(PendingFileChangeRepository pfcRepo,
-                                WorkspaceFileService workspaceFileService,
-                                ProjectRepository projectRepo) {
+                                ChangeSetService changeSetService) {
         this.pfcRepo = pfcRepo;
-        this.workspaceFileService = workspaceFileService;
-        this.projectRepo = projectRepo;
+        this.changeSetService = changeSetService;
     }
 
     /** 拉项目所有 PENDING 变更（前端审查卡片数据源） */
@@ -73,15 +62,13 @@ public class FileReviewController {
             resp.put("error", "该变更已处理");
             return ResponseEntity.badRequest().body(resp);
         }
-        try {
-            revertOnDisk(pfc);
-            pfc.setStatus("REVERTED");
-            pfcRepo.save(pfc);
+        ChangeSetService.RevertResult result = changeSetService.revertSingle(id, null);
+        if (result.count() > 0) {
             resp.put("ok", true);
-        } catch (Exception e) {
-            log.error("撤销失败: {}", e.getMessage());
+        } else {
             resp.put("ok", false);
-            resp.put("error", e.getMessage());
+            resp.put("error", result.conflicts().isEmpty()
+                    ? "撤销失败" : result.conflicts().get(0).reason());
         }
         return ResponseEntity.ok(resp);
     }
@@ -126,24 +113,13 @@ public class FileReviewController {
     /** 项目批量全部撤销：按时间倒序撤销（先撤销最新的） */
     @PostMapping("/revert-all")
     public ResponseEntity<Map<String, Object>> revertAll(@RequestParam Long projectId) {
+        ChangeSetService.RevertResult result = changeSetService.revertProject(projectId);
         Map<String, Object> resp = new HashMap<>();
-        List<PendingFileChange> pending = pfcRepo.findByProjectIdAndStatusOrderByCreateTimeDesc(projectId, "PENDING");
-        long count = 0;
-        long failed = 0;
-        for (PendingFileChange pfc : pending) {
-            try {
-                revertOnDisk(pfc);
-                pfc.setStatus("REVERTED");
-                pfcRepo.save(pfc);
-                count++;
-            } catch (Exception e) {
-                failed++;
-                log.warn("批量撤销失败 id={}: {}", pfc.getId(), e.getMessage());
-            }
-        }
-        resp.put("ok", true);
-        resp.put("count", count);
-        resp.put("failed", failed);
+        resp.put("ok", result.ok());
+        resp.put("count", result.count());
+        resp.put("failed", result.failed());
+        resp.put("skippedAccepted", result.skippedAccepted());
+        resp.put("conflicts", result.conflicts());
         return ResponseEntity.ok(resp);
     }
 
@@ -154,43 +130,13 @@ public class FileReviewController {
     @PostMapping("/revert-turn")
     public ResponseEntity<Map<String, Object>> revertTurn(@RequestParam Long sessionId,
                                                           @RequestParam String turnId) {
+        ChangeSetService.RevertResult result = changeSetService.revertTurn(sessionId, turnId, null);
         Map<String, Object> resp = new HashMap<>();
-        List<PendingFileChange> pending = pfcRepo
-                .findBySessionIdAndTurnIdAndStatusOrderByCreateTimeDesc(sessionId, turnId, "PENDING");
-        long count = 0;
-        long failed = 0;
-        for (PendingFileChange pfc : pending) {
-            try {
-                revertOnDisk(pfc);
-                pfc.setStatus("REVERTED");
-                pfcRepo.save(pfc);
-                count++;
-            } catch (Exception e) {
-                failed++;
-                log.warn("按轮次撤销失败 id={}: {}", pfc.getId(), e.getMessage());
-            }
-        }
-        resp.put("ok", true);
-        resp.put("count", count);
-        resp.put("failed", failed);
+        resp.put("ok", result.ok());
+        resp.put("count", result.count());
+        resp.put("failed", result.failed());
+        resp.put("skippedAccepted", result.skippedAccepted());
+        resp.put("conflicts", result.conflicts());
         return ResponseEntity.ok(resp);
-    }
-
-    /** 实际撤销文件操作：newContent → oldContent */
-    private void revertOnDisk(PendingFileChange pfc) throws Exception {
-        Project ps = projectRepo.findById(pfc.getProjectId()).orElse(null);
-        if (ps == null || ps.getWorkspacePath() == null) {
-            throw new IllegalStateException("项目或工作区路径不存在");
-        }
-        Path root = Paths.get(ps.getWorkspacePath());
-        Path file = workspaceFileService.resolveInWorkspace(root, pfc.getFilePath());
-        if (pfc.getOldContent() == null) {
-            // 新文件：直接删
-            Files.deleteIfExists(file);
-        } else {
-            // modify / delete：覆盖回旧内容（删除目录后撤销时要先把父目录建回来）
-            Files.createDirectories(file.getParent());
-            Files.writeString(file, pfc.getOldContent(), StandardCharsets.UTF_8);
-        }
     }
 }

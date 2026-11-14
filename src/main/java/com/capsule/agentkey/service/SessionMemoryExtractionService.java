@@ -1,6 +1,6 @@
 package com.capsule.agentkey.service;
 
-import com.capsule.agentkey.client.SpringAiAgentClient;
+import com.capsule.agentkey.client.AgentClient;
 import com.capsule.agentkey.entity.AgentRule;
 import com.capsule.agentkey.entity.AgentRule.RuleScope;
 import com.capsule.agentkey.entity.ChatMessage;
@@ -50,14 +50,14 @@ public class SessionMemoryExtractionService {
 
     private final ChatMessageRepository messageRepo;
     private final AgentRuleRepository ruleRepo;
-    private final SpringAiAgentClient agentClient;
+    private final AgentClient agentClient;
 
     /** 提炼任务用独立线程池（跟 SSE 解耦，提炼失败不阻塞对话） */
     private final Executor extractionExecutor;
 
     public SessionMemoryExtractionService(ChatMessageRepository messageRepo,
                                            AgentRuleRepository ruleRepo,
-                                           SpringAiAgentClient agentClient) {
+                                           AgentClient agentClient) {
         this.messageRepo = messageRepo;
         this.ruleRepo = ruleRepo;
         this.agentClient = agentClient;

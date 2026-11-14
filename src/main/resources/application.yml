@@ -117,6 +117,76 @@ agent:
     # DeepSeek 的 OpenAI 兼容入口；Spring AI 默认补 /v1/chat/completions
     base-url: ${AGENT_SPRING_AI_BASE_URL:https://api.deepseek.com}
     completions-path: ${AGENT_SPRING_AI_COMPLETIONS_PATH:/v1/chat/completions}
+    # 【P4-06】模型调用韧性
+    # 流式调用两个分片之间的最大空闲秒数；超时即判定本次调用失败（不限制总时长）
+    idle-timeout-seconds: ${AGENT_MODEL_IDLE_TIMEOUT_SECONDS:60}
+    # 非流式辅助调用（会话摘要、图片转写）的总时长上限
+    sync-timeout-seconds: ${AGENT_MODEL_SYNC_TIMEOUT_SECONDS:60}
+    # 同一模型的最大尝试次数（含首次）；已输出内容后不再重试
+    max-attempts: ${AGENT_MODEL_MAX_ATTEMPTS:3}
+    # 指数退避基数，第 n 次重试等待 base * 2^(n-1)，上限 8s
+    retry-backoff-ms: ${AGENT_MODEL_RETRY_BACKOFF_MS:500}
+    # 跨 Provider 备选模型必须显式配置（逗号分隔）。
+    # 默认空：base-url 指向 DeepSeek 时填 qwen/moonshot 只会得到 400，属于无效请求
+    fallback-models: ${AGENT_MODEL_FALLBACKS:}
+    # Provider 级熔断：同一 base-url 连续失败达到阈值后快速失败
+    circuit:
+      failure-threshold: ${AGENT_MODEL_CIRCUIT_THRESHOLD:5}
+      open-millis: ${AGENT_MODEL_CIRCUIT_OPEN_MILLIS:30000}
+  # 【P5-10-3】单次运行预算；0 表示不限制，接近上限时前端提示，达到上限后停止并说明原因
+  budget:
+    max-tokens-per-run: ${AGENT_BUDGET_MAX_TOKENS_PER_RUN:0}
+    max-seconds-per-run: ${AGENT_BUDGET_MAX_SECONDS_PER_RUN:0}
+  # 【P5-13】连续重复调用/失败与无推进轮次的安全停止阈值，0 表示关闭对应检测
+  loop:
+    no-progress:
+      max-repeats: ${AGENT_LOOP_NO_PROGRESS_MAX_REPEATS:3}
+      max-stagnant-rounds: ${AGENT_LOOP_NO_PROGRESS_MAX_STAGNANT_ROUNDS:4}
+  # 【P5-08】单轮内连续只读工具的并发上限；写/命令仍串行并逐条审批。
+  # 上限由 Runtime 用例的实际批规模（2～3）与 fixture 基准的 p95 收益确定，不按经验随意放大。
+  parallel:
+    readonly-max-concurrency: ${AGENT_PARALLEL_READONLY_MAX_CONCURRENCY:3}
+  # 【P5-05】变更文件诊断：默认进程内 javac；provider=lsp 时走外部 language server，
+  # 未配置 lsp.command 或启动失败会自动降级，不阻塞工具调用
+  diagnostics:
+    enabled: ${AGENT_DIAGNOSTICS_ENABLED:true}
+    provider: ${AGENT_DIAGNOSTICS_PROVIDER:javac}   # javac / lsp / none
+    max-items: ${AGENT_DIAGNOSTICS_MAX_ITEMS:20}
+    max-chars: ${AGENT_DIAGNOSTICS_MAX_CHARS:8192}
+    timeout-ms: ${AGENT_DIAGNOSTICS_TIMEOUT_MS:20000}
+    max-files: ${AGENT_DIAGNOSTICS_MAX_FILES:5}
+    lsp:
+      command: ${AGENT_DIAGNOSTICS_LSP_COMMAND:}
+      args: ${AGENT_DIAGNOSTICS_LSP_ARGS:}
+      language-id: ${AGENT_DIAGNOSTICS_LSP_LANGUAGE_ID:java}
+  # 【P5-06】项目验证回路：命令来自工作区 .lunargold/verify.json，
+  # 这里只控制全局开关、配置路径、重试上限与输出/超时兜底
+  verify:
+    enabled: ${AGENT_VERIFY_ENABLED:true}
+    config-path: ${AGENT_VERIFY_CONFIG_PATH:.lunargold/verify.json}
+    max-retries: ${AGENT_VERIFY_MAX_RETRIES:2}
+    max-output-chars: ${AGENT_VERIFY_MAX_OUTPUT_CHARS:4000}
+    default-timeout-seconds: ${AGENT_VERIFY_DEFAULT_TIMEOUT_SECONDS:120}
+  # 【P5-04】repo map：工作区目录 + 关键符号摘要，替代原来的单层目录树；
+  # 字符预算耗尽时截断并提示模型改用 list_dir / search_files
+  repo-map:
+    enabled: ${AGENT_REPO_MAP_ENABLED:true}
+    max-depth: ${AGENT_REPO_MAP_MAX_DEPTH:8}
+    max-files: ${AGENT_REPO_MAP_MAX_FILES:500}
+    max-chars: ${AGENT_REPO_MAP_MAX_CHARS:6000}
+    max-symbols-per-file: ${AGENT_REPO_MAP_MAX_SYMBOLS_PER_FILE:6}
+  # 【P5-01】提示词按场景选择版本：改这里即可切换/回滚，重启生效；
+  # 运行中可 POST /api/admin/prompts/reload 校验并热加载（仅本机）
+  prompt:
+    scenario:
+      agent:
+        version: ${AGENT_PROMPT_AGENT_VERSION:v1}
+      coding:
+        version: ${AGENT_PROMPT_CODING_VERSION:v1}
+      tool-mcp:
+        version: ${AGENT_PROMPT_TOOL_MCP_VERSION:v1}
+      tool-terminal:
+        version: ${AGENT_PROMPT_TOOL_TERMINAL_VERSION:v1}
   # 【第五十一批】MCP 接入与工具注册策略
   mcp:
     client:
@@ -159,9 +229,14 @@ embedding:
 # 知识库检索门槛：min-score 为单片段相关度下限，gate-score 为"本轮是否使用资料"的最低分。
 # bge-m3 对中文无关文本的相似度普遍在 0.3~0.45、相关文本多在 0.55 以上，故抬到 0.5/0.55，
 # 避免问"现在几点"这类与资料无关的问题时也标注出处。语料差异大时按日志「RAG 命中片段相关度」微调。
+# P5-07 混合检索：向量 + pg_trgm 词法召回，RRF 融合；词法分数独立设门槛，避免直接与余弦相似度比较。
 rag:
   min-score: ${RAG_MIN_SCORE:0.5}
   gate-score: ${RAG_GATE_SCORE:0.55}
+  hybrid-enabled: ${RAG_HYBRID_ENABLED:true}
+  lexical-min-score: ${RAG_LEXICAL_MIN_SCORE:0.3}
+  lexical-gate-score: ${RAG_LEXICAL_GATE_SCORE:0.35}
+  rrf-k: ${RAG_RRF_K:60}
 
 # 长上下文滚动摘要：历史超阈值时把较早的对话压成摘要持久化，后续注入 system prompt
 context:
@@ -208,6 +283,14 @@ workspace:
     maven-home: "${WORKSPACE_MAVEN_HOME:D:/IDEA/IntelliJ IDEA 2024.1/plugins/maven/lib/maven3}"
     # 额外参与程序查找的目录，多个用分号分隔，如 "D:/tools/bin;D:/other/bin"
     extra-path: ${WORKSPACE_COMMAND_EXTRA_PATH:}
+    # P4-01：OS 级沙箱（仅 Windows 生效）。命令进程挂进 Job Object，
+    # 超时/取消/结束关闭句柄时由内核回收整棵进程树（含脱离父进程的后台 daemon）
+    sandbox:
+      enabled: ${WORKSPACE_COMMAND_SANDBOX_ENABLED:true}
+      # 单进程提交内存上限（MB），0 = 不限
+      memory-limit-mb: ${WORKSPACE_COMMAND_SANDBOX_MEMORY_MB:4096}
+      # Job 内并发进程数上限，0 = 不限；npm/mvn 会派生子进程，别设太小
+      max-processes: ${WORKSPACE_COMMAND_SANDBOX_MAX_PROCESSES:64}
 
 app:
   version: ${APP_VERSION:1.0.0}

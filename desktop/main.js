@@ -1,10 +1,8 @@
 'use strict';
 
 /**
- * Lunar Gold 桌面壳（P3-01 骨架）。
- *
- * 职责：单实例 → 拉起侧车（与日志同目录）→ 就绪后加载本地 UI → 退出时终止整棵进程树。
- * 安装包、签名、自动更新属于 P3-04，这里只保证「同一个 jar 能像桌面应用一样启动」。
+ * Lunar Gold 桌面壳：单实例 → 拉起侧车 → 就绪后加载本地 UI → 退出时终止整棵进程树。
+ * P3-06：主进程、渲染进程、Java 与内嵌 PostgreSQL 故障统一进入本地诊断卡片。
  */
 
 const { app, BrowserWindow, dialog, shell } = require('electron');
@@ -12,6 +10,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { startSidecar, stopSidecar } = require('./sidecar');
+const diagnostics = require('./diagnostics');
 const updater = require('./updater');
 
 const APP_TITLE = 'Lunar Gold';
@@ -20,16 +19,18 @@ const HEALTH_TIMEOUT_MS = 120000;
 
 let mainWindow = null;
 let sidecar = null;
-// 主动退出期间不触发“崩溃”对话框
+// 主动退出期间不触发“崩溃”提示
 let quitting = false;
-let runtime = null; // { jarPath, env, logPath }，供崩溃后重启复用
+let sidecarRestarting = false;
+let starting = false;
+let runtime = null; // { jarPath, dataDir, env, logPath }，供崩溃后重启复用
 
 if (!app.requestSingleInstanceLock()) {
   // 已有实例：直接退出，由已有实例把窗口拉到前台
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
   });
@@ -42,6 +43,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     stopSidecar(sidecar);
+    diagnostics.markCleanExit();
   });
   app.on('will-quit', () => stopSidecar(sidecar));
   process.on('exit', () => stopSidecar(sidecar));
@@ -50,6 +52,8 @@ if (!app.requestSingleInstanceLock()) {
     stopSidecar(sidecar);
     app.quit();
   });
+  process.on('uncaughtException', (err) => handleMainFailure('uncaughtException', err));
+  process.on('unhandledRejection', (err) => handleMainFailure('unhandledRejection', err));
 }
 
 async function bootstrap() {
@@ -57,7 +61,7 @@ async function bootstrap() {
   fs.mkdirSync(dataDir, { recursive: true });
 
   runtime = {
-    jarPath: resolveJar(),
+    jarPath: null,
     dataDir,
     env: {
       ...process.env,
@@ -66,14 +70,22 @@ async function bootstrap() {
     logPath: path.join(dataDir, 'sidecar.log')
   };
 
-  mainWindow = createWindow();
+  diagnostics.init({
+    electron: { app, dialog },
+    dataDir,
+    getWindow: () => mainWindow
+  });
+  const previousSession = diagnostics.beginSession();
+  runtime.jarPath = resolveJar();
+
+  ensureWindow();
   await mainWindow.loadURL(loadingPage());
 
   updater.initUpdater({
     getWindow: () => mainWindow,
     dataDir: runtime.dataDir,
     logPath: runtime.logPath,
-    // 备份数据前停侧车：置位 sidecarRestarting 避免 onSidecarExit 误弹崩溃对话框
+    // 备份数据前停侧车：置位 sidecarRestarting 避免 onSidecarExit 误弹崩溃卡片
     stopSidecar: () => {
       sidecarRestarting = true;
       stopSidecar(sidecar);
@@ -82,16 +94,40 @@ async function bootstrap() {
     restartSidecar: async () => {
       try {
         await launchSidecar();
-        await mainWindow.loadURL(sidecar.url);
+        await mainWindow.loadURL(mainWindowUrl());
       } finally {
         sidecarRestarting = false;
       }
     }
   });
 
+  if (previousSession) {
+    diagnostics.report(
+      {
+        source: 'electron-main',
+        code: 'ELECTRON_MAIN_PREVIOUS_EXIT',
+        title: 'Lunar Gold 上次没有正常退出',
+        summary: '检测到上次主进程异常结束。主进程自身崩溃时无法当场弹出卡片，因此保留现场并在本次启动补充提示。',
+        details: previousSession.corrupt
+          ? '上次会话标记损坏，未能读取更多进程信息。'
+          : `上次启动时间：${previousSession.startedAt || '未知'}\n上次进程 PID：${previousSession.pid || '未知'}\n上次版本：${previousSession.appVersion || '未知'}`
+      },
+      { retryLabel: '继续启动', onRetry: startLocalServices }
+    );
+    return;
+  }
+
+  await startLocalServices();
+}
+
+async function startLocalServices() {
+  if (starting) return;
+  starting = true;
   try {
+    ensureWindow();
+    await mainWindow.loadURL(loadingPage());
     await launchSidecar();
-    await mainWindow.loadURL(sidecar.url);
+    await mainWindow.loadURL(mainWindowUrl());
     // 升级后的首次成功启动：确认进程稳定存活几秒再清标记，
     // 避免启动后秒崩（如新版本初始化异常）却误判为升级成功
     if (updater.pendingUpgrade()) {
@@ -104,17 +140,20 @@ async function bootstrap() {
     }
     updater.scheduleUpdateCheck();
   } catch (err) {
-    // 升级后启动失败才提供回滚入口；普通启动失败保持原有提示
+    // 升级后启动失败才提供回滚入口；普通启动失败进入诊断卡片
     const marker = updater.pendingUpgrade();
     if (marker) {
       await updater.rollbackAfterFailedUpgrade(marker);
       return;
     }
     fail('本地服务没有启动成功', err, runtime.logPath);
+  } finally {
+    starting = false;
   }
 }
 
 async function launchSidecar() {
+  if (!runtime.jarPath) runtime.jarPath = resolveJar();
   sidecar = await startSidecar({
     javaCmd: resolveJava(),
     jarPath: runtime.jarPath,
@@ -125,43 +164,77 @@ async function launchSidecar() {
   sidecar.child.once('exit', onSidecarExit);
 }
 
-/** 就绪后进程意外退出：提示重启或退出，不静默留着一个死 UI */
+/** 就绪后进程意外退出：保留日志并提供重启、导出与退出，不静默留下死 UI。 */
 function onSidecarExit(code, signal) {
   if (quitting || sidecarRestarting) return;
+  const logTail = diagnostics.readLogExcerpt(runtime.logPath);
+  const details = `侧车退出码：${code}\n退出信号：${signal}\n${logTail}`;
+  const errorCode = diagnostics.classifyJavaError(details);
   console.error(`[sidecar] 意外退出 code=${code} signal=${signal}`);
-  const choice = dialog.showMessageBoxSync(mainWindow, {
-    type: 'error',
-    title: APP_TITLE,
-    message: '本地服务意外退出',
-    detail: `code=${code} signal=${signal}\n日志：${runtime.logPath}`,
-    buttons: ['重启本地服务', '退出'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  });
-  if (choice === 0) {
-    restartSidecar();
-  } else {
-    app.quit();
-  }
+  stopSidecar(sidecar);
+  diagnostics.report(
+    {
+      source: errorCode === 'PG_INIT_FAILED' ? 'postgresql' : 'java',
+      code: errorCode === 'JAVA_START_FAILED' ? 'JAVA_EXITED' : errorCode,
+      title: errorCode === 'PG_INIT_FAILED' ? '内嵌数据库意外停止' : '本地服务意外退出',
+      summary: `Java 侧车进程已退出（code=${code}，signal=${signal}）。可以重启本地服务，或先导出诊断包。`,
+      details
+    },
+    { retryLabel: '重启本地服务', onRetry: restartSidecar }
+  );
 }
 
-let sidecarRestarting = false;
 async function restartSidecar() {
+  if (sidecarRestarting) return;
   sidecarRestarting = true;
   try {
+    ensureWindow();
     await mainWindow.loadURL(loadingPage());
     // 崩溃后内嵌 PostgreSQL 的 postmaster 是游离进程，先按 postmaster.pid 补杀，
     // 否则重启会被判定「数据库已被其他进程占用」
     stopSidecar(sidecar);
     await new Promise((resolve) => setTimeout(resolve, 2000));
     await launchSidecar();
-    await mainWindow.loadURL(sidecar.url);
+    await mainWindow.loadURL(mainWindowUrl());
   } catch (err) {
     fail('本地服务重启失败', err, runtime.logPath);
   } finally {
     sidecarRestarting = false;
   }
+}
+
+async function recoverRenderer() {
+  ensureWindow();
+  if (sidecar && sidecar.child && sidecar.child.exitCode === null) {
+    try {
+      await mainWindow.loadURL(mainWindowUrl());
+    } catch (err) {
+      showRendererFailure('ELECTRON_RENDERER_LOAD_FAILED', '界面重新加载失败', err);
+    }
+  } else {
+    await restartSidecar();
+  }
+}
+
+function showRendererFailure(code, title, err) {
+  if (quitting || sidecarRestarting || !mainWindow || mainWindow.isDestroyed()) return;
+  if (diagnostics.isShowing(mainWindow.webContents)) return;
+  const details = err && err.stack ? err.stack : err && err.message ? err.message : String(err || '无更多详情');
+  diagnostics.report(
+    {
+      source: 'electron-renderer',
+      code,
+      title,
+      summary: '应用界面出现异常，但本地服务可能仍在运行。可以重新加载界面，或导出诊断包后继续排查。',
+      details
+    },
+    { retryLabel: '重新加载界面', onRetry: recoverRenderer }
+  );
+}
+
+function ensureWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) return;
+  mainWindow = createWindow();
 }
 
 function createWindow() {
@@ -191,7 +264,32 @@ function createWindow() {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    showRendererFailure(
+      'ELECTRON_RENDERER_CRASH',
+      '应用界面意外停止',
+      `渲染进程退出原因：${details.reason}\n退出码：${details.exitCode}`
+    );
+  });
+  win.webContents.on('unresponsive', () => {
+    showRendererFailure('ELECTRON_RENDERER_UNRESPONSIVE', '应用界面没有响应', '渲染进程持续无响应。');
+  });
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // -3 是主动切换页面产生的 ERR_ABORTED，不是故障
+    if (!isMainFrame || errorCode === -3 || quitting || sidecarRestarting) return;
+    showRendererFailure(
+      'ELECTRON_RENDERER_LOAD_FAILED',
+      '应用界面加载失败',
+      `Chromium 错误码：${errorCode}\n说明：${errorDescription}\n地址：${validatedURL}`
+    );
+  });
   return win;
+}
+
+function mainWindowUrl() {
+  const target = new URL(sidecar.url);
+  target.searchParams.set('appVersion', app.getVersion());
+  return target.toString();
 }
 
 function loadingPage() {
@@ -257,10 +355,58 @@ function readOrCreateAesKey(dataDir) {
   return key;
 }
 
-function fail(title, err, logPath) {
-  const detail = err && err.message ? err.message : String(err);
-  console.error(`[${title}] ${detail}`);
-  dialog.showErrorBox(title, logPath ? `${detail}\n\n日志：${logPath}` : detail);
-  stopSidecar(sidecar);
+function handleMainFailure(kind, err) {
+  console.error(`[electron-main:${kind}]`, err);
+  if (!diagnostics.isReady()) {
+    dialog.showErrorBox('Lunar Gold 主进程异常', err && err.message ? err.message : String(err));
+    app.quit();
+    return;
+  }
+  ensureWindow();
+  diagnostics.report(
+    {
+      source: 'electron-main',
+      code: 'ELECTRON_MAIN_EXCEPTION',
+      title: 'Lunar Gold 主进程出现异常',
+      summary: `捕获到 ${kind}。建议保存诊断包后重启应用，避免在异常状态下继续操作。`,
+      details: err && err.stack ? err.stack : String(err)
+    },
+    { retryLabel: '重启应用', onRetry: relaunchApp }
+  );
+}
+
+function relaunchApp() {
+  app.relaunch();
   app.quit();
+}
+
+function fail(title, err, logPath) {
+  const detail = err && err.stack ? err.stack : err && err.message ? err.message : String(err);
+  console.error(`[${title}] ${detail}`);
+  if (!diagnostics.isReady()) {
+    dialog.showErrorBox(title, logPath ? `${detail}\n\n日志：${logPath}` : detail);
+    stopSidecar(sidecar);
+    app.quit();
+    return;
+  }
+  ensureWindow();
+  stopSidecar(sidecar);
+  // Java 根因常在数百行 Spring 堆栈的底部，不能只拿 withLogTail 的最后 6 行分类。
+  const logTail = logPath
+    ? diagnostics.readLogExcerpt(logPath, { maxBytes: 512 * 1024, maxLines: 200, maxChars: 200000 })
+    : '';
+  const fullDetail = logTail ? `${detail}\n---- sidecar.log 分类与诊断末尾 ----\n${logTail}` : detail;
+  const code = logPath ? diagnostics.classifyJavaError(fullDetail) : 'ELECTRON_MAIN_START_FAILED';
+  const friendlyTitle =
+    code === 'PG_INIT_FAILED' ? '内嵌 PostgreSQL 初始化失败' : code === 'PORT_UNAVAILABLE' ? '本地服务端口不可用' : title;
+  diagnostics.report(
+    {
+      source: code === 'PG_INIT_FAILED' ? 'postgresql' : logPath ? 'java' : 'electron-main',
+      code,
+      title: friendlyTitle,
+      summary: `${title}。${err && err.message ? err.message.split('\n')[0] : String(err)}`,
+      details: fullDetail
+    },
+    { retryLabel: '重试启动', onRetry: startLocalServices }
+  );
 }

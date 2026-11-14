@@ -54,6 +54,14 @@ public interface BaseTool {
     }
 
     /**
+     * P5-08：是否只读。只读工具不修改工作区、不触发审批，ReAct 单轮内可以并发执行。
+     * 默认 false：MCP 工具和新增工具必须显式声明，避免把有副作用的工具误并发。
+     */
+    default boolean readOnly() {
+        return false;
+    }
+
+    /**
      * 第五十九批：是否是"备选"工具——给 dispatch 层 fallback 用的，
      * 模型 prompt 里不展示（避免看到两套等价工具纠结）。
      * McpToolBridge 注册的 MCP 工具全部标记为 fallback=true，

@@ -3,6 +3,7 @@ import * as authApi from '../api/auth';
 import * as desktopApi from '../api/desktop';
 import { unwrap } from '../api/http';
 import { encryptPassword } from '../utils/crypto';
+import { setExperienceDiagnosticsAccount } from '../utils/experienceDiagnostics';
 
 const TOKEN_KEY = 'token';
 const USERNAME_KEY = 'username';
@@ -20,6 +21,7 @@ export const useAuthStore = defineStore('auth', {
       const encrypted = await encryptPassword(password);
       const resp = await authApi.login({ username, encryptedPassword: encrypted });
       const data = unwrap(resp);
+      setExperienceDiagnosticsAccount(username);
       this.token = data.token;
       this.username = username;
       localStorage.setItem(TOKEN_KEY, data.token);
@@ -42,6 +44,7 @@ export const useAuthStore = defineStore('auth', {
       try {
         const token = await desktopApi.getDesktopToken();
         if (!token) return false;
+        setExperienceDiagnosticsAccount('local');
         this.token = token;
         this.username = 'local';
         localStorage.setItem(TOKEN_KEY, token);

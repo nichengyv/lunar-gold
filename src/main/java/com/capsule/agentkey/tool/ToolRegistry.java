@@ -98,6 +98,16 @@ public class ToolRegistry {
     }
     public Collection<BaseTool> getAllTools() { return Collections.unmodifiableCollection(tools.values()); }
 
+    /**
+     * P5-08：是否为可并发的只读工具。
+     * MCP 与 fallback 工具一律按串行处理：外部 server 的副作用不可判定，
+     * 且 fallback 链自身会在主工具失败后串行重试。
+     */
+    public boolean isReadOnly(String toolName) {
+        BaseTool tool = tools.get(toolName);
+        return tool != null && tool.readOnly() && !tool.isFallback() && !"mcp".equals(tool.source());
+    }
+
     private static final Set<String> WRITE_TOOLS = Set.of("write_file", "edit_file", "delete_file");
     private static final Set<String> EXECUTE_TOOLS = Set.of("run_command");
 
@@ -234,12 +244,18 @@ public class ToolRegistry {
 
     /** 每次新会话/新 execute() 开始时 reset。避免跨会话污染。 */
     public void resetSessionStats() {
-        sessionToolStats.get().clear();
+        sessionStats().clear();
+    }
+
+    /** P5-08：有工作区上下文时用上下文内的共享统计，保证并行子线程与主线程累计到同一份数据 */
+    private Map<String, int[]> sessionStats() {
+        WorkspaceContext context = WorkspaceContext.get();
+        return context == null ? sessionToolStats.get() : context.toolStats();
     }
 
     /** dispatch 成功/失败分支调用。int[0]=calls, [1]=success, [2]=fail */
     private void recordSessionStat(String toolName, boolean success) {
-        Map<String, int[]> stats = sessionToolStats.get();
+        Map<String, int[]> stats = sessionStats();
         int[] counts = stats.computeIfAbsent(toolName, k -> new int[3]);
         counts[0]++;
         if (success) counts[1]++;
@@ -307,7 +323,7 @@ public class ToolRegistry {
 
         // 预计算会话级成功率
         Map<String, Double> toolSuccessRate = new HashMap<>();
-        Map<String, int[]> stats = sessionToolStats.get();
+        Map<String, int[]> stats = sessionStats();
         for (BaseTool t : candidates) {
             int[] c = stats.get(t.getName());
             if (c != null && c[0] > 0) {

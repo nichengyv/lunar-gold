@@ -20,6 +20,7 @@
         </button>
         <button class="wb-tab" :class="{ active: chat.dockTab === 'trace' }" @click="select('trace')">
           追踪
+          <span v-if="pendingApprovalCount" class="wb-tab-count wb-tab-warn">{{ pendingApprovalCount }}</span>
         </button>
         <button class="wb-tab" :class="{ active: chat.dockTab === 'metrics' }" @click="select('metrics')">
           监控
@@ -151,12 +152,65 @@
           <Icon name="loader" :size="22" class="wb-spin" />
           <p>加载中…</p>
         </div>
-        <div v-else-if="!traceStats" class="wb-empty">
+        <div v-else-if="!traceStats && !pendingApprovals.length && !chat.approvalHistory.length" class="wb-empty">
           <Icon name="alert-circle" :size="22" />
           <p>加载失败</p>
           <p class="wb-empty-sub">点上面的「追踪」tab 重试</p>
         </div>
         <template v-else>
+          <!-- P5-12-4：待审批步骤单独高亮，点一下直接定位聊天区的审批卡片 -->
+          <div v-if="pendingApprovals.length" class="trace-approvals">
+            <div class="trace-section-title">
+              待审批 {{ pendingApprovals.length }} 项
+              <span class="trace-approvals-hint">处理后 Agent 才会继续</span>
+            </div>
+            <button
+              v-for="a in pendingApprovals"
+              :key="a.approvalId"
+              class="trace-approval-row"
+              @click="chat.requestApprovalFocus()"
+            >
+              <Icon name="shield" :size="12" class="trace-approval-icon" />
+              <span class="trace-approval-tool">{{ a.tool }}</span>
+              <span v-if="a.preview?.path" class="trace-approval-path" :title="a.preview.path">
+                {{ baseName(a.preview.path) }}
+              </span>
+              <span v-if="a.preview?.kind === 'command'" class="trace-approval-path">执行命令</span>
+              <span class="trace-approval-go">去处理 →</span>
+            </button>
+          </div>
+
+          <!-- P5-10-2：本会话已处理审批历史，刷新或重开页面后仍可追溯 -->
+          <div
+            v-if="chat.approvalHistory.length || chat.approvalHistoryLoading"
+            class="trace-approvals trace-approval-history"
+          >
+            <div class="trace-section-title">
+              审批历史
+              <span class="trace-approvals-hint">本会话已处理</span>
+              <span v-if="chat.approvalHistoryLoading" class="wb-spin trace-history-loading">
+                <Icon name="loader" :size="11" />
+              </span>
+            </div>
+            <div v-if="!chat.approvalHistory.length" class="wb-empty-inline">加载中…</div>
+            <div v-for="h in chat.approvalHistory" :key="h.approvalId" class="trace-history-row">
+              <Icon
+                :name="h.state === 'APPROVED' ? 'check-circle' : 'x-circle'"
+                :size="12"
+                :class="h.state === 'APPROVED' ? 'his-ok' : 'his-no'"
+              />
+              <span class="trace-history-tool" :title="h.tool">{{ h.tool }}</span>
+              <span class="trace-history-state" :class="h.state === 'APPROVED' ? 'ok' : 'no'">
+                {{ h.state === 'APPROVED' ? '已批准' : '已拒绝' }}
+              </span>
+              <span class="trace-history-source">{{ approvalSourceLabel(h.decisionSource) }}</span>
+              <span v-if="h.rememberSession" class="trace-history-remember">本会话总是允许</span>
+              <span class="trace-history-time">{{ fmtTime(h.decisionTime || h.createTime) }}</span>
+            </div>
+          </div>
+
+          <!-- 无统计（会话还没跑完一轮）时仍展示上面的待审批区 -->
+          <template v-if="traceStats">
           <!-- Overview 统计卡片 -->
           <div class="trace-overview-wrapper">
             <button class="trace-export-btn" :disabled="!chat.currentSessionId" @click="exportSessionMd" title="导出为 Markdown">
@@ -187,6 +241,11 @@
             <div class="trace-card">
               <div class="trace-card-val">{{ fmtMs(traceStats.overview.totalDurationMs) }}</div>
               <div class="trace-card-label">会话耗时</div>
+            </div>
+            <div class="trace-card" v-if="traceStats.usage && traceStats.usage.totalTokens > 0"
+                 :title="`输入 ${traceStats.usage.promptTokens} / 输出 ${traceStats.usage.completionTokens}`">
+              <div class="trace-card-val">{{ fmtTokens(traceStats.usage.totalTokens) }}</div>
+              <div class="trace-card-label">Token</div>
             </div>
             <div class="trace-card trace-card-wide">
               <div class="trace-card-meta">
@@ -268,14 +327,43 @@
           <div class="trace-section">
             <div class="trace-section-title">工具时间线</div>
             <div v-if="!traceStats.timeline.length" class="wb-empty-inline">（本会话无工具调用）</div>
-            <div v-for="(t, i) in traceStats.timeline" :key="i" class="trace-tool-row">
-              <span class="trace-tool-source" :class="t.source === 'mcp' ? 'src-mcp' : 'src-builtin'">
-                {{ t.source === 'mcp' ? 'MCP' : '内置' }}
-              </span>
-              <span class="trace-tool-name" :title="t.argsSummary">{{ t.name }}</span>
-              <span class="trace-tool-status" :class="t.status">{{ t.status === 'success' ? '✓' : t.status === 'error' ? '✗' : '…' }}</span>
-              <span class="trace-tool-cost">{{ fmtMs(t.costMs) }}</span>
-            </div>
+            <template v-for="(t, i) in traceStats.timeline" :key="i">
+              <!-- P5-12-3：行内直接给「改了哪个文件 / 增删多少行」，待审批的调用单独高亮 -->
+              <div
+                class="trace-tool-row"
+                :class="{
+                  'is-pending': timelinePending(t),
+                  'is-clickable': !!t.path,
+                  expanded: expandedTrace === i
+                }"
+                @click="onTraceRowClick(i, t)"
+              >
+                <span class="trace-tool-source" :class="t.source === 'mcp' ? 'src-mcp' : 'src-builtin'">
+                  {{ t.source === 'mcp' ? 'MCP' : '内置' }}
+                </span>
+                <span class="trace-tool-name" :title="t.argsSummary">{{ t.name }}</span>
+                <span v-if="t.path" class="trace-tool-path" :title="t.path">{{ baseName(t.path) }}</span>
+                <span v-if="timelinePending(t)" class="trace-tool-pending">待审批</span>
+                <span v-if="(t.additions ?? 0) || (t.deletions ?? 0)" class="trace-tool-stat">
+                  <span class="wb-add">+{{ t.additions ?? 0 }}</span>
+                  <span class="wb-del">−{{ t.deletions ?? 0 }}</span>
+                </span>
+                <span class="trace-tool-status" :class="t.status">{{ t.status === 'success' ? '✓' : t.status === 'error' ? '✗' : '…' }}</span>
+                <span class="trace-tool-cost">{{ fmtMs(t.costMs) }}</span>
+              </div>
+              <!-- 点轨迹行展开该文件的 diff（取自本轮消息里的变更） -->
+              <div v-if="expandedTrace === i" class="trace-diff-preview trace-row-diff">
+                <div class="trace-diff-header">
+                  <Icon name="file-text" :size="10" />
+                  {{ t.path }}
+                  <span class="trace-diff-source">（{{ traceRowDiff?.action === 'create' ? '新建' : '修改' }}）</span>
+                  <span class="trace-diff-close" @click.stop="closeTraceDiff" title="关闭">✕</span>
+                </div>
+                <pre v-if="traceRowDiff?.diff" class="trace-diff-code">{{ traceRowDiff.diff }}</pre>
+                <div v-else class="trace-diff-empty">本轮轨迹未保存该文件的 diff</div>
+                <button class="trace-diff-open" @click.stop="chat.openFile(t.path!)">在编辑器中打开 →</button>
+              </div>
+            </template>
           </div>
 
           <!-- 工具按名称聚合 -->
@@ -326,6 +414,7 @@
               </div>
             </div>
           </div>
+          </template>
         </template>
       </template>
 
@@ -444,7 +533,7 @@ import * as agentApi from '../api/agent';
 import * as mcpApi from '../api/mcp';
 import type { McpStatusResponse } from '../api/mcp';
 import type { FileChange, SessionStats } from '../types/api';
-import type { PlanSnapshot, PlanStepStatus } from '../types/chat';
+import type { ApprovalHistoryItem, PlanSnapshot, PlanStepStatus } from '../types/chat';
 import Icon from './Icon.vue';
 import FileEditorPane from './FileEditorPane.vue';
 
@@ -487,6 +576,60 @@ const expandedFileDiff = computed(() => {
 
 function toggleFileDiff(path: string) {
   expandedFile.value = expandedFile.value === path ? null : path;
+}
+
+// ——— P5-12-3/4：轨迹行内联 diff 与待审批联动 ———
+/** 当前会话未处理的审批：轨迹里高亮对应步骤，也能直接跳去处理 */
+const pendingApprovals = computed(() =>
+  chat.pendingApprovals.filter((a) => a.sessionId === chat.currentSessionId && !a.resolved)
+);
+const pendingApprovalCount = computed(() => pendingApprovals.value.length);
+
+/** P5-10-2：审批来源标签；旧记录没有来源时不猜成本人 */
+function approvalSourceLabel(source: ApprovalHistoryItem['decisionSource']): string {
+  switch (source) {
+    case 'USER': return '本人';
+    case 'BATCH': return '本人 · 批量';
+    case 'TIMEOUT': return '超时自动拒绝';
+    case 'SESSION_STOP': return '会话停止';
+    case 'SYSTEM': return '系统中止';
+    default: return '来源未知';
+  }
+}
+
+/** 该轨迹步骤是否在等待审批（工具同名，且路径不冲突） */
+function timelinePending(t: SessionStats['timeline'][number]): boolean {
+  return pendingApprovals.value.some((a) => {
+    if (a.tool !== t.name) return false;
+    const p = a.preview?.path;
+    return !p || !t.path || p === t.path;
+  });
+}
+
+/** 点开的轨迹行下标 */
+const expandedTrace = ref<number | null>(null);
+/** 行内 diff：从本轮消息里找该文件最后一次改动 */
+const traceRowDiff = computed(() => {
+  const idx = expandedTrace.value;
+  if (idx == null || !traceStats.value) return null;
+  const path = traceStats.value.timeline[idx]?.path;
+  if (!path) return null;
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const m = chat.messages[i];
+    if (m.role !== 'assistant') continue;
+    const change = (m.changes || []).find((c) => c.path === path);
+    if (change?.diff) return change;
+  }
+  return null;
+});
+
+function onTraceRowClick(i: number, t: SessionStats['timeline'][number]) {
+  if (timelinePending(t)) chat.requestApprovalFocus();
+  if (t.path) expandedTrace.value = expandedTrace.value === i ? null : i;
+}
+
+function closeTraceDiff() {
+  expandedTrace.value = null;
 }
 
 // ——— 第五十五批：MCP Server 健康状态（全局，与会话无关） ———
@@ -591,6 +734,7 @@ watch(
     if (sid !== traceLoadedSessionId) {
       traceLoadedSessionId = null;
       traceStats.value = null;
+      expandedTrace.value = null;
     }
     if (tab === 'trace') {
       if (sid != null) fetchTrace();
@@ -603,12 +747,39 @@ watch(
   { immediate: true }
 );
 
+// 每轮结束后 trace 才落库：清掉缓存，停在追踪面板时自动重拉，避免看到上一轮的旧统计
+watch(
+  () => chat.isProcessing,
+  (busy) => {
+    if (busy) return;
+    traceLoadedSessionId = null;
+    if (chat.dockTab === 'trace') fetchTrace();
+  }
+);
+
+// P5-10-2：打开追踪页、切会话或审批状态变化时刷新会话审批历史
+watch(
+  () => [chat.dockTab, chat.currentSessionId, chat.approvalRevision] as const,
+  ([tab, sid]) => {
+    if (tab === 'trace' && sid != null) void chat.loadApprovalHistory(sid);
+  },
+  { immediate: true }
+);
+
 /** 毫秒格式化：<1s 显示 ms，>=1s 显示秒 */
 function fmtMs(ms: number | undefined): string {
   if (!ms || ms <= 0) return '0ms';
   if (ms < 1000) return ms + 'ms';
   if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
   return Math.floor(ms / 60000) + 'm' + Math.floor((ms % 60000) / 1000) + 's';
+}
+
+/** P4-07：token 数量按千位缩写，避免卡片被长数字撑开 */
+function fmtTokens(n: number | undefined): string {
+  if (!n || n <= 0) return '0';
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return (n / 1000).toFixed(1) + 'k';
+  return (n / 1_000_000).toFixed(2) + 'M';
 }
 
 /** 推理档位 → 中文短标签 */
@@ -978,6 +1149,11 @@ async function closeTab(path: string) {
     font-size: 10px;
     opacity: .8;
 }
+.wb-tab-count.wb-tab-warn {
+    color: var(--warning);
+    opacity: 1;
+    font-weight: 700;
+}
 .wb-tab-file {
     max-width: 200px;
     padding-right: 4px;
@@ -1285,9 +1461,9 @@ async function closeTab(path: string) {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
-.trace-meta-pill.perm-read_only { background: rgba(245, 108, 108, 0.12); color: #f56c6c; }
-.trace-meta-pill.perm-write { background: rgba(230, 162, 60, 0.12); color: #e6a23c; }
-.trace-meta-pill.perm-execute { background: rgba(103, 194, 58, 0.12); color: #67c23a; }
+.trace-meta-pill.perm-read_only { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.trace-meta-pill.perm-write { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
+.trace-meta-pill.perm-execute { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
 
 .trace-card-val {
   font-size: 16px;
@@ -1324,9 +1500,9 @@ async function closeTab(path: string) {
   min-width: 0;
   transition: width 0.3s ease;
 }
-.trace-breakdown-bar.bar-setup { background: #409eff; }
-.trace-breakdown-bar.bar-tools { background: #e6a23c; }
-.trace-breakdown-bar.bar-answer { background: #67c23a; }
+.trace-breakdown-bar.bar-setup { background: var(--primary); }
+.trace-breakdown-bar.bar-tools { background: var(--warning); }
+.trace-breakdown-bar.bar-answer { background: var(--success); }
 
 .trace-breakdown-labels {
   display: flex;
@@ -1348,9 +1524,9 @@ async function closeTab(path: string) {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.trace-bl-dot.dot-setup { background: #409eff; }
-.trace-bl-dot.dot-tools { background: #e6a23c; }
-.trace-bl-dot.dot-answer { background: #67c23a; }
+.trace-bl-dot.dot-setup { background: var(--primary); }
+.trace-bl-dot.dot-tools { background: var(--warning); }
+.trace-bl-dot.dot-answer { background: var(--success); }
 .trace-bl-name { color: var(--text-secondary); }
 .trace-bl-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
 .trace-bl-pct { color: var(--text-secondary); opacity: .75; }
@@ -1382,6 +1558,101 @@ async function closeTab(path: string) {
   padding: 4px 0;
 }
 
+/* P5-12-4：追踪面板顶部的待审批区 */
+.trace-approvals {
+  margin: 2px 0 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+/* P5-10-2：审批历史用中性面板，和黄色待审批区区分 */
+.trace-approval-history {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.trace-history-loading {
+  margin-left: 6px;
+}
+.trace-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--fs-xs);
+}
+.trace-history-tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-history-state.ok { color: var(--success); }
+.trace-history-state.no { color: var(--danger); }
+.trace-history-source { color: var(--text-secondary); }
+.trace-history-remember {
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.trace-history-time {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.his-ok { color: var(--success); }
+.his-no { color: var(--danger); }
+.trace-approvals-hint {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.trace-approval-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  cursor: pointer;
+}
+.trace-approval-row:hover { background: var(--surface-hover); }
+.trace-approval-icon { color: var(--warning); flex-shrink: 0; }
+.trace-approval-tool {
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-approval-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.trace-approval-go {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-weight: 600;
+}
+
 /* 时间行 */
 .trace-tool-row {
   display: flex;
@@ -1393,6 +1664,42 @@ async function closeTab(path: string) {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .trace-tool-row:hover { background: var(--surface-hover); }
+.trace-tool-row.is-clickable { cursor: pointer; }
+.trace-tool-row.expanded { background: var(--surface-2); }
+.trace-tool-row.is-pending {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+.trace-tool-path {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.trace-tool-pending {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+.trace-tool-stat {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.trace-row-diff { margin: 2px 0 6px 14px; }
+.trace-diff-empty {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 4px 0 6px;
+}
 
 .trace-tool-source {
   flex-shrink: 0;
@@ -1404,11 +1711,11 @@ async function closeTab(path: string) {
 }
 .trace-tool-source.src-builtin {
   background: rgba(64, 158, 255, 0.12);
-  color: #409eff;
+  color: var(--primary);
 }
 .trace-tool-source.src-mcp {
   background: rgba(167, 139, 250, 0.15);
-  color: #a78bfa;
+  color: var(--accent);
 }
 
 .trace-tool-name {
@@ -1541,7 +1848,7 @@ async function closeTab(path: string) {
   padding: 0 3px;
   border-radius: 3px;
 }
-.trace-diff-close:hover { background: var(--danger); color: #fff; }
+.trace-diff-close:hover { background: var(--danger); color: var(--on-primary); }
 .trace-diff-code {
   max-height: 200px;
   overflow: auto;
@@ -1561,7 +1868,7 @@ async function closeTab(path: string) {
   padding: 4px 6px;
   border: none;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 600;
@@ -1635,8 +1942,8 @@ async function closeTab(path: string) {
   border-radius: 3px;
   font-weight: 600;
 }
-.mcp-server-status.mcp-up { background: rgba(103, 194, 58, 0.12); color: #67c23a; }
-.mcp-server-status.mcp-down { background: rgba(245, 108, 108, 0.12); color: #f56c6c; }
+.mcp-server-status.mcp-up { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.mcp-server-status.mcp-down { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .mcp-server-status.mcp-unknown { background: var(--surface-hover); color: var(--text-secondary); }
 .mcp-server-fail {
   flex-shrink: 0;

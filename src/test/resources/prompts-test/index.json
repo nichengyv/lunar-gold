@@ -1,0 +1,28 @@
+{
+  "prompts": [
+    {
+      "id": "agent-system",
+      "version": "v1",
+      "scenario": "agent",
+      "path": "prompts-test/agent-v1.md",
+      "sha256": "8bbae71d1c8c652d6941b737746c46ba1fba17b2a0136343226c4f41bede4bf3",
+      "default": true
+    },
+    {
+      "id": "agent-system",
+      "version": "v2",
+      "scenario": "agent",
+      "path": "prompts-test/agent-v2.md",
+      "sha256": "fa12ebf84e21b93e05140add36d13c7cb31ffc2bf8ef0eef7e2d2d68ffaf9bdc",
+      "default": false
+    },
+    {
+      "id": "tool-mcp",
+      "version": "v1",
+      "scenario": "tool-mcp",
+      "path": "prompts-test/agent-v1.md",
+      "sha256": "8bbae71d1c8c652d6941b737746c46ba1fba17b2a0136343226c4f41bede4bf3",
+      "default": true
+    }
+  ]
+}

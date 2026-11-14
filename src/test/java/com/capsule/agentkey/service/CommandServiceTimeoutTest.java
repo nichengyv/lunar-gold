@@ -1,5 +1,6 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.service.sandbox.ProcessSandbox;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -72,7 +73,7 @@ class CommandServiceTimeoutTest {
 
     private CommandService newService() throws Exception {
         WorkspaceFileService workspace = new WorkspaceFileService();
-        CommandService service = new CommandService(workspace);
+        CommandService service = new CommandService(workspace, ProcessSandbox.NONE);
         set(service, "enabled", true);
         set(service, "allowedRaw", "java,javac");
         // 测试 JVM 一定有 java.home，显式指定避免依赖外部 JAVA_HOME/PATH

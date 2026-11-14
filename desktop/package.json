@@ -31,6 +31,7 @@
       "main.js",
       "sidecar.js",
       "updater.js",
+      "diagnostics.js",
       "package.json"
     ],
     "publish": [
@@ -49,6 +50,10 @@
       {
         "from": "../build/desktop-runtime/jre",
         "to": "jre"
+      },
+      {
+        "from": "../build/legal",
+        "to": "legal"
       }
     ],
     "win": {

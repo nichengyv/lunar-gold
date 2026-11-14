@@ -39,6 +39,12 @@ public class SearchTool implements BaseTool {
         return "web_search";
     }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() {
+        return true;
+    }
+
     @Override
     public String getDescription() {
         // 如果没有配置 Key，返回空描述，LLM 不会调用此工具

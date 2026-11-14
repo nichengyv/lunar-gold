@@ -1,6 +1,6 @@
 package com.capsule.agentkey.service;
 
-import com.capsule.agentkey.client.SpringAiAgentClient;
+import com.capsule.agentkey.client.AgentClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,7 +21,7 @@ import java.util.List;
 @Slf4j
 public class VisionService {
 
-    private final SpringAiAgentClient springAiClient;
+    private final AgentClient springAiClient;
 
     @Value("${deepseek.vision-model:deepseek-flash}")
     private String visionModel;
@@ -29,7 +29,7 @@ public class VisionService {
     @Value("${deepseek.vision-enabled:true}")
     private boolean visionEnabled;
 
-    public VisionService(SpringAiAgentClient springAiClient) {
+    public VisionService(AgentClient springAiClient) {
         this.springAiClient = springAiClient;
     }
 

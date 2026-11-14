@@ -1,71 +1,65 @@
 <template>
   <div class="page active chat-page">
     <div class="chat-layout">
-      <!-- 会话头：当前工作区（模型/推理/权限已移到输入框左下） -->
-      <div class="chat-header">
-        <div class="chat-header-left">
-          <span class="chat-context">
-            <Icon name="folder" :size="14" />
-            <span class="chat-context-name">{{ project.currentProject?.name || '默认工作区' }}</span>
-          </span>
-        </div>
-        <div class="chat-header-right">
-          <button
-            class="chat-tool-btn"
-            :class="{ active: chat.dockOpen && chat.dockTab === 'docs' }"
-            title="查看资料"
-            @click="toggleDock('docs')"
-          >
-            <Icon name="paperclip" :size="16" />
-            <span v-if="docCount" class="chat-tool-count">{{ docCount }}</span>
-          </button>
-          <button
-            v-if="hasLocalWorkspace"
-            class="chat-tool-btn"
-            :class="{ active: chat.dockOpen && chat.dockTab === 'changes' }"
-            title="查看文件变更"
-            @click="toggleDock('changes')"
-          >
-            <Icon name="file-text" :size="16" />
-            <span v-if="changeCount" class="chat-tool-count">{{ changeCount }}</span>
-          </button>
-        </div>
-      </div>
-
       <div ref="chatBodyEl" class="chat-body">
         <div class="chat-main">
           <!-- 缩略导航以消息区为定位基准：固定在消息区右侧，不随输入栏变高而移动 -->
           <div class="messages-zone">
           <div ref="messagesEl" class="messages" @scroll="onScroll">
-            <div v-if="chat.messages.length === 0" class="message assistant welcome">
-              <div class="ai-answer">
-                <div class="md-content">
-                  <p>你好，我是你的智能助手。</p>
-                  <p>我读过你「我的资料」里的内容，可以直接提问；也可以临时上传文件让我分析。</p>
-                </div>
-                <!-- 空态引导：点一下就把问题填进输入框，用户不需要想怎么说 -->
-                <div class="welcome-actions">
-                  <button class="suggest-btn" @click="useSuggestion('帮我总结一下资料里的核心结论')">
-                    帮我总结资料要点
-                  </button>
-                  <button class="suggest-btn" @click="useSuggestion('这份资料主要讲了什么？')">
-                    这份资料讲了什么
-                  </button>
-                  <button class="suggest-btn" @click="fileEl?.click()">
-                    上传文件让我分析
-                  </button>
-                  <router-link class="suggest-btn" to="/knowledge">先去添加资料</router-link>
+            <!-- P5-09：会话切换时先出骨架屏，避免旧会话内容直接跳到新内容 -->
+            <SkeletonMessage v-if="chat.messagesLoading" :rows="3" />
+            <!-- P5-09：历史加载失败时给出可读原因与重试，而不是空白消息区 -->
+            <ErrorState
+              v-else-if="chat.loadError"
+              title="会话加载失败"
+              :message="chat.loadError"
+              code="SESSION_LOAD_FAILED"
+              @retry="chat.reloadCurrentSession()"
+            />
+            <!-- P5-12-1：空态不再用客服式开场白，直接给项目上下文与最近任务 -->
+            <div v-else-if="chat.messages.length === 0" class="chat-empty">
+              <div class="chat-empty-head">
+                <Icon name="folder" :size="15" />
+                <span class="chat-empty-project">{{ project.currentProject?.name || '默认工作区' }}</span>
+                <span v-if="runningCount" class="chat-empty-running">{{ runningCount }} 个任务进行中</span>
+              </div>
+
+              <div v-if="recentTasks.length" class="chat-empty-block">
+                <div class="chat-empty-label">最近任务</div>
+                <button
+                  v-for="t in recentTasks"
+                  :key="t.id"
+                  class="chat-empty-task"
+                  @click="chat.switchSession(t.id)"
+                >
+                  <span class="chat-empty-dot" :class="'is-' + (chat.runningRunMap[t.id] || 'idle')"></span>
+                  <span class="chat-empty-task-title">{{ t.title || '未命名任务' }}</span>
+                  <span class="chat-empty-task-time">{{ formatDateTime(t.updateTime) }}</span>
+                </button>
+              </div>
+
+              <div class="chat-empty-block">
+                <div class="chat-empty-label">从一句话开始</div>
+                <p class="chat-empty-hint">
+                  直接描述你要做的事，例如「修复登录接口的空指针」或「给这个模块补单元测试」。
+                </p>
+                <div class="chat-empty-keys">
+                  <span><kbd>Ctrl</kbd><kbd>K</kbd> 聚焦输入框</span>
+                  <span><kbd>@</kbd> 引用文件与资料</span>
+                  <span><kbd>/</kbd> 命令</span>
                 </div>
               </div>
             </div>
             <!-- data-msg-id 供全文搜索定位：点击侧栏「正文命中」后滚动到具体那一条 -->
-            <ChatMessage
-              v-for="m in chat.messages"
-              :key="m.id"
-              :msg="m"
-              :data-msg-id="m.id"
-              @open-change="openChangeFromMessage"
-            />
+            <template v-else>
+              <ChatMessage
+                v-for="m in chat.messages"
+                :key="m.id"
+                :msg="m"
+                :data-msg-id="m.id"
+                @open-change="openChangeFromMessage"
+              />
+            </template>
           </div>
 
           <!-- 会话缩略导航：右侧每轮一条横线。当前窗口对应那条拉长高亮，悬停其他横线预览该轮问答 -->
@@ -99,8 +93,65 @@
           <!-- 待审查改动：仅桌面端有文件写入，网页端不展示审查流 -->
           <PendingChangesCard v-if="hasLocalWorkspace" />
 
-          <!-- 第六十八批 A2：危险工具审批卡片，批准/拒绝后 Agent 继续或换方案 -->
-          <ApprovalCard v-if="currentApproval && hasApproval" :key="currentApproval.approvalId" :approval="currentApproval" />
+          <!-- 第六十八批 A2 / P5-12-4：危险工具审批卡片常驻输入区上方；多项时按队列展示并给计数 -->
+          <div
+            v-if="hasApproval && activeApprovals.length"
+            ref="approvalZoneEl"
+            class="approval-queue"
+            :class="{ 'is-flashing': approvalFlash }"
+          >
+            <div v-if="activeApprovals.length > 1" class="approval-queue-head">
+              <Icon name="shield" :size="12" />
+              <span>待审批 {{ activeApprovals.length }} 项</span>
+              <button
+                v-if="batchableApprovals.length >= 2"
+                class="approval-batch-btn"
+                title="只批量允许写/编辑文件，命令与删除仍需逐条确认"
+                @click="approveLowRiskBatch"
+              >
+                允许全部低风险（{{ batchableApprovals.length }}）
+              </button>
+              <span class="approval-queue-hint">J/K 切换 · A 允许 / D 拒绝</span>
+            </div>
+            <div class="approval-queue-body">
+              <ApprovalCard
+                v-for="a in activeApprovals"
+                :key="a.approvalId"
+                :approval="a"
+                :data-approval-id="a.approvalId"
+                :shortcut-active="a.approvalId === selectedApprovalId"
+                :selected="a.approvalId === selectedApprovalId"
+                @select="selectApproval(a.approvalId)"
+              />
+            </div>
+          </div>
+
+          <!-- P5-10-3：长任务执行进度：五阶段时间线 + 轮次/token/时间预算 -->
+          <div v-if="showTaskProgress" class="task-progress" :class="{ 'is-warning': budgetWarning }">
+            <div class="tp-head">
+              <span class="tp-label">执行进度</span>
+              <span class="tp-current">
+                第 {{ currentStageIndex }} 步 · {{ currentStage?.label || '理解' }}
+                <span class="tp-current-time">{{ currentStage ? stageTimeText(currentStage) : '00:00' }}</span>
+              </span>
+              <span class="tp-budget">{{ budgetText }}</span>
+            </div>
+            <div class="tp-stages">
+              <span
+                v-for="s in stageTimeline"
+                :key="s.key"
+                class="tp-stage"
+                :class="'is-' + s.status"
+              >
+                <span class="tp-stage-dot"></span>
+                <span class="tp-stage-label">{{ s.label }}</span>
+                <span class="tp-stage-time">{{ stageTimeText(s) }}</span>
+              </span>
+            </div>
+            <div v-if="budgetWarningText" class="tp-warning">
+              <Icon name="alert" :size="12" /> {{ budgetWarningText }}
+            </div>
+          </div>
 
           <!-- 计划条：Agent 处理多步任务时显示，可折叠；点「详情」打开工作台的计划面板 -->
           <div v-if="currentPlan && !planHidden" class="plan-strip" :class="{ collapsed: planCollapsed }">
@@ -129,6 +180,19 @@
                 <span class="plan-strip-text">{{ s.title }}</span>
               </div>
             </div>
+          </div>
+
+          <!-- P5-10：断线续传状态条：只在重连 / 已恢复 / 中断时需要提示 -->
+          <div v-if="streamNotice" class="stream-status" :class="'is-' + chat.streamStatus">
+            <span class="stream-status-dot"></span>
+            <span class="stream-status-text">{{ streamNotice }}</span>
+            <button
+              v-if="chat.streamStatus === 'interrupted'"
+              class="stream-status-btn"
+              @click="chat.reloadCurrentSession()"
+            >
+              重新加载
+            </button>
           </div>
 
           <div class="input-bar">
@@ -217,12 +281,12 @@
               </button>
             </div>
 
-            <!-- 下排：运行参数 pill（真正的左下角） -->
+            <!-- 下排：模型 / 推理档位 / 工作权限，放在输入框下方（与 Trae、DeepSeek 一致） -->
             <div class="input-bar-row-bottom">
               <div class="input-bar-footer">
                 <!-- 模型 -->
                 <el-dropdown class="pill-dropdown" trigger="click" @command="onModelChange">
-                  <span class="chat-pill chat-pill-btn" title="切换对话模型">
+                  <span class="chat-pill chat-pill-btn" :title="`切换对话模型：${chat.model}`">
                     <Icon name="cpu" :size="11" /> {{ chat.model }}
                   </span>
                   <template #dropdown>
@@ -234,7 +298,7 @@
                 </el-dropdown>
                 <!-- 推理档位 -->
                 <el-dropdown class="pill-dropdown" trigger="click" @command="onReasoningChange">
-                  <span class="chat-pill chat-pill-btn" title="调整推理档位">
+                  <span class="chat-pill chat-pill-btn" :title="`调整推理档位：${reasoningLabel}`">
                     <Icon name="sparkles" :size="11" /> {{ reasoningLabel }}
                   </span>
                   <template #dropdown>
@@ -247,7 +311,7 @@
                 </el-dropdown>
                 <!-- 工作权限 -->
                 <el-dropdown class="pill-dropdown" trigger="click" @command="onPermissionChange">
-                  <span class="chat-pill chat-pill-btn" title="调整工作权限">
+                  <span class="chat-pill chat-pill-btn" :title="`调整工作权限：${permissionLabel}`">
                     <Icon name="shield" :size="11" /> {{ permissionLabel }}
                   </span>
                   <template #dropdown>
@@ -280,24 +344,46 @@
         />
       </div>
     </div>
+
+    <!-- P5-10：流式内容播报用，视觉隐藏；读屏用户能听到「正在生成 / 已完成 / 已恢复」 -->
+    <div class="sr-only" aria-live="polite">{{ liveAnnounce }}</div>
+
+    <!-- P5-10：快捷键面板，Ctrl/Cmd + / 打开；只读展示，不拦截页面其他操作 -->
+    <div v-if="shortcutsOpen" class="shortcuts-mask" @click.self="shortcutsOpen = false">
+      <div class="shortcuts-panel" role="dialog" aria-label="键盘快捷键">
+        <div class="shortcuts-head">
+          <span>键盘快捷键</span>
+          <button class="shortcuts-close" title="关闭" @click="shortcutsOpen = false">×</button>
+        </div>
+        <div v-for="item in shortcutList" :key="item.label" class="shortcuts-row">
+          <span class="shortcuts-label">{{ item.label }}</span>
+          <span class="shortcuts-keys">
+            <kbd v-for="k in item.keys" :key="k">{{ k }}</kbd>
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useChatStore } from '../stores/chat';
+import { buildStageTimeline, isBatchApprovable, TASK_STAGES, useChatStore } from '../stores/chat';
 import { useMetaStore } from '../stores/meta';
 import { useProjectStore } from '../stores/project';
 import * as workspaceApi from '../api/workspace';
 import * as knowledgeApi from '../api/knowledge';
+import { formatDateTime } from '../utils/format';
 import ChatMessage from '../components/ChatMessage.vue';
+import SkeletonMessage from '../components/state/SkeletonMessage.vue';
+import ErrorState from '../components/state/ErrorState.vue';
 import WorkbenchDock from '../components/WorkbenchDock.vue';
 import PendingChangesCard from '../components/PendingChangesCard.vue';
 import ApprovalCard from '../components/ApprovalCard.vue';
 import Icon from '../components/Icon.vue';
 import type { DocumentInfo } from '../types/api';
-import type { PermissionLevel, PlanSnapshot, ReasoningLevel } from '../types/chat';
+import type { PermissionLevel, PlanSnapshot, ReasoningLevel, TaskStageItem } from '../types/chat';
 
 const chat = useChatStore();
 const meta = useMetaStore();
@@ -309,6 +395,11 @@ const inputText = ref('');
 const messagesEl = ref<HTMLElement>();
 const inputEl = ref<HTMLTextAreaElement>();
 const fileEl = ref<HTMLInputElement>();
+
+// ——— P5-12-1：空态概览 ———
+/** 进行中/待审批的轮次：状态放在 store，侧栏任务列表与空态共用同一份数据 */
+const recentTasks = computed(() => chat.sessions.slice(0, 4));
+const runningCount = computed(() => Object.keys(chat.runningRunMap).length);
 
 //会话头三个可切换参数：模型 / 推理档位 / 工作权限（选择对后续消息生效，并随请求下发）
 const REASONING_LABELS: Record<ReasoningLevel, string> = { FAST: '快速', STANDARD: '标准', DEEP: '深度' };
@@ -348,6 +439,14 @@ const MODEL_ALIASES: Record<string, string> = {
   'deepseek-reasoner': 'deepseek-reasoner'
 };
 
+const PERMISSION_ALIASES: Record<string, PermissionLevel> = {
+  manual: 'MANUAL',
+  auto: 'AUTO',
+  full: 'FULL',
+  'readonly': 'READ_ONLY',
+  'read-only': 'READ_ONLY'
+};
+
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: 'clear',
@@ -379,6 +478,25 @@ const SLASH_COMMANDS: SlashCommand[] = [
       }
       chat.model = model;
       ElMessage.success(`已切换到 ${model}`);
+    }
+  },
+  {
+    name: 'permission',
+    icon: 'shield',
+    hint: '查看或调整工作权限：/permission auto',
+    run: (args) => {
+      const key = args.toLowerCase();
+      if (!key) {
+        ElMessage.info(`当前权限：${permissionLabel.value}；切换用 /permission manual|auto|full`);
+        return;
+      }
+      const permission = PERMISSION_ALIASES[key];
+      if (!permission) {
+        ElMessage.warning(`未知权限「${args}」，可用 manual / auto / full`);
+        return;
+      }
+      chat.setPermission(permission);
+      ElMessage.success(`已切换到 ${PERMISSION_LABELS[permission]}`);
     }
   },
   {
@@ -699,11 +817,7 @@ async function closeDockSafely() {
   chat.closeDock();
 }
 
-/** 会话头按钮：同一 tab 再点一次就收起 */
-function toggleDock(tab: 'docs' | 'changes') {
-  if (chat.dockOpen && chat.dockTab === tab) void closeDockSafely();
-  else chat.openDock(tab);
-}
+
 
 /** 消息底部文件清单点击：直接用编辑器打开该文件（本次改动会在文件里标色） */
 function openChangeFromMessage(path: string, action?: string) {
@@ -715,17 +829,38 @@ function openChangeFromMessage(path: string, action?: string) {
   chat.openFile(path);
 }
 
-/** 会话头的计数：资料看附件数，变更看本会话改动过的文件数（按路径去重） */
-const docCount = computed(() => {
-  const sent = chat.currentSessionId ? chat.sessionAttachments[chat.currentSessionId] || [] : [];
-  return sent.length + chat.pendingChips.filter((c) => c.status === 'done').length;
+// ——— P5-10：断线续传状态条 ———
+let streamNoticeTimer: number | undefined;
+const streamNotice = computed(() => {
+  switch (chat.streamStatus) {
+    case 'reconnecting':
+      return '连接中断，正在从未完成的位置恢复…';
+    case 'recovered':
+      return chat.recoveredTruncated
+        ? '已恢复：超长回答只保留了前 2 万字'
+        : '已恢复：内容已从断点续上';
+    case 'interrupted':
+      return '连接中断，已保留已生成的内容';
+    default:
+      return '';
+  }
 });
-
-const changeCount = computed(() => {
-  const paths = new Set<string>();
-  chat.messages.forEach((m) => (m.changes || []).forEach((c) => paths.add(c.path)));
-  return paths.size;
-});
+// 「已恢复」是正向提示，几秒后自动收起；中断提示保留，等用户处理
+watch(
+  () => chat.streamStatus,
+  (status) => {
+    if (streamNoticeTimer) {
+      window.clearTimeout(streamNoticeTimer);
+      streamNoticeTimer = undefined;
+    }
+    if (status === 'recovered') {
+      streamNoticeTimer = window.setTimeout(() => {
+        chat.streamStatus = 'idle';
+        streamNoticeTimer = undefined;
+      }, 4000);
+    }
+  }
+);
 
 // ——— 计划条：折叠状态只在前端保留 ———
 const planCollapsed = ref(false);
@@ -765,14 +900,178 @@ function openPlanDock() {
   chat.openDock('plan');
 }
 
-// 第六十八批 A2：只显示当前会话的**未处理**待审批项——
-// 已 resolved 的审批留在数组里给 resolved 态过渡用，但 find() 必须跳过它，
-// 否则批准第一张后新的审批会被挡在后面永远渲染不出来（Array.find 返回第一个匹配）
-const currentApproval = computed(() => {
-  return chat.pendingApprovals.find(
-    (a) => a.sessionId === chat.currentSessionId && !a.resolved
-  ) ?? null;
+// ——— P5-10-3：阶段时间线与预算 ———
+const nowTick = ref(Date.now());
+let progressTimer: number | undefined;
+
+watch(
+  () => chat.isProcessing,
+  (busy) => {
+    if (progressTimer != null) {
+      window.clearInterval(progressTimer);
+      progressTimer = undefined;
+    }
+    if (busy) {
+      nowTick.value = Date.now();
+      progressTimer = window.setInterval(() => {
+        nowTick.value = Date.now();
+      }, 1000);
+    }
+  },
+  { immediate: true }
+);
+
+onUnmounted(() => {
+  if (progressTimer != null) window.clearInterval(progressTimer);
 });
+
+const stageTimeline = computed(() => buildStageTimeline(chat.liveStageMarks, nowTick.value));
+const currentStage = computed(() => {
+  const active = stageTimeline.value.find((s) => s.status === 'active');
+  if (active) return active;
+  return [...stageTimeline.value].reverse().find((s) => s.status === 'done');
+});
+const currentStageIndex = computed(() => {
+  if (!currentStage.value) return 1;
+  const idx = TASK_STAGES.findIndex((s) => s.key === currentStage.value?.key);
+  return idx < 0 ? 1 : idx + 1;
+});
+/** 短问答不显示进度条，避免一闪而过；进入读取及以后立即显示 */
+const showTaskProgress = computed(() => {
+  if (!chat.isProcessing) return false;
+  if (nowTick.value - chat.runStartedAt >= 3000) return true;
+  return !!(chat.liveStageMarks.read || chat.liveStageMarks.modify || chat.liveStageMarks.verify);
+});
+
+const budget = computed(() => chat.liveBudget);
+const budgetElapsedMs = computed(() =>
+  Math.max(budget.value?.elapsedMs ?? 0, chat.isProcessing ? nowTick.value - chat.runStartedAt : 0)
+);
+const budgetText = computed(() => {
+  const b = budget.value;
+  const round = b?.round != null && b?.maxRounds != null ? `第 ${b.round}/${b.maxRounds} 轮` : '轮次 —';
+  const tokens = b
+    ? b.maxTokens
+      ? `${formatTokenCount(b.totalTokens)}/${formatTokenCount(b.maxTokens)} token`
+      : `${formatTokenCount(b.totalTokens)} token（不限）`
+    : 'token —';
+  const elapsed = b?.maxElapsedMs
+    ? `${formatDuration(budgetElapsedMs.value)}/${formatDuration(b.maxElapsedMs)}`
+    : `${formatDuration(budgetElapsedMs.value)}${b ? '（不限）' : ''}`;
+  return `${round} · ${tokens} · ${elapsed}`;
+});
+const budgetWarningText = computed(() => {
+  const b = budget.value;
+  if (!b) return '';
+  const parts: string[] = [];
+  if (b.round != null && b.maxRounds && b.round / b.maxRounds >= 0.8) parts.push('轮次接近上限');
+  if (b.maxTokens && b.totalTokens / b.maxTokens >= 0.8) parts.push('token 接近上限');
+  if (b.maxElapsedMs && budgetElapsedMs.value / b.maxElapsedMs >= 0.8) parts.push('时间接近上限');
+  return parts.length ? `${parts.join(' · ')}，Agent 会优先收口` : '';
+});
+const budgetWarning = computed(() => !!budgetWarningText.value);
+
+function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 10000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function stageTimeText(stage: TaskStageItem): string {
+  if (stage.status === 'skipped') return '跳过';
+  if (stage.status === 'pending') return '待开始';
+  return formatDuration(stage.durationMs ?? 0);
+}
+
+// 第六十八批 A2 / P5-12-4：当前会话所有**未处理**待审批项按队列渲染——
+// 已 resolved 的审批留在数组里给 resolved 态过渡用，队列必须过滤掉。
+const activeApprovals = computed(() => {
+  return chat.pendingApprovals.filter(
+    (a) => a.sessionId === chat.currentSessionId && !a.resolved
+  );
+});
+
+// P5-10-2：当前选中审批 + 可批量允许的低风险项（判定与后端白名单一致）
+const selectedApprovalId = ref<string | null>(null);
+const batchableApprovals = computed(() => activeApprovals.value.filter(isBatchApprovable));
+
+/** 队列变化时收口选中项：仍在就保留；被移除则优先选同位置后一项，没有后一项选前一项 */
+watch(
+  () => activeApprovals.value.map((a) => a.approvalId),
+  (ids, oldIds) => {
+    if (!ids.length) {
+      selectedApprovalId.value = null;
+      return;
+    }
+    if (selectedApprovalId.value && ids.includes(selectedApprovalId.value)) return;
+    const oldIdx = oldIds ? oldIds.indexOf(selectedApprovalId.value ?? '') : -1;
+    const nextIdx = oldIdx >= 0 ? Math.min(oldIdx, ids.length - 1) : 0;
+    selectedApprovalId.value = ids[nextIdx];
+  },
+  { immediate: true, flush: 'post' }
+);
+
+function selectApproval(approvalId: string) {
+  selectedApprovalId.value = approvalId;
+  scrollSelectedApproval();
+}
+
+function scrollSelectedApproval() {
+  nextTick(() => {
+    const id = selectedApprovalId.value;
+    if (!id || !approvalZoneEl.value) return;
+    approvalZoneEl.value
+      .querySelector<HTMLElement>(`[data-approval-id="${id}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+/** J/K 在当前队列内移动，到边界后停止，不循环 */
+function moveApprovalSelection(delta: number) {
+  const list = activeApprovals.value;
+  if (!list.length) return;
+  const idx = list.findIndex((a) => a.approvalId === selectedApprovalId.value);
+  const next = Math.max(0, Math.min(list.length - 1, (idx < 0 ? 0 : idx) + delta));
+  selectedApprovalId.value = list[next].approvalId;
+  scrollSelectedApproval();
+}
+
+function approveLowRiskBatch() {
+  void chat.approveBatch(batchableApprovals.value.map((a) => a.approvalId));
+}
+
+/** P5-10-2：输入框内打字不触发 J/K 移动 */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !!el?.closest('input, textarea, select, [contenteditable="true"]');
+}
+
+// P5-12-4：轨迹面板点「待审批」步骤时，滚到审批区并短暂高亮
+const approvalZoneEl = ref<HTMLElement>();
+const approvalFlash = ref(false);
+let approvalFlashTimer: number | undefined;
+watch(
+  () => chat.approvalFocusToken,
+  () => {
+    if (!activeApprovals.value.length) return;
+    nextTick(() => {
+      approvalZoneEl.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      approvalFlash.value = true;
+      if (approvalFlashTimer) window.clearTimeout(approvalFlashTimer);
+      approvalFlashTimer = window.setTimeout(() => {
+        approvalFlash.value = false;
+        approvalFlashTimer = undefined;
+      }, 1200);
+    });
+  }
+);
 
 // 离开底部超过一段距离才显示「回到底部」，避免在底部时白占位置
 const SCROLL_BOTTOM_GAP = 80;
@@ -1007,6 +1306,36 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// ——— P5-10：快捷键面板 + 读屏播报 ———
+const shortcutsOpen = ref(false);
+const shortcutList = [
+  { label: '聚焦输入框', keys: ['Ctrl', 'K'] },
+  { label: '连续按两次停止生成', keys: ['Esc', 'Esc'] },
+  { label: '批准当前审批', keys: ['A'] },
+  { label: '拒绝当前审批', keys: ['D'] },
+  { label: '切换待审批', keys: ['J', 'K'] },
+  { label: '发送消息', keys: ['Enter'] },
+  { label: '换行', keys: ['Shift', 'Enter'] },
+  { label: '引用文件 / 资料 / 会话', keys: ['@'] },
+  { label: '斜杠命令', keys: ['/'] },
+  { label: '打开快捷键面板', keys: ['Ctrl', '/'] }
+];
+const liveAnnounce = ref('');
+watch(
+  () => chat.isProcessing,
+  (busy) => {
+    liveAnnounce.value = busy ? '助手正在生成回答' : '回答已生成';
+  }
+);
+watch(
+  () => chat.streamStatus,
+  (status) => {
+    if (status === 'reconnecting') liveAnnounce.value = '连接中断，正在恢复未完成的内容';
+    else if (status === 'recovered') liveAnnounce.value = '已从断点恢复内容';
+    else if (status === 'interrupted') liveAnnounce.value = '连接中断，已保留已生成的内容';
+  }
+);
+
 // Esc Esc 停止生成：500ms 内连按两次 Esc 才触发，避免误按打断；
 // 弹窗打开时（Element Plus 用 Esc 关弹窗）或命令面板已消费该事件时不计数
 let lastEscAt = 0;
@@ -1017,6 +1346,26 @@ function onGlobalKeydown(e: KeyboardEvent) {
     e.preventDefault();
     inputEl.value?.focus();
     return;
+  }
+  // Ctrl/Cmd+/：查看快捷键
+  if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    e.preventDefault();
+    shortcutsOpen.value = !shortcutsOpen.value;
+    return;
+  }
+  if (e.key === 'Escape' && shortcutsOpen.value) {
+    shortcutsOpen.value = false;
+    return;
+  }
+  // P5-10-2：J/K 在当前会话审批队列中移动；输入态或带修饰键时让给原行为
+  if (!e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target)) {
+    const key = e.key.toLowerCase();
+    if (key === 'j' || key === 'k') {
+      if (!activeApprovals.value.length) return;
+      e.preventDefault();
+      moveApprovalSelection(key === 'j' ? 1 : -1);
+      return;
+    }
   }
   if (e.key !== 'Escape') return;
   if (e.defaultPrevented || document.querySelector('.el-overlay')) {
@@ -1035,17 +1384,23 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
   window.addEventListener('resize', onWindowResize);
+  // 侧栏任务列表与空态概览共用 store 里的运行态，这里刷新一次
+  chat.refreshRunningRuns();
   // 首屏回填的草稿可能是多行，等 DOM 就绪后按内容撑高输入框
   if (inputText.value) nextTick(resizeInput);
   // 搜索命中时可能从别的页面跳进对话页，等本页挂载后补一次定位
   scrollToFocusedMessage();
   // 首屏已有历史时，先算出右侧缩略导航的当前位置
   nextTick(updateActiveTurn);
+  // P5-14：恢复当前会话的任务交付视图（刷新后由后端重建）
+  if (hasLocalWorkspace.value) void chat.fetchChangeSet();
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
   window.removeEventListener('resize', onWindowResize);
+  if (streamNoticeTimer) window.clearTimeout(streamNoticeTimer);
+  if (approvalFlashTimer) window.clearTimeout(approvalFlashTimer);
 });
 
 function autoResize(e: Event) {
@@ -1094,57 +1449,11 @@ function removeChip(key: string) {
   chat.removeChip(key);
   chat.saveDraftChips(draftKey.value);
 }
-
-/** 空态建议：填入输入框并聚焦，让用户可以直接改字或回车发送 */
-function useSuggestion(text: string) {
-  inputText.value = text;
-  inputEl.value?.focus();
-}
-
-
 </script>
 
 <style scoped>
 .chat-page {
     padding: 0;
-}
-
-.chat-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-}
-
-.chat-header-left {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-    overflow: hidden;
-}
-
-.chat-context {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 220px;
-    padding: 4px 10px;
-    border-radius: var(--radius-pill);
-    background: var(--surface-hover);
-    color: var(--text);
-    font-size: var(--fs-sm);
-    font-weight: 500;
-}
-
-.chat-context-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .chat-pill {
@@ -1181,48 +1490,6 @@ function useSuggestion(text: string) {
 
 .pill-chevron {
     opacity: 0.6;
-}
-
-.chat-header-right {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    flex-shrink: 0;
-}
-
-.chat-tool-btn {
-    position: relative;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all var(--dur-fast);
-}
-.chat-tool-btn:hover { background: var(--surface-hover); color: var(--text); }
-.chat-tool-btn.active {
-    color: var(--primary);
-    border-color: var(--primary);
-    background: transparent;
-}
-
-.chat-tool-count {
-    position: absolute;
-    top: -3px;
-    right: -3px;
-    min-width: 15px;
-    padding: 0 3px;
-    border-radius: var(--radius-pill);
-    background: var(--primary);
-    color: #fff;
-    font-size: 10px;
-    line-height: 15px;
-    text-align: center;
 }
 
 .chat-body {
@@ -1514,5 +1781,208 @@ function useSuggestion(text: string) {
 /* 窄屏时工作台铺满对话区，没有拖动的空间 */
 @media (max-width: 900px) {
     .dock-resizer { display: none; }
+}
+
+/* P5-10：快捷键面板 */
+.shortcuts-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 2600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 32%);
+}
+.shortcuts-panel {
+    width: min(380px, 90vw);
+    padding: 14px 16px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg, 0 12px 32px rgb(0 0 0 / 18%));
+    color: var(--text);
+    font-size: var(--fs-sm);
+}
+.shortcuts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+.shortcuts-close {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.shortcuts-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+.shortcuts-label { color: var(--text-secondary); }
+.shortcuts-keys { display: inline-flex; gap: 4px; }
+.shortcuts-keys kbd {
+    min-width: 20px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--fs-xs);
+    text-align: center;
+}
+/* P5-12-1：空态概览，替代原来的客服式开场白 */
+.chat-empty {
+    width: min(720px, calc(100% - 48px));
+    margin: 6vh auto 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    color: var(--text);
+}
+.chat-empty-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+}
+.chat-empty-project { color: var(--text); font-weight: 600; }
+.chat-empty-running {
+    margin-left: auto;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--warning-bg);
+    color: var(--warning);
+    font-size: var(--fs-xs);
+}
+.chat-empty-block {
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+.chat-empty-label {
+    margin-bottom: 8px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    letter-spacing: .04em;
+}
+.chat-empty-task {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.chat-empty-task:hover { background: var(--surface-2); border-color: var(--border); }
+.chat-empty-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex-shrink: 0;
+}
+.chat-empty-dot.is-RUNNING {
+    background: var(--primary);
+    animation: stream-pulse 1.2s ease-in-out infinite;
+}
+.chat-empty-dot.is-WAITING_APPROVAL { background: var(--warning); }
+.chat-empty-task-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+}
+.chat-empty-task-time { color: var(--text-tertiary); font-size: var(--fs-xs); }
+.chat-empty-hint {
+    margin: 0 0 10px;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+}
+.chat-empty-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+.chat-empty-keys kbd {
+    margin-right: 4px;
+    padding: 0 5px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    font-family: inherit;
+}
+
+/* P5-12-4：审批队列——多项时不被互相遮蔽，超出高度内部滚动 */
+.approval-queue {
+    flex-shrink: 0;
+    margin: 0 20px 6px;
+    border-radius: var(--radius-sm);
+    transition: box-shadow .25s, background .25s;
+}
+.approval-queue.is-flashing {
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.approval-queue-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 0 2px;
+    font-size: var(--fs-xs);
+    color: var(--warning);
+    font-weight: 600;
+}
+.approval-queue-hint {
+    margin-left: auto;
+    color: var(--text-tertiary);
+    font-weight: 400;
+}
+/* P5-10-2：低风险批量允许入口，只影响白名单内的写/编辑审批 */
+.approval-batch-btn {
+    margin-left: 4px;
+    padding: 1px 8px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.approval-batch-btn:hover {
+    background: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.approval-queue-body {
+    max-height: 42vh;
+    overflow-y: auto;
+}
+/* 卡片自带左右外边距，队列里改由队列统一控制，避免双重缩进 */
+.approval-queue-body :deep(.approval-card) {
+    margin: 0 0 6px;
+}
+.approval-queue-body :deep(.approval-card:last-child) {
+    margin-bottom: 0;
 }
 </style>

@@ -11,7 +11,14 @@ import { useChatStore } from '../stores/chat';
 import type { PendingApproval } from '../types/api';
 import type { ApprovalPreview } from '../types/chat';
 
-const props = defineProps<{ approval: PendingApproval }>();
+const props = defineProps<{
+  approval: PendingApproval;
+  /** P5-12-4：队列里只有当前选中项响应 A / D 快捷键，避免一次按键批掉全部 */
+  shortcutActive?: boolean;
+  /** P5-10-2：J/K 移动后的当前项，显示明确选中边框 */
+  selected?: boolean;
+}>();
+const emit = defineEmits<{ (e: 'select'): void }>();
 const chat = useChatStore();
 
 const remaining = ref(0);
@@ -111,10 +118,38 @@ function respond(decision: 'APPROVE' | 'REJECT', remember = false) {
 function close() {
   chat.dismissApproval(props.approval.approvalId);
 }
+
+/** P5-10：输入框内打字不触发审批快捷键，避免误批 */
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !!el?.closest('input, textarea, select, [contenteditable="true"]');
+}
+
+/** P5-10：A 允许 / D 拒绝；带修饰键或正在输入时让给原行为 */
+function onKeydown(e: KeyboardEvent) {
+  if (props.shortcutActive === false) return;
+  if (isResolved.value || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (isEditableTarget(e.target)) return;
+  const key = e.key.toLowerCase();
+  if (key === 'a') {
+    e.preventDefault();
+    respond('APPROVE');
+  } else if (key === 'd') {
+    e.preventDefault();
+    respond('REJECT');
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <template>
-  <div class="approval-card" :class="{ resolved: isResolved }">
+  <div
+    class="approval-card"
+    :class="{ resolved: isResolved, selected: selected && !isResolved }"
+    @click="emit('select')"
+  >
     <div class="approval-head">
       <Icon
         :name="isResolved ? (approval.resolved === 'APPROVE' ? 'check-circle' : 'x-circle') : 'shield'"
@@ -161,9 +196,9 @@ function close() {
     </div>
 
     <div class="approval-actions">
-      <button v-if="!isResolved" class="approval-btn" @click="respond('REJECT')">拒绝</button>
+      <button v-if="!isResolved" class="approval-btn" @click="respond('REJECT')">拒绝<span class="approval-kbd">D</span></button>
       <button v-if="!isResolved" class="approval-btn" @click="respond('APPROVE', true)">本会话总是允许</button>
-      <button v-if="!isResolved" class="approval-btn primary" @click="respond('APPROVE')">允许</button>
+      <button v-if="!isResolved" class="approval-btn primary" @click="respond('APPROVE')">允许<span class="approval-kbd">A</span></button>
       <button v-else class="approval-btn" :disabled="true">{{ resultLabel }}</button>
     </div>
   </div>
@@ -172,12 +207,17 @@ function close() {
 <style scoped>
 .approval-card {
   background: var(--surface-2);
-  border: 1px solid var(--warning, #d97706);
+  border: 1px solid var(--warning);
   border-radius: var(--radius-sm);
   margin: 0 20px 6px;
   padding: 8px 10px;
   flex-shrink: 0;
-  transition: opacity .2s, border-color .2s, background .2s;
+  transition: opacity .2s, border-color .2s, background .2s, box-shadow .2s;
+}
+/* P5-10-2：当前选中项用主色描边，亮暗主题都保持可读 */
+.approval-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent);
 }
 .approval-card.resolved {
   border-color: var(--border);
@@ -194,7 +234,7 @@ function close() {
   gap: 6px;
   font-size: var(--fs-sm);
 }
-.approval-icon { color: var(--warning, #d97706); }
+.approval-icon { color: var(--warning); }
 .approval-card.resolved .approval-icon { color: var(--text-tertiary); }
 .approval-title { font-weight: 600; color: var(--text); }
 .approval-chip {
@@ -261,8 +301,8 @@ function close() {
   font-variant-numeric: tabular-nums;
 }
 .badge.new { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
-.badge.add { background: color-mix(in srgb, #16a34a 14%, transparent); color: #16a34a; }
-.badge.del { background: color-mix(in srgb, var(--danger, #dc2626) 14%, transparent); color: var(--danger, #dc2626); }
+.badge.add { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.badge.del { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 
 .link-btn {
   margin-left: auto;
@@ -315,8 +355,8 @@ function close() {
   word-break: break-all;
   color: var(--text-secondary);
 }
-.diff-line.add { background: color-mix(in srgb, #16a34a 12%, transparent); color: #15803d; }
-.diff-line.del { background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent); color: var(--danger, #dc2626); }
+.diff-line.add { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.diff-line.del { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .diff-line.hunk { color: var(--text-tertiary); }
 .diff-line.note { color: var(--text-tertiary); font-style: italic; }
 
@@ -349,7 +389,17 @@ function close() {
 .approval-btn.primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
-.approval-btn.primary:hover { opacity: 0.9; color: #fff; }
+.approval-btn.primary:hover { opacity: 0.9; color: var(--on-primary); }
+/* P5-10：按钮上的键位提示，弱化显示不抢视觉 */
+.approval-kbd {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 14px;
+  opacity: 0.55;
+}
 </style>

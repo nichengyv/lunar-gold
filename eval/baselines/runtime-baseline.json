@@ -1,0 +1,138 @@
+{
+  "total" : 15,
+  "passed" : 15,
+  "p95_latency_ms" : 13000,
+  "cases" : [ {
+    "id" : "runtime-approval-approved",
+    "category" : "approval",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-approval-rejected",
+    "category" : "approval",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-write-unverified",
+    "category" : "completion",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-plan-incomplete",
+    "category" : "completion",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-repeated-tool-call",
+    "category" : "loop_control",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-repeated-failure",
+    "category" : "loop_control",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-stagnant-rounds",
+    "category" : "loop_control",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-max-tool-rounds",
+    "category" : "loop_control",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-multi-tool-messages",
+    "category" : "message_flow",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-cancelled",
+    "category" : "message_flow",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-deterministic-a",
+    "category" : "determinism",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-deterministic-b",
+    "category" : "determinism",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-text-completed",
+    "category" : "completion",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-write-error-recovery",
+    "category" : "recovery",
+    "status" : "pass"
+  }, {
+    "id" : "runtime-read-error-recovery",
+    "category" : "recovery",
+    "status" : "pass"
+  } ],
+  "categories" : {
+    "approval" : {
+      "total" : 2,
+      "passed" : 2,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 2.0,
+      "avg_tokens" : 20,
+      "p95_latency_ms" : 13000
+    },
+    "completion" : {
+      "total" : 3,
+      "passed" : 3,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 1.7,
+      "avg_tokens" : 17,
+      "p95_latency_ms" : 150
+    },
+    "loop_control" : {
+      "total" : 4,
+      "passed" : 4,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 5.0,
+      "avg_tokens" : 51,
+      "p95_latency_ms" : 320
+    },
+    "message_flow" : {
+      "total" : 2,
+      "passed" : 2,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 1.5,
+      "avg_tokens" : 11,
+      "p95_latency_ms" : 260
+    },
+    "determinism" : {
+      "total" : 2,
+      "passed" : 2,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 2.0,
+      "avg_tokens" : 14,
+      "p95_latency_ms" : 240
+    },
+    "recovery" : {
+      "total" : 2,
+      "passed" : 2,
+      "pass_rate" : 100.0,
+      "avg_rounds" : 3.0,
+      "avg_tokens" : 27,
+      "p95_latency_ms" : 160
+    }
+  },
+  "case_pass_rate" : 100.0,
+  "task_succeeded" : 3,
+  "task_success_rate" : 20.0,
+  "file_change_cases" : 5,
+  "verified_file_cases" : 0,
+  "verification_coverage" : 0.0,
+  "no_progress_stops" : 3,
+  "attempted_tool_calls" : 32,
+  "repeated_tool_calls" : 4,
+  "repeated_call_rate" : 12.5,
+  "model_calls" : 42,
+  "avg_model_calls" : 2.8,
+  "total_tokens" : 396,
+  "avg_tokens" : 26,
+  "version" : 1,
+  "thresholds" : {
+    "pass_rate_drop_pp" : 2.0,
+    "rounds_increase_pct" : 10.0,
+    "token_increase_pct" : 10.0,
+    "p95_increase_pct" : 20.0,
+    "p95_absolute_slack_ms" : 25.0
+  }
+}

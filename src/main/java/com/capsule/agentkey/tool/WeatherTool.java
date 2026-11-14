@@ -48,6 +48,12 @@ public class WeatherTool implements BaseTool {
         return "get_current_weather";
     }
 
+    /** P5-08：只读，可与其他连续只读调用并发 */
+    @Override
+    public boolean readOnly() {
+        return true;
+    }
+
     @Override
     public String getDescription() {
         return "获取指定城市的实时天气信息，包括温度、湿度、风速、天气状况等。"

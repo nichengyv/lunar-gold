@@ -1,6 +1,6 @@
 package com.capsule.agentkey.service;
 
-import com.capsule.agentkey.client.SpringAiAgentClient;
+import com.capsule.agentkey.client.AgentClient;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.repository.ChatSessionRepository;
@@ -29,7 +29,7 @@ import java.util.List;
 @Slf4j
 public class ContextSummaryService {
 
-    private final SpringAiAgentClient springAiClient;
+    private final AgentClient springAiClient;
     private final ChatSessionRepository sessionRepo;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -60,7 +60,7 @@ public class ContextSummaryService {
     @Value("${context.summary.max-summary-chars:1200}")
     private int maxSummaryChars;
 
-    public ContextSummaryService(SpringAiAgentClient springAiClient,
+    public ContextSummaryService(AgentClient springAiClient,
                                  ChatSessionRepository sessionRepo) {
         this.springAiClient = springAiClient;
         this.sessionRepo = sessionRepo;

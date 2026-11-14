@@ -1,29 +1,90 @@
-# Privacy Policy — Lunar Gold
+# 隐私政策 — Lunar Gold
 
-Last updated: 2026-11-10
+最后更新：2026-11-11
 
-## Desktop edition
+Lunar Gold 是免费的开源软件。本政策说明桌面应用与可选的 Web 版会如何处理数据，内容与实际发布的代码一致；从源码构建的版本行为相同。
 
-The Lunar Gold desktop application is fully local:
+> English version: [PRIVACY.en.md](PRIVACY.en.md)
 
-- All data (projects, sessions, knowledge bases, uploaded files, embedded database) stays on your machine, under the app's data directory.
-- The desktop edition has no account system and does not send any telemetry, crash reports or analytics. Future remote diagnostics, if any, will be strictly opt-in and off by default.
-- Model API keys ("bring your own key") are stored locally and are only sent to the model provider you configure, never to the developers.
-- Uninstalling removes program files; user data directories are preserved unless you choose to delete them.
+## 摘要
 
-## Web edition
+- **桌面版没有遥测、统计分析、崩溃上传，也不需要账号。** 项目、对话、知识库、附件和数据库都留在你的机器上。
+- 桌面版只在以下情况访问网络：(a) 向 GitHub Releases 检查更新；(b) 请求你配置的模型 / 向量服务商；(c) 你主动调用内置联网工具；(d) 你添加的 MCP 服务。
+- 模型 API Key 使用本机生成的密钥加密后落盘，只会发送给你配置的服务商，不会发送给项目维护者。
+- 本地诊断只写入磁盘。导出诊断包需要你选择保存位置，不会自动上传。
 
-The web edition provides optional accounts:
+## 桌面版
 
-- We collect your email address and a password hash solely for account registration, login and password recovery.
-- We do not sell or share account data with third parties, and we do not track you across sites.
-- Session content is stored to provide the service (chat history, knowledge bases) and is not used to train models.
+### 保存在本机的数据
 
-## Your control
+桌面版默认把数据存放在 `%USERPROFILE%\.lunargold\desktop`（可用 `DESKTOP_DATA_DIR` 环境变量覆盖）：
 
-- Desktop: everything is on your disk; you can inspect, back up or delete it at any time.
-- Web: you can request export or deletion of your account and data by opening an issue at https://github.com/nichengyv/lunar-gold/issues.
+| 路径 | 内容 |
+|---|---|
+| `db/` | 内嵌 PostgreSQL 数据：对话、消息、项目、知识库元数据与向量 |
+| `aes.key` | 首次运行时生成的 AES-256-GCM 密钥，用于加密模型 API Key |
+| `local-token` | 随机令牌，桌面外壳凭它访问本地后端 |
+| `sidecar.log` | 后端日志 |
+| `diagnostics/reports/*.json` | 本地诊断报告（最多 10 份，超出后删除最旧的） |
+| `diagnostics/session.json` | 崩溃标记，正常退出时删除 |
+| `upgrade-state.json` | 升级期间写入的临时标记 |
 
-## Changes
+相关位置：
 
-Material changes to this policy will be announced in release notes.
+- `%USERPROFILE%\.lunargold\updater.log` — 自动更新日志。
+- `%USERPROFILE%\.lunargold\backup\<旧版本>-<时间戳>` — 升级前的数据目录备份，只保留最近两份。
+- 应用工作目录下的 `uploads\documents` 与 `uploads\chat-attachments`（通过快捷方式正常启动时即安装目录）— 知识库文件与对话附件。
+
+你可以随时查看、备份或删除这些文件。删除数据目录会重置应用。
+
+### 本地诊断
+
+当应用出错（Electron 主进程、渲染进程、Java 后端、内嵌 PostgreSQL 或端口绑定）时，会显示诊断卡片并写入报告。报告使用固定字段白名单（版本、操作系统、错误码、脱敏后的摘要与日志尾部）。在写入或导出之前，应用会脱敏 API Key、令牌、`Bearer` 头、JWT、URL 内嵌凭据、用户路径以及 `LocalTokenService` 的令牌日志行。
+
+**导出诊断包** 按钮生成的 ZIP 只含 `report.json`、`sidecar.log` 末尾（最多 400 行 / 512 KB）和 `updater.log` 末尾。ZIP 保存到你选择的位置，不包含源码、对话、知识库、数据库、模型 Key、`local-token` 或 `aes.key`；应用也没有任何上传它的代码路径。
+
+### 网络连接
+
+1. **检查更新。** `electron-updater` 会访问 `nichengyv/lunar-gold` 的公开 GitHub Releases，通常在启动约 8 秒后（可用 `LUNARGOLD_UPDATE_INITIAL_DELAY_MS` 调整）。GitHub 会收到标准的 HTTP 请求元数据（如 IP 地址和 User-Agent）。更新只在你同意后才会下载和安装，也可以选择「稍后提醒」。若运维方设置 `LUNARGOLD_UPDATE_MODE=auto`，更新会在无提示的情况下下载安装；该开关默认关闭，仅用于受管安装环境。从源码运行时不检查更新。
+2. **模型与向量服务商。** 完成请求所需的提示词、选中的代码上下文、附件和工具结果会发送到你配置的接口（例如 DeepSeek、OpenAI、智谱、Moonshot、SiliconFlow）。API Key 用于向该服务商认证，并加密保存在本地。这些服务商按其自身政策处理数据；由此产生的费用由你与服务商结算。
+3. **内置联网工具。** 使用时，相关查询或 URL 会直接发送给第三方服务：网页搜索发送给 Tavily（使用你自己的 Tavily Key），天气发送给 `wttr.in` 与 Open-Meteo，网页抓取会访问你指定的 URL。结果作为工具输出返回给模型。
+4. **MCP 服务。** 如果你配置了 MCP 服务，应用会连接它们；这些服务可能自行访问其他服务，其行为不在本政策范围内。
+
+桌面版**不会**向维护者发送使用统计、遥测、崩溃报告、设备标识或广告数据。
+
+### 卸载与数据保留
+
+- 卸载会删除程序文件，包括私有运行时和安装目录内的 `uploads` 文件夹。
+- `%USERPROFILE%\.lunargold` 下的数据目录（数据库、`aes.key`、`local-token`、日志、诊断报告）和 `backup` 文件夹会**保留**，以便重装后继续使用。需要彻底清除时请手动删除该文件夹。
+- 诊断报告本地最多保留 10 份，可随时删除。
+
+## Web 版
+
+Web 版是基于同一代码库、可选、单独部署的服务：
+
+- **账号数据。** 为提供注册、登录和找回密码，我们保存你的邮箱地址和加盐密码哈希（BCrypt）。不需要昵称、手机号或支付信息。
+- **内容。** 为提供服务，对话、知识库和上传的文档会存储在服务器上；不会出售，也不会用于训练模型。
+- **无跟踪。** 不嵌入广告网络、跨站跟踪器或第三方统计。
+- **模型调用。** 请求会发送给该部署配置的模型服务商；在 BYOK 模式下，使用你填写的 Key。
+
+如需导出或删除 Web 账号数据，请用账号对应邮箱在 <https://github.com/nichengyv/lunar-gold/issues> 提交 issue，或使用该部署公布的其他联系方式。
+
+## 安全
+
+- 模型 API Key 使用 AES-256-GCM 加密存储，密钥不会离开你的机器（桌面版）。
+- 桌面外壳通过 `127.0.0.1` 访问后端，每个请求都必须携带本机数据目录中的 `local-token`。
+- Web 部署应通过 HTTPS 提供服务，凭据只放在环境变量中，不进入仓库。
+
+任何存储或传输方式都无法做到绝对安全；请自行备份重要项目。
+
+## 儿童
+
+本服务不面向儿童。若你未达到所在司法辖区可自主同意数据处理的年龄，请勿使用。
+
+## 变更
+
+本政策的重大变更会在 Release 说明中公布，并同步更新上方的「最后更新」日期。
+
+## 联系方式
+
+问题或请求：<https://github.com/nichengyv/lunar-gold/issues>。

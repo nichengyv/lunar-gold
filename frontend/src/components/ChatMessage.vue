@@ -62,7 +62,32 @@
       <span v-if="msg.content && msg.streaming && !hasRunning" class="typing-inline" aria-label="正在生成">
         <i></i><i></i><i></i>
       </span>
-      <div v-if="msg.stopped" class="stopped-hint"><Icon name="stop" :size="12" /> 已停止生成</div>
+      <div v-if="completionHint" class="completion-hint">
+        <Icon name="alert" :size="14" />
+        <span>{{ completionHint }}</span>
+      </div>
+      <div
+        v-if="diagnosticsHint"
+        class="diagnostics-hint"
+        :class="{ 'is-error': diagnosticsHasError }"
+        :title="diagnosticsTitle"
+      >
+        <Icon :name="diagnosticsHasError ? 'alert' : 'check'" :size="13" />
+        <span>{{ diagnosticsHint }}</span>
+      </div>
+      <div
+        v-if="verifyHint"
+        class="verify-hint"
+        :class="{ 'is-error': verifyHasError, 'is-muted': verifyIsMuted }"
+        :title="verifyTitle"
+      >
+        <Icon :name="verifyHasError ? 'alert' : verifyInfo?.status === 'PASSED' ? 'check' : 'alert'" :size="13" />
+        <span>{{ verifyHint }}</span>
+      </div>
+      <div v-if="msg.stopped" class="stopped-hint">
+        <Icon name="stop" :size="12" /> 已停止生成
+        <button class="continue-btn" :disabled="chat.isProcessing" @click="chat.continueTask(msg.id)">继续</button>
+      </div>
       <div v-if="msg.sources?.length" class="sources">
         <span class="sources-label">参考了</span>
         <span
@@ -70,7 +95,7 @@
           :key="s.id"
           class="source-chip"
           :class="{ expanded: expandedSources.has(s.id) }"
-          :title="`相关度 ${s.score.toFixed(2)} · 点击${expandedSources.has(s.id) ? '收起' : '查看片段'}`"
+          :title="`相关度 ${s.score.toFixed(2)}${s.chunkIndex != null ? ` · 第 ${s.chunkIndex + 1} 段` : ''} · 点击${expandedSources.has(s.id) ? '收起' : '查看片段'}`"
           @click="toggleSource(s.id)"
         ><Icon name="file-text" :size="12" /> {{ s.name }}</span>
         <div
@@ -91,12 +116,28 @@
       </div>
     </div>
 
-    <!-- 断线/报错：给出原因和「重试这一轮」，不用重新输入问题 -->
-    <div v-if="msg.failed" class="failed-box">
-      <div class="failed-text"><Icon name="alert" :size="14" /> {{ msg.errorText || '这一轮没有完成' }}</div>
-      <button class="retry-btn" @click="chat.regenerate(msg.id)">
-        <Icon name="refresh" :size="13" /> 重试这一轮
-      </button>
+    <!-- P5-10-3：失败分级——先说明属于哪一类，再给对应动作 -->
+    <div v-if="msg.failed" class="failed-box" :class="'is-' + failureInfo.class">
+      <div class="failed-main">
+        <div class="failed-text">
+          <Icon name="alert" :size="14" />
+          <span class="failure-tag">{{ failureInfo.label }}</span>
+          <span>{{ msg.errorText || '这一轮没有完成' }}</span>
+        </div>
+        <div class="failed-hint">{{ failureInfo.hint }}</div>
+      </div>
+      <div class="failed-actions">
+        <button class="retry-btn" @click="handleFailureAction">
+          <Icon :name="failureActionIcon" :size="13" /> {{ failureActionLabel }}
+        </button>
+        <button
+          v-if="failureInfo.class === 'config'"
+          class="retry-btn is-ghost"
+          @click="chat.regenerate(msg.id)"
+        >
+          <Icon name="refresh" :size="13" /> 重试这一轮
+        </button>
+      </div>
     </div>
 
     <div v-if="!msg.streaming && msg.content && !msg.failed" class="msg-actions">
@@ -142,8 +183,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import type { ToolInvocation, UiMessage } from '../types/api';
-import { useChatStore } from '../stores/chat';
+import { classifyFailure, useChatStore } from '../stores/chat';
 import { copyToClipboard } from '../utils/format';
 import MarkdownContent from './MarkdownContent.vue';
 import Icon from './Icon.vue';
@@ -151,6 +193,7 @@ import Icon from './Icon.vue';
 const props = defineProps<{ msg: UiMessage }>();
 const emit = defineEmits<{ (e: 'open-change', path: string, action: string): void }>();
 const chat = useChatStore();
+const router = useRouter();
 
 // 思考内容 + 步骤明细合并后的展开状态（默认只显示一行摘要）
 const detailOpen = ref(false);
@@ -195,6 +238,85 @@ function truncate(s: string, n: number): string {
 }
 const hasRunning = computed(() => props.msg.tools.some((t) => t.status === 'running'));
 const runningTool = computed(() => props.msg.tools.find((t) => t.status === 'running'));
+// P5-10-3：失败分级与对应动作
+const failureInfo = computed(() => classifyFailure(props.msg.errorText, props.msg.completion));
+const failureActionLabel = computed(() => {
+  switch (failureInfo.value.primaryAction) {
+    case 'settings': return '去设置';
+    case 'reload': return '重新加载';
+    default: return '重试这一轮';
+  }
+});
+const failureActionIcon = computed(() => (failureInfo.value.primaryAction === 'retry' ? 'refresh' : 'chevron-right'));
+
+function handleFailureAction() {
+  if (failureInfo.value.primaryAction === 'settings') {
+    router.push({ path: '/settings', query: { tab: 'model' } });
+  } else if (failureInfo.value.primaryAction === 'reload') {
+    chat.reloadCurrentSession();
+  } else {
+    chat.regenerate(props.msg.id);
+  }
+}
+
+const completionHint = computed(() => {
+  const completion = props.msg.completion;
+  if (completion?.status === 'UNVERIFIED') {
+    return completion.message || '文件已修改，但尚未运行诊断或验证。';
+  }
+  if (completion?.status === 'INCOMPLETE') {
+    return completion.message || '任务尚未完成。';
+  }
+  return '';
+});
+
+// P5-05：变更文件诊断的紧凑状态行；详细明细留给后续任务交付面板
+const diagnosticsHasError = computed(() =>
+  !!props.msg.diagnostics?.diagnostics?.some((d) => d.severity === 'ERROR')
+);
+const diagnosticsHint = computed(() => {
+  const info = props.msg.diagnostics;
+  if (!info) return '';
+  if (!info.available) return '诊断不可用';
+  const errors = info.diagnostics?.filter((d) => d.severity === 'ERROR').length ?? 0;
+  if (errors > 0) return `${errors} 个编译错误`;
+  return info.analyzedFiles > 0 ? '编译检查通过' : '';
+});
+const diagnosticsTitle = computed(() => props.msg.diagnostics?.diagnostics?.[0]?.message || '');
+
+// P5-06：项目验证的紧凑状态行；未配置/不可用不能被展示成通过
+const verifyInfo = computed(() => props.msg.verify);
+const verifyHasError = computed(() => verifyInfo.value?.status === 'FAILED');
+const verifyIsMuted = computed(() => {
+  const status = verifyInfo.value?.status;
+  return status === 'NOT_CONFIGURED' || status === 'UNAVAILABLE';
+});
+const verifyHint = computed(() => {
+  switch (verifyInfo.value?.status) {
+    case 'PASSED': return '验证通过';
+    case 'FAILED': return '验证失败';
+    case 'NOT_CONFIGURED': return '未配置验证';
+    case 'UNAVAILABLE': return '验证不可用';
+    default: return '';
+  }
+});
+const verifyTitle = computed(() => {
+  const info = verifyInfo.value;
+  if (!info) return '';
+  const parts: string[] = [];
+  if (info.message) parts.push(info.message);
+  if (info.status === 'FAILED') {
+    const failed = info.commands?.find((c) => c.required && (c.timedOut || c.exitCode !== 0));
+    if (failed) {
+      parts.push(`命令：${failed.command}`);
+      if (failed.outputTail) parts.push(truncate(failed.outputTail, 600));
+    }
+  }
+  if (info.status === 'NOT_CONFIGURED' && info.configPath) {
+    parts.push(`配置：${info.configPath}`);
+  }
+  return parts.filter(Boolean).join('\n');
+});
 
 /** 毫秒转「秒 / 分 秒」，参考样式里的「已完成，用时 10 分 48 秒」 */
 function formatDuration(ms?: number): string {
@@ -212,6 +334,12 @@ const progressSummary = computed(() => {
   if (runningTool.value) return stepLabel(runningTool.value);
   if (props.msg.streaming) return `正在执行 · 已完成 ${props.msg.tools.length} 个步骤`;
   const duration = formatDuration(props.msg.durationMs);
+  const completionLabel = props.msg.completion?.status === 'UNVERIFIED'
+    ? '未验证'
+    : props.msg.completion?.status === 'INCOMPLETE'
+      ? '未完成'
+      : '';
+  if (completionLabel) return duration ? `${completionLabel}，用时 ${duration}` : completionLabel;
   if (duration) return `已完成，用时 ${duration}`;
   return props.msg.tools.length ? `已完成 ${props.msg.tools.length} 个步骤` : '已完成';
 });
@@ -402,6 +530,54 @@ async function onCopy() {
 </script>
 
 <style scoped>
+.completion-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.diagnostics-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diagnostics-hint.is-error {
+  color: var(--danger);
+}
+
+.verify-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--success);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.verify-hint.is-error {
+  color: var(--danger);
+}
+
+.verify-hint.is-muted {
+  color: var(--text-tertiary);
+}
+
 /* 失败提示条：原因在左、重试按钮在右，宽度跟随内容不铺满 */
 .failed-box {
   display: flex;
@@ -417,11 +593,71 @@ async function onCopy() {
   font-size: 13px;
 }
 
+.failed-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .failed-text {
   display: flex;
   align-items: center;
   gap: 6px;
   word-break: break-word;
+}
+
+.failure-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.failed-hint {
+  font-size: 11px;
+  opacity: 0.8;
+  padding-left: 20px;
+}
+
+.failed-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.retry-btn.is-ghost {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.retry-btn.is-ghost:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.continue-btn {
+  margin-left: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.continue-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.continue-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .retry-btn {
