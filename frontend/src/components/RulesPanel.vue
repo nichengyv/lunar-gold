@@ -40,13 +40,14 @@
 
           <!-- 操作按钮 -->
           <div class="rule-actions">
-            <button class="rule-action-btn" title="编辑" @click="onEdit(r)">
+            <button class="rule-action-btn" title="编辑" aria-label="编辑规则" @click="onEdit(r)">
               <Icon name="edit-2" :size="12" />
             </button>
             <button
               v-if="!r.builtin"
               class="rule-action-btn danger"
               title="删除"
+              aria-label="删除规则"
               @click="onDelete(r)"
             >
               <Icon name="trash-2" :size="12" />

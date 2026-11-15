@@ -155,6 +155,8 @@ export interface ToolInvocation {
   result?: string;
   error?: string;
   costMs?: number;
+  /** P5-09：前端记录的开始时间，仅用于运行中实时展示已耗时 */
+  startedAt?: number;
 }
 
 /** 一次生成中工作区文件的变更（后端 file_change 事件） */

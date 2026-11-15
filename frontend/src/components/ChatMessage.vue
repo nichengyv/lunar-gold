@@ -54,7 +54,7 @@
     </div>
 
     <div class="ai-answer">
-      <MarkdownContent v-if="msg.content" :content="msg.content" />
+      <MarkdownContent v-if="msg.content" :content="msg.content" :streaming="msg.streaming" />
       <div v-else-if="msg.streaming" class="md-content">
         <div class="typing"><span></span><span></span><span></span></div>
       </div>
@@ -97,7 +97,10 @@
           :class="{ expanded: expandedSources.has(s.id) }"
           :title="`相关度 ${s.score.toFixed(2)}${s.chunkIndex != null ? ` · 第 ${s.chunkIndex + 1} 段` : ''} · 点击${expandedSources.has(s.id) ? '收起' : '查看片段'}`"
           @click="toggleSource(s.id)"
-        ><Icon name="file-text" :size="12" /> {{ s.name }}</span>
+        ><Icon name="file-text" :size="12" /> {{ s.name }}<span
+            v-if="s.chunkIndex != null"
+            class="source-pos"
+          >第 {{ s.chunkIndex + 1 }} 段</span></span>
         <div
           v-for="s in msg.sources"
           v-show="expandedSources.has(s.id) && s.content"
@@ -182,7 +185,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { ToolInvocation, UiMessage } from '../types/api';
 import { classifyFailure, useChatStore } from '../stores/chat';
@@ -238,6 +241,33 @@ function truncate(s: string, n: number): string {
 }
 const hasRunning = computed(() => props.msg.tools.some((t) => t.status === 'running'));
 const runningTool = computed(() => props.msg.tools.find((t) => t.status === 'running'));
+
+// P5-09：运行中的工具每秒刷新「已用 N 秒」；结束后立刻停表，空闲消息不再触发重渲染
+const now = ref(Date.now());
+let elapsedTimer: ReturnType<typeof setInterval> | undefined;
+function syncElapsedTimer(running: boolean) {
+  if (running && !elapsedTimer) {
+    now.value = Date.now();
+    elapsedTimer = setInterval(() => {
+      now.value = Date.now();
+    }, 1000);
+  } else if (!running && elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = undefined;
+  }
+}
+watch(hasRunning, syncElapsedTimer, { immediate: true });
+onUnmounted(() => {
+  if (elapsedTimer) clearInterval(elapsedTimer);
+});
+
+/** 单个工具耗时：运行中按本地开始时间实时算，结束后用后端返回的 costMs */
+function toolElapsed(tool: ToolInvocation): string {
+  if (tool.status === 'running') {
+    return tool.startedAt ? formatDuration(now.value - tool.startedAt) : '';
+  }
+  return formatDuration(tool.costMs);
+}
 // P5-10-3：失败分级与对应动作
 const failureInfo = computed(() => classifyFailure(props.msg.errorText, props.msg.completion));
 const failureActionLabel = computed(() => {
@@ -331,7 +361,11 @@ function formatDuration(ms?: number): string {
 
 // 一行摘要：运行中显示当前动作；完成后显示耗时（老消息没有耗时则退回步骤数）
 const progressSummary = computed(() => {
-  if (runningTool.value) return stepLabel(runningTool.value);
+  if (runningTool.value) {
+    const elapsed = toolElapsed(runningTool.value);
+    const label = stepLabel(runningTool.value);
+    return elapsed ? `${label} · 已用 ${elapsed}` : label;
+  }
   if (props.msg.streaming) return `正在执行 · 已完成 ${props.msg.tools.length} 个步骤`;
   const duration = formatDuration(props.msg.durationMs);
   const completionLabel = props.msg.completion?.status === 'UNVERIFIED'
@@ -439,7 +473,10 @@ function stepLabel(tool: ToolInvocation): string {
 }
 
 function stepState(tool: ToolInvocation): string {
-  if (tool.status === 'running') return '进行中';
+  if (tool.status === 'running') {
+    const elapsed = toolElapsed(tool);
+    return elapsed ? `进行中 · ${elapsed}` : '进行中';
+  }
   return tool.status === 'success' ? '已完成' : '没成功';
 }
 

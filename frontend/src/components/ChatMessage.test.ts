@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { UiMessage } from '../types/api';
@@ -84,5 +84,53 @@ describe('ChatMessage P5-10-3', () => {
     expect(wrapper.find('.retry-btn').text()).toBe('重新加载');
     await wrapper.find('.retry-btn').trigger('click');
     expect(reload).toHaveBeenCalled();
+  });
+});
+
+describe('ChatMessage P5-09 工具运行耗时', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-15T10:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('运行中按秒刷新已耗时，结束后切回已完成', async () => {
+    const running = message({
+      streaming: true,
+      tools: [
+        {
+          name: 'read_file',
+          args: '{"path":"a.ts"}',
+          status: 'running',
+          startedAt: Date.now() - 4000
+        } as never
+      ]
+    });
+    const wrapper = mountMessage(running);
+
+    expect(wrapper.find('.progress-text').text()).toContain('已用 4 秒');
+    await wrapper.find('.progress-toggle').trigger('click');
+    expect(wrapper.find('.step-state').text()).toBe('进行中 · 4 秒');
+
+    vi.advanceTimersByTime(3000);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.progress-text').text()).toContain('已用 7 秒');
+    expect(wrapper.find('.step-state').text()).toBe('进行中 · 7 秒');
+
+    await wrapper.setProps({
+      msg: message({
+        streaming: true,
+        tools: [
+          { name: 'read_file', args: '{"path":"a.ts"}', status: 'success', costMs: 2500 } as never
+        ]
+      })
+    });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.step-state').text()).toBe('已完成');
+    expect(wrapper.find('.progress-text').text()).not.toContain('已用');
   });
 });

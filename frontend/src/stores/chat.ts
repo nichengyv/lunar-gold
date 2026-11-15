@@ -5,6 +5,7 @@ import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
 import { streamChat } from '../api/sse';
 import * as fileChangesApi from '../api/fileChanges';
+import { createFrameThrottle } from '../utils/frameThrottle';
 import { useProjectStore } from './project';
 import {
   beginExperienceRecovery,
@@ -1078,6 +1079,18 @@ export const useChatStore = defineStore('chat', {
       });
       const startedAt = Date.now();
       this.messages.push(aiMsg);
+      // P5-11-3：SSE 每个 chunk 只保留最新全量文本，实际写响应式状态按帧合并（最多 20 次/秒）。
+      // 结束、失败、停止与 finally 都会 flush，保证正文最终与后端全量文本逐字一致。
+      const contentThrottle = createFrameThrottle<string>((full) => {
+        aiMsg.content = full;
+      });
+      const thinkingThrottle = createFrameThrottle<string>((thought) => {
+        aiMsg.thinking = thought;
+      });
+      const flushStreamedText = () => {
+        contentThrottle.flush();
+        thinkingThrottle.flush();
+      };
       this.isProcessing = true;
       this.livePlan = null;
       this.liveBudget = null;
@@ -1131,7 +1144,7 @@ export const useChatStore = defineStore('chat', {
               markExperienceRun(runId, this.currentSessionId);
             },
             onThinking: (thought) => {
-              aiMsg.thinking = thought;
+              thinkingThrottle.push(thought);
             },
             onSources: (sources) => {
               aiMsg.sources = sources;
@@ -1174,7 +1187,7 @@ export const useChatStore = defineStore('chat', {
               this.markLiveStage('modify');
             },
             onToolCall: (tool, args) => {
-              aiMsg.tools.push({ name: tool, args, status: 'running' } as ToolInvocation);
+              aiMsg.tools.push({ name: tool, args, status: 'running', startedAt: Date.now() } as ToolInvocation);
               const stage = stageForTool(tool, !!this.liveStageMarks.modify);
               if (stage) this.markLiveStage(stage);
             },
@@ -1190,7 +1203,7 @@ export const useChatStore = defineStore('chat', {
               }
             },
             onContent: (full) => {
-              aiMsg.content = full;
+              contentThrottle.push(full);
             },
             onCompletion: (completion) => {
               aiMsg.completion = completion;
@@ -1208,6 +1221,8 @@ export const useChatStore = defineStore('chat', {
               this.liveBudget = usage;
             },
             onDone: () => {
+              // 先提交最后一段文本，再切到完成态：避免合帧丢掉结尾或最后一帧仍是流式渲染
+              flushStreamedText();
               this.markLiveStage('summarize');
               aiMsg.streaming = false;
               this.streamStatus = 'idle';
@@ -1215,6 +1230,7 @@ export const useChatStore = defineStore('chat', {
               // 思考内容保留：完成后折叠成「思考过程」入口，切回会话也仍能看到
             },
             onError: (message) => {
+              flushStreamedText();
               aiMsg.streaming = false;
               aiMsg.failed = true;
               this.streamStatus = 'idle';
@@ -1225,6 +1241,8 @@ export const useChatStore = defineStore('chat', {
           },
           controller.signal
         );
+        // 流正常结束（无论是否收到 done）先把合帧中的最后一段提交出去
+        flushStreamedText();
         // P5-10：流先结束了却没收到 done（后端收尾前连接被掐断）——按 runId 把这一轮补完
         if (aiMsg.streaming && !controller.signal.aborted) {
           if (this.activeRunId != null) {
@@ -1237,6 +1255,7 @@ export const useChatStore = defineStore('chat', {
           }
         }
       } catch (e) {
+        flushStreamedText();
         aiMsg.streaming = false;
         if (controller.signal.aborted) {
           // 用户主动停止：保留已生成的部分，不标成失败
@@ -1256,6 +1275,7 @@ export const useChatStore = defineStore('chat', {
             : raw || '这一轮没有完成';
         }
       } finally {
+        flushStreamedText();
         // 成功、失败、主动停止都记一次耗时；完成后的折叠摘要和执行轨迹共用这个值
         aiMsg.durationMs = Date.now() - startedAt;
         if (currentAbort === controller) currentAbort = null;

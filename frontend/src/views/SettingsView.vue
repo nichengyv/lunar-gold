@@ -181,6 +181,31 @@
               </el-radio-group>
               <p class="hint">字体大小影响全局：导航、消息、输入框、设置页等所有文本区域</p>
             </div>
+
+            <div class="card">
+              <h3><Icon name="menu" :size="15" /> 消息密度</h3>
+              <el-radio-group
+                v-model="theme.density"
+                aria-label="消息密度"
+                @change="theme.setDensity(theme.density)"
+              >
+                <el-radio value="comfortable">舒适</el-radio>
+                <el-radio value="compact">紧凑</el-radio>
+              </el-radio-group>
+              <p class="hint">紧凑档缩小工具调用行与表格内边距，一屏能看到更多步骤</p>
+            </div>
+
+            <div class="card">
+              <h3><Icon name="sparkles" :size="15" /> 减少动效</h3>
+              <el-switch
+                v-model="theme.reduceMotion"
+                aria-label="减少动效"
+                active-text="开启"
+                inactive-text="关闭"
+                @change="theme.setReduceMotion(theme.reduceMotion)"
+              />
+              <p class="hint">默认跟随系统设置；开启后关闭过渡动画与平滑滚动，减少视觉干扰</p>
+            </div>
           </div>
         </template>
 

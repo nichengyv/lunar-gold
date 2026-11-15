@@ -306,19 +306,21 @@ async function onContinueFix() {
                 v-if="c.diffText"
                 class="pfc-action-btn"
                 :title="diffOpenId === c.id ? '收起 diff' : '查看 diff'"
+                :aria-label="diffOpenId === c.id ? '收起 diff' : '查看 diff'"
                 @click="toggleDiff(c.id)"
               >
                 <Icon :name="diffOpenId === c.id ? 'chevron-down' : 'chevron-right'" :size="10" />
               </button>
-              <button class="pfc-action-btn" title="在编辑器中打开" @click="onOpenEditor(c.filePath)">
+              <button class="pfc-action-btn" title="在编辑器中打开" aria-label="在编辑器中打开" @click="onOpenEditor(c.filePath)">
                 <Icon name="external-link" :size="10" />
               </button>
-              <button class="pfc-action-btn pfc-action-ok" title="保留此文件改动" @click="onAcceptOne(c.id)">
+              <button class="pfc-action-btn pfc-action-ok" title="保留此文件改动" aria-label="保留此文件改动" @click="onAcceptOne(c.id)">
                 <Icon name="check" :size="10" />
               </button>
               <button
                 class="pfc-action-btn pfc-action-danger"
                 title="撤销此文件改动"
+                aria-label="撤销此文件改动"
                 @click="onRevertOne(c.id, c.filePath)"
               >
                 <Icon name="x" :size="10" />

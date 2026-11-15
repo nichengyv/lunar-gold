@@ -1,11 +1,13 @@
 <script setup lang="ts">
-/** P5-09：统一的错误态，含错误码、可读原因与重试入口 */
+/** P5-09：统一的错误态，含错误码、可读原因、重试与导出诊断入口 */
 defineProps<{
   title?: string;
   message?: string;
   code?: string;
+  /** 传 true 时展示「导出诊断」，由调用方决定诊断内容来源 */
+  exportable?: boolean;
 }>();
-defineEmits<{ retry: [] }>();
+defineEmits<{ retry: []; exportDiagnostics: [] }>();
 </script>
 
 <template>
@@ -14,6 +16,9 @@ defineEmits<{ retry: [] }>();
     <p class="es-message">{{ message || '请稍后重试。' }}</p>
     <div class="es-actions">
       <span v-if="code" class="es-code">{{ code }}</span>
+      <button v-if="exportable" class="es-export" type="button" @click="$emit('exportDiagnostics')">
+        导出诊断
+      </button>
       <button class="es-retry" type="button" @click="$emit('retry')">重试</button>
     </div>
   </div>
@@ -61,4 +66,15 @@ defineEmits<{ retry: [] }>();
   color: var(--on-primary);
 }
 .es-retry:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.es-export {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+.es-export:hover { border-color: var(--primary); color: var(--primary); }
+.es-export + .es-retry { margin-left: 0; }
 </style>

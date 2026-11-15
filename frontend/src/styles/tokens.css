@@ -11,6 +11,11 @@
     --sidebar-width: 280px;
     --header-height: 46px;
 
+    /* ---- 消息密度（P5-09）：舒适为默认，紧凑在下方覆盖 ---- */
+    --density-row: 32px;
+    --density-gap: 6px;
+    --density-pad-y: 6px;
+
     /* ---- 间距 ---- */
     --space-1: 4px;
     --space-2: 8px;
@@ -126,4 +131,11 @@
     /* ---- 阴影 ---- */
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* P5-09：紧凑档只覆盖密度 token，组件结构不变 */
+[data-density="compact"] {
+    --density-row: 24px;
+    --density-gap: 4px;
+    --density-pad-y: 4px;
 }

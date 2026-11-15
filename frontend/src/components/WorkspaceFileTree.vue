@@ -2,13 +2,13 @@
   <div class="ws-tree-wrap">
     <div class="ws-tree-toolbar">
       <span class="ws-tree-path clickable" :title="'点击打开工作区设置\n' + workspacePath" @click="$emit('open-settings')">{{ workspacePath }}</span>
-      <button class="ws-tree-btn" title="新建文件" @click="onCreate(false)">
+      <button class="ws-tree-btn" title="新建文件" aria-label="新建文件" @click="onCreate(false)">
         <Icon name="plus" :size="13" />
       </button>
-      <button class="ws-tree-btn" title="新建文件夹" @click="onCreate(true)">
+      <button class="ws-tree-btn" title="新建文件夹" aria-label="新建文件夹" @click="onCreate(true)">
         <Icon name="folder" :size="13" />
       </button>
-      <button class="ws-tree-btn" title="刷新" @click="refresh">
+      <button class="ws-tree-btn" title="刷新" aria-label="刷新文件树" @click="refresh">
         <Icon name="refresh" :size="13" />
       </button>
     </div>
@@ -46,7 +46,7 @@
             trigger="click"
             @command="(c: string) => onRowCommand(c, row)"
           >
-            <button class="ws-row-more-btn" title="更多" @click.stop>
+            <button class="ws-row-more-btn" title="更多" aria-label="文件操作" @click.stop>
               <Icon name="more" :size="14" />
             </button>
             <template #dropdown>

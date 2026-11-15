@@ -10,16 +10,15 @@
     outline-offset: 2px;
 }
 
-/* P5-10：尊重系统「减少动效」偏好，关闭动画与平滑滚动 */
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: .001ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: .001ms !important;
-        scroll-behavior: auto !important;
-    }
+/* P5-10：尊重系统「减少动效」偏好；P5-10-4 由 theme store 在挂载前统一写入
+ * data-motion="reduce"（默认跟随系统，设置页可手动开关），样式只保留这一条规则 */
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
 }
 
 body {
@@ -373,6 +372,22 @@ body {
 .session-item:hover { background: var(--surface-hover); }
 .session-item.active { background: var(--primary-light); }
 
+/* P5-10-4：会话主体是按钮，读屏名称取可见文本；「更多」放在按钮外，避免嵌套交互 */
+.session-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
 .session-item .session-title {
     flex: 1;
     font-weight: 400;
@@ -532,6 +547,18 @@ body {
     gap: 18px;
 }
 
+/* P5-11-3：窗口化渲染的上下占位，不参与收缩，高度由实测/估算决定 */
+.virtual-pad {
+    flex: 0 0 auto;
+    width: 100%;
+    pointer-events: none;
+}
+
+/* 窗口切换时消息会重复挂载，再播入场动画会闪；虚拟化下直接显示 */
+.messages.is-virtual .message {
+    animation: none;
+}
+
 .message {
     max-width: 88%;
     line-height: 1.65;
@@ -640,6 +667,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: var(--density-row);
     font-size: var(--fs-xs);
     color: var(--text-secondary);
 }
@@ -700,7 +728,7 @@ body {
 .timeline {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--density-gap);
 }
 
 /* 文件变更面板：总变动摘要在上，展开后是文件清单，点文件到右侧看 diff */
@@ -833,6 +861,29 @@ body {
     line-height: 1.6;
 }
 
+/* P5-09：Markdown 表格统一边框 + 斑马纹，行高跟随密度档位 */
+.md-content table {
+    width: 100%;
+    margin: 10px 0;
+    border: 1px solid var(--border);
+    border-collapse: collapse;
+    font-size: var(--fs-sm);
+}
+.md-content th,
+.md-content td {
+    padding: var(--density-pad-y) var(--space-3);
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+.md-content th {
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+.md-content tbody tr:nth-child(even) { background: var(--surface-2); }
+.md-content tbody tr:last-child td { border-bottom: none; }
+
 .code-block {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -906,7 +957,8 @@ body {
     opacity: 0;
     transition: opacity .2s;
 }
-.message.assistant:hover .msg-actions { opacity: 1; }
+.message.assistant:hover .msg-actions,
+.message.assistant:focus-within .msg-actions { opacity: 1; }
 
 .msg-action-btn {
     font-size: var(--fs-xs);
@@ -1381,6 +1433,13 @@ body {
     transition: all .15s;
 }
 .source-chip:hover { color: var(--primary); border-color: var(--primary); }
+/* P5-09：位置直接可见，相关度仍保留在 title 里 */
+.source-pos {
+    margin-left: 6px;
+    padding-left: 6px;
+    border-left: 1px solid var(--border);
+    opacity: .75;
+}
 .source-chip.expanded {
     color: var(--primary);
     border-color: var(--primary);

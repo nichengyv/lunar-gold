@@ -227,6 +227,25 @@ describe('chat store', () => {
     expect(store.messages.some((m) => m.role === 'user' && m.content === CONTINUE_PROMPT)).toBe(true);
   });
 
+  it('P5-11-3：流式合帧后最终正文与后端全量文本一致', async () => {
+    const chunks = ['第一段', '第一段\n\n第二段', '第一段\n\n第二段\n\n尾段'];
+    streamChatMock.mockImplementation(async (_payload, hooks) => {
+      hooks.onSessionId?.(3);
+      hooks.onRunId?.(9);
+      hooks.onThinking?.('思考');
+      for (const text of chunks) hooks.onContent?.(text, text);
+      hooks.onDone?.(chunks[chunks.length - 1]);
+    });
+
+    const store = useChatStore();
+    await store.sendMessage('你好');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+    expect(assistantMessage().content).toBe('第一段\n\n第二段\n\n尾段');
+    expect(assistantMessage().thinking).toBe('思考');
+    expect(assistantMessage().streaming).toBe(false);
+  });
+
   it('按 runId 重放已落库事件恢复正文', async () => {
     localStorage.clear();
     vi.mocked(agentApi.getRunEvents).mockResolvedValue({

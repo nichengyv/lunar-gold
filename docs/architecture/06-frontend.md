@@ -51,6 +51,8 @@ frontend/src/
 
 `no_progress` 不单独弹出提示，最终由 `completion` 统一展示结果，避免重复打扰。
 
+**长会话节流（P5-11-3）**：`content` / `thinking` 事件不直接写响应式状态，而是交给 `utils/frameThrottle.ts` 按帧合并（rAF + 50ms 最小间隔，最多 20 次/秒），同一帧只保留最新全量文本；`done`、`error`、用户停止与 `finally` 强制 flush，保证最终正文与后端全量文本逐字一致。自动跟底同样合帧，并且只在用户停留底部时跟随。
+
 ---
 
 ## 4. 三条恢复路径
@@ -70,7 +72,9 @@ frontend/src/
 | 组件 | 职责 |
 |---|---|
 | `ChatMessage.vue` | 消息正文、工具轨迹、完成状态徽标（已完成/未验证/未完成及原因） |
-| `MarkdownContent.vue` | Markdown 渲染、代码块、diff |
+| `MarkdownContent.vue` | Markdown 渲染、代码块、diff；流式时只重算变化段落，结束后整篇解析 |
+| `composables/useVirtualMessages.ts` | 消息数 > 200 时按可视窗口渲染，实测高度 + 上下占位，供定位与缩略导航复用偏移 |
+| `utils/focusTrap.ts` | 快捷键面板的焦点查询与 Tab 循环，避免焦点逃逸到背景页面 |
 | `ApprovalCard.vue` | 审批卡片、A/D 快捷键、倒计时、详情折叠 |
 | `PendingChangesCard.vue` | 待处理文件变更与撤回入口 |
 | `WorkbenchDock.vue` | 右侧工作台：文件树、编辑器、变更审查 |
@@ -95,7 +99,10 @@ frontend/src/
 - `styles/tokens.css` 是唯一 token 层：颜色语义、焦点环、层级、密度、状态色。
 - 亮暗两套 token 一一对应，组件内不写死 hex（白名单例外仅限主题预览）。
 - `theme` store 负责切换、持久化、首屏防闪白与字号注入。
-- 支持 `:focus-visible` 焦点环与 `prefers-reduced-motion`。
+- 消息密度只切 token：`--density-row/--density-gap/--density-pad-y` 默认 32px / 6px / 6px，`[data-density="compact"]` 覆盖为 24px / 4px / 4px；设置页「外观」切换，`theme.density` 持久化并在挂载前应用。
+- 支持 `:focus-visible` 焦点环。
+- 减少动效由 `theme.reduceMotion` 统一控制：默认跟随系统并监听 `matchMedia`，设置页可手动开启并持久化，挂载前写入 `html[data-motion="reduce"]`；平滑滚动同步降级为 `auto`。
+- 图标按钮具备 `aria-label`，审批队列有区域语义；流式、连接与审批状态经 `aria-live="polite"` 播报。
 
 ---
 
@@ -104,13 +111,15 @@ frontend/src/
 | 项 | 状态 |
 |---|---|
 | 断线续传 | 已完成（runId 重放 + 正文检查点） |
-| 审批键盘化 | 部分完成：A/D 已有；J/K 切换、批量、审批历史未做 |
-| 长任务进度 | 部分完成：计划条已有；阶段耗时、预算可视化、失败分级未做 |
-| 三态 | 部分完成：会话骨架与错误态已有；工具运行态与统一空态未完成 |
-| 消息排版 | 未完成：代码块头与复制、密度档位 |
-| 响应式 | 部分完成：1024 图标栏、768 抽屉已有；960×640 实测未归档 |
-| 前端自动化测试 | 未开始：无 Vitest / Playwright |
-| 体验指标 | 未开始：无全局错误捕获与 Web Vitals |
+| 审批键盘化 | 已完成：A/D 决策、J/K 切换、低风险批量与审批历史；会话可 Tab + Enter 切换 |
+| 键盘与无障碍 | 已完成：`Ctrl + /` 面板焦点陷阱与恢复、图标按钮可读名称、审批播报、手动减少动效；axe 扫描 `/chat`、`/settings` critical 为 0 |
+| 长任务进度 | 已完成：五阶段时间线、阶段耗时、预算可视化与失败分级 |
+| 三态 | 已完成：会话切换骨架、首屏项目概览、工作台各 tab 空态、错误态（错误码/原因/重试/导出诊断）；工具运行中显示名称与实时耗时 |
+| 消息排版 | 已完成：代码块头与复制、表格斑马纹与密度行高、引用位置可见、密度档位（紧凑 24px / 舒适 32px）、操作条悬停或聚焦出现 |
+| 响应式 | 已完成：≥1024 三栏、768-1023 图标栏 + 工作台浮层、<768 抽屉；960×640 与三档宽度 E2E 归档，无横向滚动 |
+| 前端自动化测试 | 已完成基线：Vitest 12 文件 88 项，Playwright 23 条（含无障碍与响应式用例，`@perf` 按需运行） |
+| 体验指标 | 已完成：本地异常/Web Vitals/Run 恢复采样 + 设置页诊断面板 |
+| 长会话渲染 | 已完成：≤20 次/秒合帧、Markdown 只重算变化段落、>200 条窗口化渲染；500 条实测首屏 108ms、DOM 216 节点、60 秒流式 0 长任务 |
 
 ---
 

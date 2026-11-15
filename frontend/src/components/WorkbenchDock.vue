@@ -52,10 +52,10 @@
           </span>
         </div>
       </div>
-      <button class="wb-icon-btn" :title="fullscreen ? '退出全屏' : '全屏'" @click="$emit('toggle-fullscreen')">
+      <button class="wb-icon-btn" :title="fullscreen ? '退出全屏' : '全屏'" :aria-label="fullscreen ? '退出全屏' : '全屏'" @click="$emit('toggle-fullscreen')">
         <Icon :name="fullscreen ? 'compress' : 'expand'" :size="14" />
       </button>
-      <button class="wb-icon-btn" title="收起" @click="$emit('close')">
+      <button class="wb-icon-btn" title="收起" aria-label="收起工作台" @click="$emit('close')">
         <Icon name="x" :size="15" />
       </button>
     </div>

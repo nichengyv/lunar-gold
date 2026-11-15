@@ -350,6 +350,35 @@
 - **全量验收**：后端 `mvn -o test` **298 项，0 失败、0 错误、12 跳过，BUILD SUCCESS**；前端 `npx vitest run` **7 文件 57/57**；`npm run build` 通过（1847 个模块，本机 TEMP/TMP 指向工作区 `.tmp` 规避既有 esbuild 清理权限问题）；系统 Edge 下 Playwright 全量 **14/14**，完整套件 `--repeat-each=3` **42/42**。诊断 E2E 制造 window error/unhandled rejection，实际下载并读取 JSON，核验脱敏、关闭停采与清除。
 - **边界**：浏览器连接指标是当前设备的有界样本，后端指标是当前用户的审计聚合，均不是全平台 SLO；工具指标为进程累计而非最近 100 Run。E2E 继续采用浏览器层 API 仿真，不验证真实 Spring 事务或真实模型链路，也不断言 CI 必然产生固定 LCP/INP 数值；亮暗样式通过复用主题 token 保持，未新增整页视觉截图档案。长会话性能剖析与虚拟化仍属 P5-11-3。
 
+### 8.15 P5-11-3 长会话性能（2026-11-14）
+
+- **剖析方法与基线**：新增 `frontend/e2e/perf-long-session.spec.ts`（`@perf`，默认跳过，`PERF=1` 才运行），用 `page.route` 注入 500 条含标题/列表/代码块的消息与两段会话；`MutationObserver` 记录「点击会话 → 首条消息进入 DOM」，`PerformanceObserver('longtask')` 只统计流式开始后的长任务；页面内覆盖 `fetch` 返回 ReadableStream，按约 30 chunk/s 持续 60 秒。对生产构建（`vite preview`）实测：改造前首屏 **220ms**、消息区 **9000** DOM 节点、500 条全部渲染、8 秒流式 1 个 56ms 长任务；改造后首屏 **108ms**、消息区 **216** 节点、实际渲染 **11** 条、60 秒流式 **0** 长任务。
+- **流式按帧合并**：新增 `utils/frameThrottle.ts`（rAF 调度 + 50ms 最小间隔，push/flush/cancel）。`stores/chat.ts` 的正文与思考改为合帧提交，`onDone`/`onError`/停止/`finally` 强制 flush，保证最终正文与后端全量文本逐字一致。自动跟底同样合帧，并改为仅在用户停留底部时跟随。
+- **Markdown 增量渲染**：新增 `utils/markdownSegments.ts`。非流式仍整篇 `marked.parse`；流式用 `marked.lexer` 顶层 token 按 `type + raw` 做 200 条有界缓存，只渲染新增/变化段落，流式结束后切回整篇解析，修复引用式链接等跨段语义。代码块高亮与复制按钮行为不变，未变化代码块不重复高亮。
+- **虚拟滚动**：新增 `composables/useVirtualMessages.ts`，消息数 > 200 时只渲染可视窗口（上下 6 条 overscan、800px 缓冲），`ResizeObserver` 实测高度、未实测按估算，上下占位撑起真实滚动高度；≤ 200 条保持原全量渲染。搜索定位、缩略导航高亮与跳转改用高度缓存偏移，目标未渲染时先按估算滚动、渲染后按实测校正；正在流式的最后一条始终在窗口内。
+- **保真与边界**：单条消息复制与代码块复制不受影响；虚拟化下跨窗口整段拖选不可用，需要跳转后分段复制，边界写入 `spec.md`。虚拟化只改变渲染范围，不改变消息顺序、历史还原、断线恢复、审批与 ChangeSet 行为。
+- **全量验收**：前端 `npx vitest run` **10 文件 75/75**；`npm run build` 通过；系统 Edge 下 Playwright 全量 **14/14**（`@perf` 默认跳过），`PERF=1` 时 500 条性能用例通过；后端 `mvn -o test` **294 项，0 失败、0 错误、12 跳过，BUILD SUCCESS**。性能数字来自本机生产构建，不能外推为所有设备或 CI 环境的固定值。
+
+### 8.16 P5-10-4 键盘与无障碍（2026-11-15）
+
+- **快捷键面板**：`Ctrl + /` 打开，`aria-modal`；打开时记录来源焦点并聚焦关闭按钮，Tab / Shift+Tab 由 `utils/focusTrap.ts` 限制在面板内，Esc 或关闭按钮关闭后归还焦点（来源已卸载时回退输入框）。空态快捷键提示补充 `Ctrl + /`。
+- **会话项键盘化**：会话主体改为原生 `<button>`，「更多」按钮保留在按钮外避免嵌套交互；Enter / Space 原生切换，`aria-current` 标记当前会话，读屏名称取可见标题与时间。
+- **图标按钮与区域语义**：侧栏、工作台、文件树、审批卡片、编辑器、规则面板的图标按钮补 `aria-label`；审批队列为 `role="region"`，审批卡片名称为「待审批：路径 / 命令」。
+- **播报**：审批队列数量变化播报「有 N 项审批待确认，按 A 允许、D 拒绝、J/K 切换」，清空播报「审批已处理完」；流式结束的「回答已生成」在仍有待审批时不覆盖审批提示。
+- **减少动效**：`theme` store 新增 `reduceMotion`，默认跟随系统并监听 `matchMedia` 变化；设置页「外观」可手动开启并持久化。挂载前统一写入 `html[data-motion="reduce"]`，样式只保留一条规则；平滑滚动在减少动效下降级为 `auto`。
+- **验证**：新增 `e2e/accessibility.spec.ts` 5 条，覆盖面板焦点不逃逸与焦点恢复、会话项键盘切换、审批区域语义与键盘决策、`/chat` 与 `/settings` axe critical 0；axe 的 `nested-interactive` 与 `label-content-name-mismatch` 两项 serious 随会话项重构消除。前端 Vitest **12 文件 85/85**，系统 Edge 下 Playwright **19 通过、1 跳过**（`@perf`），`npm run build` 通过。
+- **边界**：新增 devDependency `@axe-core/playwright`，只用于测试；axe 只覆盖可自动检测规则，不等同完整 WCAG 审计。浏览器会拦截 `Ctrl + K`，该快捷键维持既有实现，未纳入 E2E。无后端改动、无数据库迁移。
+
+### 8.17 P5-09 剩余视觉项（2026-11-15）
+
+- **工具运行态**：`ToolInvocation` 增加前端 `startedAt`，`onToolCall` 写入开始时间；`ChatMessage.vue` 只在存在运行中工具时每秒刷新，折叠摘要显示「正在读取… · 已用 N 秒」，步骤行显示「进行中 · N 秒」，结束后改用后端 `costMs`，组件卸载时清理定时器。
+- **消息密度**：`tokens.css` 新增 `--density-row / --density-gap / --density-pad-y`，`[data-density="compact"]` 覆盖为 24px / 4px / 4px；`theme` store 持久化 `density`，设置页「外观」新增「消息密度」（舒适 / 紧凑）。`.step-row` 与 `.timeline` 只引用 token，紧凑档下工具行 24px、舒适档 32px。
+- **排版细节**：消息操作条增加 `:focus-within`，键盘 Tab 到复制按钮时同样可见；`.md-content table` 增加边框、表头底色、偶数行斑马纹与密度内边距；引用 chip 直接显示「第 N 段」，相关度保留在 `title`。
+- **响应式**：`toggleSidebar()` 断点由 `< 769` 统一为 `< 768`；768-1023 下工作台改为右侧浮层（宽度 `min(100vw - 56px, 520px)`）+ 半透明遮罩，点击遮罩收起，隐藏拖拽条，不再挤压正文。
+- **三态收口**：复核 `SkeletonMessage`、首屏空态、工作台 `wb-empty` 与 `ErrorState`；`ErrorState` 增加可选「导出诊断」，会话加载失败时可直接导出体验诊断 JSON，其他调用方不传则不显示。
+- **实测归档**：新增 `e2e/responsive.spec.ts` 4 条。960×640 侧栏 56px、横向溢出 0、输入框与发送按钮在视口内；900×700 工作台浮层右缘 ≤900、遮罩可关闭；767×700 侧栏默认在屏幕外、菜单按钮可拉出；1280×800 侧栏 280px。截图输出到 `frontend/test-results/`，不入库。
+- **验证**：前端 `npx vitest run` **12 文件 88/88**；系统 Edge 下 Playwright **23 通过、1 跳过**（`@perf`）；`npm run build` 通过。无后端改动、无数据库迁移、无新增依赖。
+
 详细分批状态见 [Phase 5 计划](phases/phase5/plan.md)。
 
 ---

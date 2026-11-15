@@ -47,6 +47,20 @@ const pathParts = computed(() => {
 
 const hasStats = computed(() => (preview.value?.additions ?? 0) > 0 || (preview.value?.deletions ?? 0) > 0);
 
+/** P5-10-4：读屏名称只保留动作与目标，不把整段 diff 读出来 */
+const cardLabel = computed(() => {
+  const prefix = isResolved.value
+    ? props.approval.resolved === 'APPROVE'
+      ? '已批准'
+      : '已拒绝'
+    : '待审批';
+  const target =
+    preview.value?.kind === 'command'
+      ? preview.value.command || '空命令'
+      : preview.value?.path || riskLabel.value;
+  return `${prefix}：${target}`;
+});
+
 /** diff 逐行分类，仅在展开时渲染 */
 const diffLines = computed(() => {
   const text = preview.value?.diff;
@@ -148,6 +162,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   <div
     class="approval-card"
     :class="{ resolved: isResolved, selected: selected && !isResolved }"
+    role="group"
+    :aria-label="cardLabel"
     @click="emit('select')"
   >
     <div class="approval-head">
@@ -159,7 +175,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
       <span class="approval-title">{{ isResolved ? resultLabel : '需要你确认' }}</span>
       <span class="approval-chip">{{ riskLabel }}</span>
       <span v-if="!isResolved" class="approval-timer">{{ remaining }}s</span>
-      <button class="approval-close" title="关闭" @click="close">×</button>
+      <button class="approval-close" title="关闭" aria-label="关闭审批卡片" @click="close">×</button>
     </div>
 
     <div v-if="!isResolved" class="approval-body">

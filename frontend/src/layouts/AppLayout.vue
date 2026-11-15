@@ -29,7 +29,7 @@
         <div class="ws-section-header">
           <span class="ws-section-plain">{{ isExplorerMode ? '资源管理器' : '任务' }}</span>
           <div v-if="sideTab === 'sessions'" class="ws-section-actions">
-            <button class="ws-action" title="搜索工作区/任务" @click="wsSearchOpen = !wsSearchOpen">
+            <button class="ws-action" title="搜索工作区/任务" aria-label="搜索工作区或任务" @click="wsSearchOpen = !wsSearchOpen">
               <Icon name="search" :size="14" />
             </button>
             <button v-if="hasLocalWorkspace" class="ws-action" title="新建工作区" @click="onCreateWorkspace">
@@ -49,7 +49,7 @@
               placeholder="搜索工作区或任务..."
               @keydown="onSearchKeydown"
             >
-            <button v-if="wsKeyword" class="ws-search-clear" title="清空" @click="wsKeyword = ''">
+            <button v-if="wsKeyword" class="ws-search-clear" title="清空" aria-label="清空搜索" @click="wsKeyword = ''">
               <Icon name="x" :size="12" />
             </button>
           </div>
@@ -84,7 +84,7 @@
               @click="onWorkspaceClick(p)"
             >
               <el-dropdown trigger="click" @command="(c: string) => onWorkspaceCommand(c, p)">
-                <button class="more-btn" title="更多" @click.stop>
+                <button class="more-btn" title="更多" aria-label="工作区操作" @click.stop>
                   <Icon name="more" :size="16" />
                 </button>
                 <template #dropdown>
@@ -96,10 +96,10 @@
               </el-dropdown>
               <span class="ws-icon"><Icon name="folder" :size="14" /></span>
               <span class="ws-name" :title="p.workspacePath || p.name">{{ p.name }}</span>
-              <button class="ws-del" title="删除工作区" @click.stop="onDeleteWorkspace(p)">
+              <button class="ws-del" title="删除工作区" aria-label="删除工作区" @click.stop="onDeleteWorkspace(p)">
                 <Icon name="trash" :size="13" />
               </button>
-              <button class="ws-new-session" title="在此新建任务" @click.stop="onNewSessionIn(p)">
+              <button class="ws-new-session" title="在此新建任务" aria-label="在此新建任务" @click.stop="onNewSessionIn(p)">
                 <Icon name="plus" :size="14" />
               </button>
             </div>
@@ -117,10 +117,9 @@
                   active: s.id === chat.currentSessionId,
                   'search-active': s.id === activeSearchSessionId
                 }"
-                @click="onSwitchSession(s.id, p)"
               >
                 <el-dropdown trigger="click" @command="(c: string) => onSessionCommand(c, s.id, s.title)">
-                  <button class="more-btn" title="更多" @click.stop>
+                  <button class="more-btn" title="更多" aria-label="任务操作" @click.stop>
                   <Icon name="more" :size="16" />
                 </button>
                   <template #dropdown>
@@ -130,22 +129,29 @@
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-                <div class="session-title" title="双击重命名">
+                <button
+                  type="button"
+                  class="session-main"
+                  :aria-current="s.id === chat.currentSessionId ? 'true' : undefined"
+                  @click="onSwitchSession(s.id, p)"
+                >
+                  <div class="session-title" title="双击重命名">
+                    <span
+                      v-for="(part, i) in highlightParts(s.title || `任务${s.id}`)"
+                      :key="i"
+                      :class="{ 'match-hit': part.hit }"
+                    >{{ part.text }}</span>
+                  </div>
                   <span
-                    v-for="(part, i) in highlightParts(s.title || `任务${s.id}`)"
-                    :key="i"
-                    :class="{ 'match-hit': part.hit }"
-                  >{{ part.text }}</span>
-                </div>
-                <span
-                  v-if="sessionRunMeta(s)"
-                  class="session-dot"
-                  :class="sessionRunClass(s)"
-                  :title="sessionRunTitle(s)"
-                ></span>
-                <div class="session-time" :title="formatDateTime(s.updateTime)">{{
-                  formatRelativeTime(s.updateTime)
-                }}</div>
+                    v-if="sessionRunMeta(s)"
+                    class="session-dot"
+                    :class="sessionRunClass(s)"
+                    :title="sessionRunTitle(s)"
+                  ></span>
+                  <div class="session-time" :title="formatDateTime(s.updateTime)">{{
+                    formatRelativeTime(s.updateTime)
+                  }}</div>
+                </button>
               </div>
               <div v-if="matchedSessions(p.id).length === 0" class="session-empty">
                 {{ sessionsOf(p.id).length === 0 ? '暂无任务' : '没有匹配的任务' }}
@@ -186,7 +192,7 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="menu-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
+          <button class="menu-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
             <Icon name="menu" :size="18" />
           </button>
           <span class="page-title">{{ pageTitle }}</span>
@@ -198,6 +204,7 @@
             class="icon-btn"
             :class="{ active: isExplorerMode }"
             :title="isExplorerMode ? '返回导航栏' : '打开工作区资源管理器'"
+            :aria-label="isExplorerMode ? '返回导航栏' : '打开工作区资源管理器'"
             @click="toggleExplorer"
           >
             <Icon name="panel-left" :size="16" />
@@ -208,11 +215,12 @@
             class="icon-btn"
             :class="{ active: chat.dockOpen }"
             title="任务详情侧边栏"
+            aria-label="任务详情侧边栏"
             @click="toggleTaskDock"
           >
             <Icon name="panel" :size="16" />
           </button>
-          <button class="icon-btn" :title="theme.isDark ? '切换到浅色' : '切换到深色'" @click="theme.toggle()">
+          <button class="icon-btn" :title="theme.isDark ? '切换到浅色' : '切换到深色'" :aria-label="theme.isDark ? '切换到浅色主题' : '切换到深色主题'" @click="theme.toggle()">
             <Icon :name="theme.isDark ? 'sun' : 'moon'" :size="16" />
           </button>
         </div>
@@ -361,7 +369,7 @@ function toggleCollapse() {
  * 原来侧栏头里的「<<」按钮已删，统一走这里。
  */
 function toggleSidebar() {
-  if (window.innerWidth < 769) {
+  if (window.innerWidth < 768) {
     sidebarOpen.value = !sidebarOpen.value;
   } else {
     toggleCollapse();
@@ -638,7 +646,6 @@ function isExpanded(projectId: number) {
 }
 
 onMounted(async () => {
-  theme.init();
   window.addEventListener('resize', onWindowResize);
   onWindowResize();
   try {

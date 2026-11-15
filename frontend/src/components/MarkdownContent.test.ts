@@ -59,4 +59,13 @@ describe('MarkdownContent', () => {
     expect(wrapper.findAll('li')).toHaveLength(2);
     expect(wrapper.find('a').attributes('href')).toBe('https://example.com');
   });
+
+  it('流式模式同样渲染 Markdown 与代码块复制按钮', () => {
+    const wrapper = mount(MarkdownContent, {
+      props: { content: '## 标题\n\n第一段\n\n```ts\nconst a = 1;\n```', streaming: true }
+    });
+    expect(wrapper.find('h2').text()).toBe('标题');
+    expect(wrapper.find('.code-lang').text()).toBe('ts');
+    expect(wrapper.find('.copy-code-btn').exists()).toBe(true);
+  });
 });

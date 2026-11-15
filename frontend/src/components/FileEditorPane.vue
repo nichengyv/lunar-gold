@@ -7,13 +7,13 @@
         <span v-if="dirty" class="fe-dirty">未保存</span>
       </div>
       <div class="fe-actions">
-        <button class="fe-btn" :disabled="saving || loading" title="重新加载" @click="reload">
+        <button class="fe-btn" :disabled="saving || loading" title="重新加载" aria-label="重新加载文件" @click="reload">
           <Icon name="refresh" :size="13" />
         </button>
         <button class="fe-btn primary" :disabled="!dirty || saving" @click="save">
           <Icon name="save" :size="13" /> {{ saving ? '保存中…' : '保存' }}
         </button>
-        <button class="fe-btn" title="关闭" @click="$emit('close')">
+        <button class="fe-btn" title="关闭" aria-label="关闭编辑器" @click="$emit('close')">
           <Icon name="x" :size="13" />
         </button>
       </div>
