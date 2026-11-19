@@ -189,7 +189,7 @@
       </div>
     </aside>
 
-    <main class="main">
+    <main ref="mainEl" class="main">
       <header class="topbar">
         <div class="topbar-left">
           <button class="menu-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'">
@@ -319,6 +319,27 @@
         </template>
       </el-dialog>
     </main>
+
+    <!-- 任务详情侧边栏：main 的兄弟节点，整列顶开会话区；≥1024px 内联占宽，<1024px 浮层 -->
+    <div
+      v-if="showDock && !dockFullscreen && isNarrowDock"
+      class="dock-backdrop"
+      @click="closeTaskDock"
+    ></div>
+    <div
+      v-if="showDock && !dockFullscreen"
+      class="dock-resizer"
+      :class="{ dragging: dockDragging }"
+      title="拖动调整工作台宽度"
+      @mousedown="startDockDrag"
+    ></div>
+    <WorkbenchDock
+      v-if="showDock"
+      :width="dockWidth"
+      :fullscreen="dockFullscreen"
+      @close="closeTaskDock"
+      @toggle-fullscreen="dockFullscreen = !dockFullscreen"
+    />
   </div>
 </template>
 
@@ -335,6 +356,7 @@ import { formatDateTime, formatRelativeTime } from '../utils/format';
 import * as workspaceApi from '../api/workspace';
 import * as agentApi from '../api/agent';
 import WorkspaceFileTree from '../components/WorkspaceFileTree.vue';
+import WorkbenchDock from '../components/WorkbenchDock.vue';
 import Icon from '../components/Icon.vue';
 import type { FileNode, MessageSearchHit, ProjectInfo, SessionInfo } from '../types/api';
 
@@ -348,6 +370,58 @@ const theme = useThemeStore();
 
 /** 网页端（cloud）不提供本地工作区，文件树、工作区管理与文件类入口全部隐藏 */
 const hasLocalWorkspace = computed(() => meta.has('LOCAL_WORKSPACE'));
+
+// ——— 任务详情侧边栏（右侧工作台）———
+// 与 main 同级、整列顶开会话区；宽屏内联占宽，<1024px 浮层
+const DOCK_WIDTH_KEY = 'chat.dockWidth';
+// 对话区最小宽度：再窄输入框占位提示就会折成两行，因此把压缩下限提高
+const MIN_CHAT_WIDTH = 540;
+// 工作台与会话区之间用留白分隔，不再画竖线
+const DOCK_GUTTER = 4;
+const mainEl = ref<HTMLElement | null>(null);
+const dockWidth = ref(Number(localStorage.getItem(DOCK_WIDTH_KEY)) || 520);
+const dockFullscreen = ref(false);
+const dockDragging = ref(false);
+const viewportWidth = ref(window.innerWidth);
+const isNarrowDock = computed(() => viewportWidth.value < 1024);
+const showDock = computed(() => route.name === 'chat' && chat.dockOpen);
+
+/** 内联工作台是 main 的兄弟节点：main 已被顶窄，算上限时要把它占的宽度加回来 */
+function containerWidth() {
+  const mainWidth = mainEl.value?.clientWidth ?? window.innerWidth;
+  return showDock.value && !isNarrowDock.value && !dockFullscreen.value
+    ? mainWidth + dockWidth.value + DOCK_GUTTER
+    : mainWidth;
+}
+
+function maxDockWidth() {
+  return Math.max(300, Math.min(window.innerWidth * 0.7, containerWidth() - MIN_CHAT_WIDTH - DOCK_GUTTER));
+}
+
+function clampDockWidth(w: number) {
+  return Math.min(maxDockWidth(), Math.max(300, w));
+}
+
+/** 拖动手柄：以工作台左缘为准，鼠标向左拖工作台变宽；拖动期间禁掉文本选择避免误选 */
+function startDockDrag(e: MouseEvent) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = dockWidth.value;
+  dockDragging.value = true;
+  document.body.style.userSelect = 'none';
+  const onMove = (ev: MouseEvent) => {
+    dockWidth.value = clampDockWidth(startW + (startX - ev.clientX));
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.userSelect = '';
+    dockDragging.value = false;
+    localStorage.setItem(DOCK_WIDTH_KEY, String(dockWidth.value));
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
 
 const sidebarOpen = ref(false);
 
@@ -377,6 +451,7 @@ function toggleSidebar() {
 }
 
 function onWindowResize() {
+  viewportWidth.value = window.innerWidth;
   if (window.innerWidth < 1024) {
     if (!sidebarCollapsed.value) {
       sidebarCollapsed.value = true;
@@ -385,6 +460,14 @@ function onWindowResize() {
   } else if (autoCollapsed) {
     sidebarCollapsed.value = localStorage.getItem(COLLAPSE_KEY) === '1';
     autoCollapsed = false;
+  }
+  // 窗口变窄时立刻收敛工作台宽度，避免临时把对话区挤到最小宽度以下
+  if (chat.dockOpen && !dockFullscreen.value) {
+    const clamped = clampDockWidth(dockWidth.value);
+    if (clamped !== dockWidth.value) {
+      dockWidth.value = clamped;
+      localStorage.setItem(DOCK_WIDTH_KEY, String(clamped));
+    }
   }
 }
 // 侧栏搜索：同时过滤工作区名和其下会话名
@@ -416,12 +499,8 @@ function toggleExplorer() {
   sidebarOpen.value = true;
 }
 
-/** 任务详情侧边栏：收起前先确认未保存的编辑内容 */
-async function toggleTaskDock() {
-  if (!chat.dockOpen) {
-    chat.openDock(chat.dockTab);
-    return;
-  }
+/** 收起工作台前先确认：编辑器里的未保存内容会随挂载一起消失 */
+async function closeTaskDock() {
   if (chat.editorDirty) {
     try {
       await ElMessageBox.confirm('工作台里还有未保存的改动，收起后会丢失。', '未保存的改动', {
@@ -434,6 +513,15 @@ async function toggleTaskDock() {
     }
   }
   chat.closeDock();
+}
+
+/** 任务详情侧边栏：打开或收起 */
+async function toggleTaskDock() {
+  if (!chat.dockOpen) {
+    chat.openDock(chat.dockTab);
+    return;
+  }
+  await closeTaskDock();
 }
 /** 编辑器里当前激活的文件，用于资源管理器里高亮 */
 const editingPath = computed(() => chat.activeFilePath);
@@ -648,6 +736,10 @@ function isExpanded(projectId: number) {
 onMounted(async () => {
   window.addEventListener('resize', onWindowResize);
   onWindowResize();
+  // 布局尺寸要等容器挂载后才知道，这里再收敛一次工作台初始宽度
+  nextTick(() => {
+    dockWidth.value = clampDockWidth(dockWidth.value);
+  });
   try {
     // 先拿到项目（没有则后端自动建默认项目），再加载各工作区下的会话
     await project.load();
@@ -1084,5 +1176,58 @@ async function onLogout() {
   font-size: 11px;
   color: var(--text-secondary);
   font-style: italic;
+}
+
+/* 任务详情侧边栏是 main 的兄弟节点：整列高度，直接把会话区顶窄 */
+.dock-resizer {
+    width: 4px;
+    flex-shrink: 0;
+    position: relative;
+    cursor: col-resize;
+    background: transparent;
+}
+/* 悬停/拖动才在留白中间显一小段细线，平时只是一段背景留白；
+   上下各留出头部高度与边距，任何时候都不会贯穿顶栏把顶层切开 */
+.dock-resizer::after {
+    content: '';
+    position: absolute;
+    top: calc(var(--header-height) + 6px);
+    bottom: 8px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: var(--primary);
+    opacity: 0;
+    transition: opacity var(--dur-fast);
+}
+.dock-resizer:hover::after,
+.dock-resizer.dragging::after {
+    opacity: 0.5;
+}
+
+/* <1024px：工作台不挤压正文，改为右侧整列浮层 + 遮罩 */
+@media (max-width: 1023px) {
+    .dock-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 2399;
+        background: rgb(0 0 0 / 28%);
+    }
+    .workbench:not(.fullscreen) {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2400;
+        width: min(calc(100vw - 56px), 520px) !important;
+        box-shadow: var(--shadow-overlay);
+    }
+    .dock-resizer { display: none; }
+}
+
+/* 全屏态让出左侧导航；折叠成图标轨时只让 56px */
+@media (min-width: 769px) {
+    .sidebar.collapsed ~ .workbench.fullscreen { left: 56px; }
 }
 </style>

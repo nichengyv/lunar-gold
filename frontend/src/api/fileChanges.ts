@@ -6,8 +6,8 @@ export function fetchPendingChanges(projectId: number): Promise<PendingFileChang
   return http.get('/api/file-changes', { params: { projectId, status: 'PENDING' } });
 }
 
-/** 单条撤销 */
-export function revertChange(id: number): Promise<{ ok: boolean; error?: string }> {
+/** 单条撤销；响应结构与批量撤回统一为 RevertResult */
+export function revertChange(id: number): Promise<RevertResult> {
   return http.post(`/api/file-changes/${id}/revert`);
 }
 

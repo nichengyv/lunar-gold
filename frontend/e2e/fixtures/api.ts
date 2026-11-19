@@ -76,7 +76,13 @@ export type ApiMockOptions = {
   /** 断点恢复成功后再拉会话历史时返回的完整消息（模拟后端已落库的完整回答） */
   messagesAfterRecovery?: Record<number, unknown[]>;
   runningRuns?: unknown[];
-  runEvents?: Record<number, unknown>;
+  /** P7-05：运行事件按轮询次数返回不同快照，用于「运行中 → 终态」的断流恢复 */
+  runEvents?: Record<number, unknown | ((poll: number) => unknown)>;
+  /**
+   * P7-05：是否预置本地令牌。桌面端默认由 /api/desktop/token 自动换取，
+   * 置 false 可覆盖路由守卫的本地令牌引导路径。
+   */
+  seedToken?: boolean;
   /** 聊天 SSE 响应体；函数形式可按请求体动态生成 */
   stream?: string | ((body: Record<string, unknown>, attempt: number) => string);
   /** 流式响应前的延迟，用于「生成中停止」场景 */
@@ -154,13 +160,16 @@ export function multiApprovalStream(
 }
 
 export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise<void> {
-  await page.addInitScript((token) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('username', 'e2e');
-  }, E2E_TOKEN);
+  if (options.seedToken !== false) {
+    await page.addInitScript((token) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('username', 'e2e');
+    }, E2E_TOKEN);
+  }
 
   let changeSet = options.changeSet ?? null;
   let streamAttempt = 0;
+  const runEventPolls: Record<number, number> = {};
   // 一旦前端按 runId 拉过运行事件，就认为后端已把完整回答落库
   let runEventsFetched = false;
 
@@ -196,6 +205,10 @@ export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise
     if (/^\/api\/projects\/\d+$/.test(path)) {
       return route.fulfill({ json: ok(E2E_PROJECT) });
     }
+    // 工作台文件标签打开时读取文件内容；返回一段文本避免编辑器拿到 null
+    if (/^\/api\/projects\/\d+\/workspace\/file$/.test(path) && method === 'GET') {
+      return route.fulfill({ json: ok('const demo = 1;\n') });
+    }
     if (path === '/api/settings/defaults') {
       return route.fulfill({ json: ok({ model: 'e2e-model', reasoning: 'STANDARD', permission: 'WRITE' }) });
     }
@@ -206,7 +219,7 @@ export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise
           windowRuns: 0,
           firstToken: { p95Ms: null, sampleCount: 0 },
           tool: { failureRate: null, totalCount: 0, failedCount: 0, scope: 'PROCESS' },
-          approval: { averageWaitMs: null, sampleCount: 0 },
+          approval: { averageWaitMs: null, sampleCount: 0, byEntry: [] },
           tokens: { averageTotalTokens: null, totalTokens: 0, sampleCount: 0 }
         })
       });
@@ -232,8 +245,14 @@ export async function mockApi(page: Page, options: ApiMockOptions = {}): Promise
     }
     if (/^\/api\/agent\/runs\/\d+\/events$/.test(path)) {
       runEventsFetched = true;
-      const runId = Number(path.split('/')[5]);
-      return route.fulfill({ json: ok(options.runEvents?.[runId] ?? { runId, state: 'SUCCEEDED', events: [] }) });
+      const runId = Number(path.split('/')[4]);
+      runEventPolls[runId] = (runEventPolls[runId] ?? 0) + 1;
+      const entry = options.runEvents?.[runId];
+      const snapshot =
+        typeof entry === 'function'
+          ? entry(runEventPolls[runId])
+          : (entry ?? { runId, state: 'SUCCEEDED', events: [] });
+      return route.fulfill({ json: ok(snapshot) });
     }
     if (path === '/api/agent/chat/stream') {
       streamAttempt += 1;

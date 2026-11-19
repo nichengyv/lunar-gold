@@ -22,9 +22,6 @@
           追踪
           <span v-if="pendingApprovalCount" class="wb-tab-count wb-tab-warn">{{ pendingApprovalCount }}</span>
         </button>
-        <button class="wb-tab" :class="{ active: chat.dockTab === 'metrics' }" @click="select('metrics')">
-          监控
-        </button>
         <!-- 每个打开的文件一个 tab（可多个），tab 上有未保存圆点与关闭叉号；可拖拽排序 -->
         <div
           v-for="p in chat.openFiles"
@@ -211,6 +208,55 @@
 
           <!-- 无统计（会话还没跑完一轮）时仍展示上面的待审批区 -->
           <template v-if="traceStats">
+          <!-- 工具时间线：日常最常看的过程记录，放在最上面 -->
+          <div class="trace-section">
+            <div class="trace-section-title">工具时间线</div>
+            <div v-if="!traceStats.timeline.length" class="wb-empty-inline">（本会话无工具调用）</div>
+            <template v-for="(t, i) in traceStats.timeline" :key="i">
+              <!-- P5-12-3：行内直接给「改了哪个文件 / 增删多少行」，待审批的调用单独高亮 -->
+              <div
+                class="trace-tool-row"
+                :class="{
+                  'is-pending': timelinePending(t),
+                  'is-clickable': !!t.path,
+                  expanded: expandedTrace === i
+                }"
+                @click="onTraceRowClick(i, t)"
+              >
+                <span class="trace-tool-source" :class="t.source === 'mcp' ? 'src-mcp' : 'src-builtin'">
+                  {{ t.source === 'mcp' ? 'MCP' : '内置' }}
+                </span>
+                <span class="trace-tool-name" :title="t.argsSummary">{{ t.name }}</span>
+                <span v-if="t.path" class="trace-tool-path" :title="t.path">{{ baseName(t.path) }}</span>
+                <span v-if="timelinePending(t)" class="trace-tool-pending">待审批</span>
+                <span v-if="(t.additions ?? 0) || (t.deletions ?? 0)" class="trace-tool-stat">
+                  <span class="wb-add">+{{ t.additions ?? 0 }}</span>
+                  <span class="wb-del">−{{ t.deletions ?? 0 }}</span>
+                </span>
+                <span class="trace-tool-status" :class="t.status">{{ t.status === 'success' ? '✓' : t.status === 'error' ? '✗' : '…' }}</span>
+                <span class="trace-tool-cost">{{ fmtMs(t.costMs) }}</span>
+              </div>
+              <!-- 点轨迹行展开该文件的 diff（取自本轮消息里的变更） -->
+              <div v-if="expandedTrace === i" class="trace-diff-preview trace-row-diff">
+                <div class="trace-diff-header">
+                  <Icon name="file-text" :size="10" />
+                  {{ t.path }}
+                  <span class="trace-diff-source">（{{ traceRowDiff?.action === 'create' ? '新建' : '修改' }}）</span>
+                  <span class="trace-diff-close" @click.stop="closeTraceDiff" title="关闭">✕</span>
+                </div>
+                <pre v-if="traceRowDiff?.diff" class="trace-diff-code">{{ traceRowDiff.diff }}</pre>
+                <div v-else class="trace-diff-empty">本轮轨迹未保存该文件的 diff</div>
+                <button class="trace-diff-open" @click.stop="chat.openFile(t.path!)">在编辑器中打开 →</button>
+              </div>
+            </template>
+          </div>
+
+          <!-- 统计、耗时、MCP、聚合收进「运行详情」，默认收起，避免日常视图过载 -->
+          <details class="trace-details">
+            <summary>
+              运行详情
+              <span class="trace-details-hint">统计 · 耗时拆分 · MCP · 聚合</span>
+            </summary>
           <!-- Overview 统计卡片 -->
           <div class="trace-overview-wrapper">
             <button class="trace-export-btn" :disabled="!chat.currentSessionId" @click="exportSessionMd" title="导出为 Markdown">
@@ -323,49 +369,6 @@
             </div>
           </div>
 
-          <!-- 工具时间线 -->
-          <div class="trace-section">
-            <div class="trace-section-title">工具时间线</div>
-            <div v-if="!traceStats.timeline.length" class="wb-empty-inline">（本会话无工具调用）</div>
-            <template v-for="(t, i) in traceStats.timeline" :key="i">
-              <!-- P5-12-3：行内直接给「改了哪个文件 / 增删多少行」，待审批的调用单独高亮 -->
-              <div
-                class="trace-tool-row"
-                :class="{
-                  'is-pending': timelinePending(t),
-                  'is-clickable': !!t.path,
-                  expanded: expandedTrace === i
-                }"
-                @click="onTraceRowClick(i, t)"
-              >
-                <span class="trace-tool-source" :class="t.source === 'mcp' ? 'src-mcp' : 'src-builtin'">
-                  {{ t.source === 'mcp' ? 'MCP' : '内置' }}
-                </span>
-                <span class="trace-tool-name" :title="t.argsSummary">{{ t.name }}</span>
-                <span v-if="t.path" class="trace-tool-path" :title="t.path">{{ baseName(t.path) }}</span>
-                <span v-if="timelinePending(t)" class="trace-tool-pending">待审批</span>
-                <span v-if="(t.additions ?? 0) || (t.deletions ?? 0)" class="trace-tool-stat">
-                  <span class="wb-add">+{{ t.additions ?? 0 }}</span>
-                  <span class="wb-del">−{{ t.deletions ?? 0 }}</span>
-                </span>
-                <span class="trace-tool-status" :class="t.status">{{ t.status === 'success' ? '✓' : t.status === 'error' ? '✗' : '…' }}</span>
-                <span class="trace-tool-cost">{{ fmtMs(t.costMs) }}</span>
-              </div>
-              <!-- 点轨迹行展开该文件的 diff（取自本轮消息里的变更） -->
-              <div v-if="expandedTrace === i" class="trace-diff-preview trace-row-diff">
-                <div class="trace-diff-header">
-                  <Icon name="file-text" :size="10" />
-                  {{ t.path }}
-                  <span class="trace-diff-source">（{{ traceRowDiff?.action === 'create' ? '新建' : '修改' }}）</span>
-                  <span class="trace-diff-close" @click.stop="closeTraceDiff" title="关闭">✕</span>
-                </div>
-                <pre v-if="traceRowDiff?.diff" class="trace-diff-code">{{ traceRowDiff.diff }}</pre>
-                <div v-else class="trace-diff-empty">本轮轨迹未保存该文件的 diff</div>
-                <button class="trace-diff-open" @click.stop="chat.openFile(t.path!)">在编辑器中打开 →</button>
-              </div>
-            </template>
-          </div>
-
           <!-- 工具按名称聚合 -->
           <div v-if="traceStats.tools.length" class="trace-section">
             <div class="trace-section-title">工具统计（按名称）</div>
@@ -414,95 +417,12 @@
               </div>
             </div>
           </div>
+          </details>
           </template>
         </template>
       </template>
 
-      <!-- D3 可观测性：全局累计的 Agent 工具调用监控面板 -->
-      <template v-else-if="chat.dockTab === 'metrics'">
-        <div class="metrics-header">
-          <button class="trace-refresh-btn" @click="refreshMetrics" :disabled="metricsLoading" title="刷新">
-            <Icon :name="metricsLoading ? 'loader' : 'refresh'" :size="11" :class="{ 'wb-spin': metricsLoading }" />
-          </button>
-          <span v-if="metricsData?.generatedAt" class="metrics-generated">
-            更新于 {{ fmtTime(metricsData.generatedAt) }}
-          </span>
-        </div>
 
-        <div v-if="metricsLoading && !metricsData" class="wb-empty">
-          <Icon name="loader" :size="22" class="wb-spin" />
-          <p>加载监控数据…</p>
-        </div>
-        <div v-else-if="metricsError" class="wb-empty">
-          <Icon name="alert-circle" :size="22" />
-          <p>加载失败</p>
-          <p class="wb-empty-sub">{{ metricsError }}</p>
-        </div>
-        <div v-else-if="!metricsData" class="wb-empty">
-          <Icon name="activity" :size="22" />
-          <p>暂无监控数据</p>
-          <p class="wb-empty-sub">后端还没记录到任何工具调用</p>
-        </div>
-        <template v-else>
-          <!-- Overview 卡片 -->
-          <div class="metrics-overview">
-            <div class="trace-card">
-              <div class="trace-card-val">{{ metricsData.summary?.totalCalls ?? 0 }}</div>
-              <div class="trace-card-label">总调用</div>
-            </div>
-            <div class="trace-card">
-              <div class="trace-card-val">{{ metricsData.summary?.uniqueTools ?? 0 }}</div>
-              <div class="trace-card-label">工具种类</div>
-            </div>
-            <div class="trace-card" :class="{ bad: (metricsData.summary?.successRate ?? 100) < 90 }">
-              <div class="trace-card-val">{{ metricsData.summary?.successRate ?? 0 }}%</div>
-              <div class="trace-card-label">成功率</div>
-            </div>
-            <div class="trace-card">
-              <div class="trace-card-val">{{ metricsData.summary?.successCalls ?? 0 }}</div>
-              <div class="trace-card-label">成功</div>
-            </div>
-            <div class="trace-card">
-              <div class="trace-card-val">{{ metricsData.summary?.failCalls ?? 0 }}</div>
-              <div class="trace-card-label">失败</div>
-            </div>
-            <div class="trace-card">
-              <div class="trace-card-val">{{ metricsP95.totalP95Calls > 0 ? metricsP95.avgP95Ms : '—' }}</div>
-              <div class="trace-card-label">加权 P95</div>
-            </div>
-          </div>
-
-          <!-- 工具排行表 -->
-          <div v-if="metricsToolsList.length" class="metrics-table-wrapper">
-            <div class="metrics-table-header">
-              <span>工具</span>
-              <span>调用</span>
-              <span>成功率</span>
-              <span>P95</span>
-              <span>P99</span>
-            </div>
-            <div
-              v-for="t in metricsToolsList"
-              :key="t.name"
-              class="metrics-row"
-            >
-              <span class="metrics-toolname" :title="`来源: ${(t.sources || []).join(', ') || 'builtin'}`">
-                {{ t.name }}
-              </span>
-              <span class="metrics-num">{{ t.calls }}</span>
-              <span
-                class="metrics-rate"
-                :class="{ bad: t.successRate < 90 && t.calls >= 3 }"
-              >
-                {{ t.successRate }}%
-              </span>
-              <span class="metrics-num">{{ fmtMs(t.p95Ms) }}</span>
-              <span class="metrics-num">{{ fmtMs(t.p99Ms) }}</span>
-            </div>
-          </div>
-          <div v-else class="wb-empty-inline" style="padding: 20px;">暂无工具调用记录</div>
-        </template>
-      </template>
 
       <!-- 文件：每个 tab 一个编辑器实例，切走时用 v-show 保持挂载，未保存内容不丢 -->
       <div
@@ -590,6 +510,7 @@ function approvalSourceLabel(source: ApprovalHistoryItem['decisionSource']): str
   switch (source) {
     case 'USER': return '本人';
     case 'BATCH': return '本人 · 批量';
+    case 'CLIENT': return '客户端';
     case 'TIMEOUT': return '超时自动拒绝';
     case 'SESSION_STOP': return '会话停止';
     case 'SYSTEM': return '系统中止';
@@ -655,60 +576,6 @@ function refreshMcpStatus() {
   fetchMcpStatus();
 }
 
-// ——— D3 可观测性：全局工具调用监控面板 ———
-const metricsLoading = ref(false);
-const metricsError = ref<string | null>(null);
-const metricsData = ref<any>(null);
-
-async function fetchMetrics() {
-  metricsLoading.value = true;
-  metricsError.value = null;
-  try {
-    metricsData.value = await agentApi.getMetrics();
-  } catch (e: any) {
-    metricsError.value = e?.message || '请求失败';
-    metricsData.value = null;
-  } finally {
-    metricsLoading.value = false;
-  }
-}
-
-function refreshMetrics() {
-  fetchMetrics();
-}
-
-/** 工具列表按调用次数降序；P95 为 null 时排除（避免 / 0） */
-const metricsToolsList = computed(() => {
-  const tools = metricsData.value?.tools;
-  if (!tools || typeof tools !== 'object') return [];
-  return Object.entries(tools)
-    .map(([name, v]: [string, any]) => ({
-      name,
-      calls: Number(v?.calls ?? 0),
-      successRate: Number(v?.successRate ?? 0),
-      p50Ms: Number(v?.p50Ms ?? 0),
-      p95Ms: Number(v?.p95Ms ?? 0),
-      p99Ms: Number(v?.p99Ms ?? 0),
-      maxMs: Number(v?.maxMs ?? 0),
-      sources: Array.from(v?.sources ?? [])
-    }))
-    .sort((a, b) => b.calls - a.calls);
-});
-
-/** 加权 P95 —— 按调用次数加权平均各工具的 P95（展示级摘要，不用精确百分位合并算法） */
-const metricsP95 = computed(() => {
-  let totalCalls = 0;
-  let weighted = 0;
-  for (const t of metricsToolsList.value) {
-    if (t.p95Ms > 0) {
-      totalCalls += t.calls;
-      weighted += t.p95Ms * t.calls;
-    }
-  }
-  if (totalCalls === 0) return { totalP95Calls: 0, avgP95Ms: '' };
-  return { totalP95Calls: totalCalls, avgP95Ms: fmtMs(Math.round(weighted / totalCalls)) };
-});
-
 async function fetchTrace() {
   const sid = chat.currentSessionId;
   if (!sid) {
@@ -739,9 +606,6 @@ watch(
     if (tab === 'trace') {
       if (sid != null) fetchTrace();
       fetchMcpStatus(); // MCP 状态全局拉一次
-    }
-    if (tab === 'metrics') {
-      fetchMetrics();
     }
   },
   { immediate: true }
@@ -947,6 +811,20 @@ const attachments = computed(() => {
   return [...map.values()];
 });
 
+/** 仍在待审查的改动：以 ChangeSet（或项目待审查列表）为准，已接受/已撤回的 diff 不再参与标色 */
+const reviewChanges = computed<FileChange[]>(() => {
+  const set = chat.changeSet;
+  const items = set ? set.changes.filter((c) => c.status === 'PENDING') : chat.pendingChanges;
+  return items.map((c) => ({
+    path: c.filePath,
+    action: (c.action as FileChange['action']) ?? 'modify',
+    source: c.source ?? 'agent',
+    additions: c.additions ?? 0,
+    deletions: c.deletions ?? 0,
+    diff: c.diffText ?? ''
+  }));
+});
+
 /** 本会话全部文件变更：同一路径只保留最新一次 */
 const changes = computed(() => {
   const map = new Map<string, FileChange>();
@@ -1004,9 +882,9 @@ const breakdownPercents = computed(() => {
   };
 });
 
-/** 某个文件对应的那次改动，交给编辑器做行内标色 */
+/** 某个文件对应的那次改动，交给编辑器做行内标色；只有仍待审查的改动才标 */
 function changeOf(path: string): FileChange | null {
-  return changes.value.find((c) => c.path === path) || null;
+  return reviewChanges.value.find((c) => c.path === path) || null;
 }
 
 /** 从 hunk 头里取新文件的起始行，点变更时直接定位到改动处 */
@@ -1021,7 +899,7 @@ function openChange(c: FileChange) {
   chat.openFile(c.path, changeLine(c));
 }
 
-function select(tab: 'changes' | 'docs' | 'file' | 'trace' | 'plan' | 'metrics') {
+function select(tab: 'changes' | 'docs' | 'file' | 'trace' | 'plan') {
   chat.openDock(tab);
 }
 
@@ -1083,8 +961,11 @@ async function closeTab(path: string) {
 <style scoped>
 .workbench {
     flex-shrink: 0;
-    border-left: 1px solid var(--border);
-    background: var(--surface);
+    /* 底色与会话区一致；区域之间靠 8px 顶层色留白分隔，不画线 */
+    background: var(--bg);
+    /* 面板换成底色后，原先「浮在浅色面板上」的 surface-2 层级改用 surface 才浮得起来，
+       覆盖只在本面板内生效 */
+    --surface-2: var(--surface);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -1097,19 +978,27 @@ async function closeTab(path: string) {
 }
 
 .workbench.fullscreen {
-    position: absolute;
-    inset: 0;
+    position: fixed;
+    inset: 0 0 0 var(--sidebar-width);
     width: auto !important;
-    z-index: 20;
+    z-index: 30;
     border-left: none;
 }
 
+/* 与左侧导航一致：全屏时 <768px 的侧栏是抽屉，不占位 */
+@media (max-width: 767px) {
+    .workbench.fullscreen { left: 0; }
+}
+
+/* 头部与顶栏同高同色：标签按钮和顶栏按钮处在同一条顶层，不画横线 */
 .wb-header {
+    height: var(--header-height);
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 6px 6px 6px 8px;
-    border-bottom: 1px solid var(--border);
+    padding: 0 6px 0 8px;
+    background: var(--surface);
     flex-shrink: 0;
 }
 
@@ -1191,7 +1080,7 @@ async function closeTab(path: string) {
 }
 .wb-tab-file:hover .wb-tab-close,
 .wb-tab-file.active .wb-tab-close { opacity: 1; }
-.wb-tab-close:hover { background: var(--surface-2); color: var(--text); }
+.wb-tab-close:hover { background: var(--surface-hover); color: var(--text); }
 
 .wb-icon-btn {
     flex-shrink: 0;
@@ -1400,6 +1289,39 @@ async function closeTab(path: string) {
 .plan-step.is-completed .plan-step-status { color: var(--success); }
 
 /* ——— 第五十四批：追踪面板样式 ——— */
+/* 运行详情：默认收起，日常只看时间线 */
+.trace-details {
+  margin: 10px 8px 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.trace-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  list-style: none;
+  padding: 4px 0;
+}
+.trace-details > summary::-webkit-details-marker { display: none; }
+.trace-details > summary::before {
+  content: '›';
+  font-size: 12px;
+  line-height: 1;
+  transition: transform .15s;
+}
+.trace-details[open] > summary::before { transform: rotate(90deg); }
+.trace-details-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+}
 .trace-overview-wrapper {
   position: relative;
   padding-top: 24px; /* 给导出按钮留空间 */
@@ -1581,7 +1503,7 @@ async function closeTab(path: string) {
   margin-top: 4px;
   padding: 4px 6px;
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--surface-3);
   font-size: var(--fs-xs);
 }
 .trace-history-tool {
@@ -1960,82 +1882,5 @@ async function closeTab(path: string) {
   max-width: 50%;
 }
 
-/* ——— D3 可观测性：监控面板样式 ——— */
-.metrics-header {
-  display: flex;
-  align-items: center;
-  padding: 4px 8px 0;
-  gap: 6px;
-}
-.metrics-generated {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: .85;
-}
 
-.metrics-overview {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  padding: 8px;
-  flex-shrink: 0;
-}
-
-.metrics-table-wrapper {
-  padding: 4px 8px 8px;
-  border-top: 1px solid var(--border);
-}
-.metrics-table-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 6px 6px 4px;
-  position: sticky;
-  top: 0;
-  background: var(--surface);
-  z-index: 1;
-}
-.metrics-table-header > span:first-child { flex: 1; min-width: 0; }
-.metrics-table-header > span { flex-shrink: 0; width: 50px; text-align: right; }
-
-.metrics-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 6px;
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-xs);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  cursor: default;
-}
-.metrics-row:hover { background: var(--surface-hover); }
-.metrics-toolname {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-  font-weight: 500;
-}
-.metrics-num {
-  flex-shrink: 0;
-  width: 50px;
-  text-align: right;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.metrics-rate {
-  flex-shrink: 0;
-  width: 50px;
-  text-align: right;
-  color: var(--success);
-  font-weight: 600;
-}
-.metrics-rate.bad { color: var(--danger); }
 </style>

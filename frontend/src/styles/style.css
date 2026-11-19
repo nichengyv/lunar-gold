@@ -107,13 +107,15 @@ body {
 }
 
 /* ========== 布局框架 ========== */
-.app { display: flex; height: 100vh; }
+/* 底色取顶层色：区域之间的留白与顶栏、主导航同色，三者连成一体，顶层因此不被竖缝切断 */
+.app { display: flex; height: 100vh; background: var(--surface); }
 
-/* 侧边栏 */
+/* 主导航：与顶层同色，右边缘的 8px 留白也同色，所以看上去没有分界线 */
 .sidebar {
     width: var(--sidebar-width);
     background: var(--surface);
-    border-right: 1px solid var(--border);
+    /* 区域之间用背景留白分隔，不画贯穿顶栏的竖线 */
+    margin-right: 8px;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -124,7 +126,7 @@ body {
     height: var(--header-height);
     display: flex; align-items: center;
     padding: 0 20px;
-    border-bottom: 1px solid var(--border);
+    /* 与顶栏同色同高，接成一条连续的顶层；不画横线 */
     font-size: 18px;
     font-weight: 600;
     gap: 10px;
@@ -457,11 +459,17 @@ body {
 .sidebar-footer a:hover { text-decoration: underline; }
 
 /* 主内容区 */
-.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    /* 会话正文用底色，顶栏用顶层色，两者靠色差分界而不是画线 */
+    background: var(--bg);
+}
 
 .topbar {
     height: var(--header-height);
-    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -560,8 +568,8 @@ body {
 }
 
 .message {
-    max-width: 88%;
-    line-height: 1.65;
+    max-width: 100%;
+    line-height: 1.75;
     font-size: var(--fs-base);
     animation: msgIn .25s ease;
 }
@@ -571,31 +579,30 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* 用户发言保留气泡：靠右、主色底；回答则不套气泡，两者层次分明 */
 .message.user {
     align-self: flex-end;
-    /* 比默认 88% 再收窄一些，长提问不显得铺满整行；右侧再让一点，整体往左挪 */
     max-width: 76%;
     margin-right: 6%;
+    padding: 10px 16px;
     background: var(--primary);
     color: white;
-    padding: 10px 16px;
     border-radius: 16px;
     border-bottom-right-radius: 4px;
     white-space: pre-wrap;
 }
 
+/* 回答铺在画布上，和空态欢迎区一致，只用留白分区 */
 .message.assistant {
-    align-self: flex-start;
-    background: var(--surface);
+    align-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    border-bottom-left-radius: 4px;
-    padding: 14px 18px;
-    /* 不再铺满整行：右侧留出一点余量，也给右侧条纹导航留位置 */
-    width: 90%;
-    max-width: 90%;
-    box-shadow: var(--shadow);
+    box-shadow: none;
 }
 
 /* 思考框 */
@@ -947,18 +954,22 @@ body {
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: bold; }
 
-/* 消息操作 */
+/* 消息操作：常显，避免操作按钮只能靠悬停发现 */
 .msg-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
-    opacity: 0;
-    transition: opacity .2s;
 }
-.message.assistant:hover .msg-actions,
-.message.assistant:focus-within .msg-actions { opacity: 1; }
+
+.msg-usage {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    margin-left: 2px;
+}
 
 .msg-action-btn {
     font-size: var(--fs-xs);
@@ -1658,16 +1669,15 @@ body {
     .sidebar.open { left: 0; }
     .menu-toggle { display: flex !important; }
     .message { max-width: 95%; }
-    .msg-actions { opacity: 1; }
 }
 
 /* 滚动条美化：细窄、悬浮才明显；thumb 用透明边框 + content-box 内缩，视觉更细但不难点中 */
 html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
     background: var(--border);
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
     background-clip: content-box;
 }

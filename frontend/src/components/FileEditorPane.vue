@@ -3,7 +3,10 @@
     <div class="fe-header">
       <div class="fe-file">
         <Icon name="file-text" :size="14" />
-        <span class="fe-file-name" :title="path">{{ path }}</span>
+        <!-- 标签栏已经显示文件名，这里改显示相对路径：目录弱化、文件名可读 -->
+        <span class="fe-file-path" :title="path">
+          <span v-if="pathParts.dir" class="fe-dir">{{ pathParts.dir }}/</span>{{ pathParts.dir ? '' : './' }}{{ pathParts.name }}
+        </span>
         <span v-if="dirty" class="fe-dirty">未保存</span>
       </div>
       <div class="fe-actions">
@@ -99,6 +102,13 @@ watch(dirty, (v) => emit('update:dirty', v));
 
 const hasDiff = computed(() => !!props.change?.diff);
 
+/** 头部展示相对路径：目录弱化、文件名保持可读 */
+const pathParts = computed(() => {
+  const idx = props.path.lastIndexOf('/');
+  if (idx < 0) return { dir: '', name: props.path };
+  return { dir: props.path.slice(0, idx), name: props.path.slice(idx + 1) };
+});
+
 const lineCount = computed(() => (content.value ? content.value.split('\n').length : 1));
 
 // 项目是异步加载的，等 currentProjectId 到位才读文件
@@ -132,11 +142,11 @@ watch(
 
 /** 基础配色 */
 const baseTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--surface)', color: 'var(--text)' },
+  '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg)', color: 'var(--text)' },
   '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', lineHeight: '1.6' },
   '.cm-content': { padding: '8px 0' },
   '.cm-gutters': {
-    backgroundColor: 'var(--surface-2)',
+    backgroundColor: 'var(--bg)',
     color: 'var(--text-secondary)',
     borderRight: '1px solid var(--border)'
   },
@@ -153,7 +163,8 @@ const themeCompartment = new Compartment();
 const diffCompartment = new Compartment();
 
 function themeExtension(): Extension {
-  return theme.isDark ? [baseTheme, oneDark] : baseTheme;
+  // oneDark 只负责语法配色；放在前面，让 baseTheme 的背景色（与侧栏一致的 --bg）生效
+  return theme.isDark ? [oneDark, baseTheme] : baseTheme;
 }
 
 /**
@@ -364,11 +375,18 @@ async function relocate() {
 .fe-pane {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   height: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  /* 直接嵌进工作台：不画边框/圆角，避免看起来像抽屉里再套一层卡片 */
+  background: transparent;
   overflow: hidden;
+}
+/* oneDark 主题自带 #282c34 底色，这里强制与侧栏/工作台同色 */
+.fe-pane :deep(.cm-editor),
+.fe-pane :deep(.cm-scroller),
+.fe-pane :deep(.cm-gutters) {
+  background-color: var(--bg) !important;
 }
 .fe-header {
   display: flex;
@@ -376,7 +394,7 @@ async function relocate() {
   justify-content: space-between;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--bg);
   flex-shrink: 0;
 }
 .fe-file {
@@ -386,14 +404,15 @@ async function relocate() {
   font-size: 12px;
   min-width: 0;
 }
-.fe-file-name {
+.fe-file-path {
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 260px;
+  max-width: 320px;
 }
+.fe-dir { color: var(--text-tertiary); font-weight: 500; }
 .fe-dirty {
   font-size: 10px;
   padding: 1px 5px;

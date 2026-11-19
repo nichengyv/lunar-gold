@@ -349,6 +349,8 @@ export interface UiMessage {
   turnId?: string;
   /** 本轮耗时（毫秒）：生成中用开始时间计时，完成后固定，历史消息从 trace 还原 */
   durationMs?: number;
+  /** 本轮 token 用量（来自 usage 事件；历史消息暂不回填） */
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   /** 本轮任务的验证与完成状态 */
   completion?: CompletionInfo;
   /** P5-05：最近一批变更文件诊断 */
@@ -436,10 +438,22 @@ export interface AgentExperienceMetrics {
   approval: {
     averageWaitMs: number | null;
     sampleCount: number;
+    byEntry: AgentApprovalEntryMetrics[];
   };
   tokens: {
     averageTotalTokens: number | null;
     totalTokens: number;
     sampleCount: number;
   };
+}
+
+/** P6-05b：审批指标按入口拆分；entry 为 WEB / CLIENT / AUTO / UNKNOWN。 */
+export interface AgentApprovalEntryMetrics {
+  entry: string;
+  clientId: string | null;
+  totalCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  approvalRate: number | null;
+  averageDecisionMs: number | null;
 }

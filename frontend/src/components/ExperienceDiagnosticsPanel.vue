@@ -75,7 +75,7 @@
       </div>
     </div>
 
-    <div class="diag-card" data-testid="agent-experience-metrics">
+    <div v-if="showAcceptance" class="diag-card" data-testid="agent-experience-metrics">
       <div class="diag-card-head">
         <div>
           <h3><Icon name="cpu" :size="15" /> Agent 体验</h3>
@@ -113,6 +113,25 @@
           </span>
         </div>
       </div>
+      <div v-if="approvalEntries.length" class="entry-table" data-testid="approval-entry-metrics">
+        <div class="entry-row entry-head">
+          <span>审批入口</span>
+          <span>审批量</span>
+          <span>批准率</span>
+          <span>平均耗时</span>
+        </div>
+        <div
+          v-for="item in approvalEntries"
+          :key="`${item.entry}-${item.clientId ?? ''}`"
+          class="entry-row"
+        >
+          <span class="entry-name" :title="item.clientId ?? undefined">{{ entryLabel(item) }}</span>
+          <span>{{ item.totalCount }}</span>
+          <span>{{ formatPercent(item.approvalRate) }}</span>
+          <span>{{ formatMs(item.averageDecisionMs) }}</span>
+        </div>
+      </div>
+      <p v-else-if="agentMetrics" class="diag-footnote">暂无已决策审批</p>
       <p v-if="agentMetrics" class="diag-footnote">生成时间：{{ formatTime(agentMetrics.generatedAt) }}</p>
     </div>
 
@@ -139,7 +158,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as agentApi from '../api/agent';
 import { useChatStore } from '../stores/chat';
-import type { AgentExperienceMetrics } from '../types/api';
+import type { AgentApprovalEntryMetrics, AgentExperienceMetrics } from '../types/api';
 import type { ExperienceErrorKind, WebVitalName } from '../utils/experienceDiagnostics';
 import {
   clearExperienceDiagnostics,
@@ -157,6 +176,9 @@ const chat = useChatStore();
 const enabled = ref(isExperienceDiagnosticsEnabled());
 const data = ref(getExperienceDiagnostics());
 const sessionFilter = ref<'all' | 'current'>('all');
+/** 验收指标默认展示；设置页默认收起，由外层按开发者意图决定是否展示 */
+withDefaults(defineProps<{ showAcceptance?: boolean }>(), { showAcceptance: true });
+
 const agentMetrics = ref<AgentExperienceMetrics | null>(null);
 const metricsLoading = ref(false);
 const metricsError = ref(false);
@@ -172,6 +194,15 @@ const connection = computed(() => {
   return getExperienceConnectionMetrics();
 });
 const recentErrors = computed(() => [...data.value.errors].reverse());
+const approvalEntries = computed(() => agentMetrics.value?.approval.byEntry ?? []);
+
+function entryLabel(item: AgentApprovalEntryMetrics): string {
+  if (item.entry === 'WEB') return '工作台';
+  if (item.entry === 'CLIENT') return item.clientId ? `客户端 · ${item.clientId}` : '客户端';
+  if (item.entry === 'AUTO') return '自动';
+  if (item.entry === 'UNKNOWN') return '来源未知';
+  return item.entry;
+}
 
 function refreshLocal() {
   data.value = getExperienceDiagnostics();
@@ -308,6 +339,20 @@ onBeforeUnmount(() => unsubscribe?.());
 .metric-value { color: var(--text-primary); font-size: 20px; font-weight: 650; line-height: 1.2; }
 .metric-sample { color: var(--text-tertiary); font-size: 10px; line-height: 1.45; }
 .metrics-error { margin: 12px 0 0; color: var(--danger); font-size: 12px; }
+.entry-table { margin-top: 14px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, .8fr));
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.entry-row + .entry-row { border-top: 1px solid var(--border); }
+.entry-head { background: var(--surface-2); color: var(--text-tertiary); font-size: 10px; }
+.entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-row span:not(.entry-name) { text-align: right; font-variant-numeric: tabular-nums; }
 .retry-link { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; cursor: pointer; }
 .diag-footnote { margin: 10px 0 0; color: var(--text-tertiary); font-size: 10px; text-align: right; }
 .error-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }

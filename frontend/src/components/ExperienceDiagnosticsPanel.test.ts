@@ -25,7 +25,21 @@ const metrics: AgentExperienceMetrics = {
   windowRuns: 20,
   firstToken: { p95Ms: 1900, sampleCount: 20 },
   tool: { failureRate: 0.25, totalCount: 8, failedCount: 2, scope: 'PROCESS' },
-  approval: { averageWaitMs: 2000, sampleCount: 3 },
+  approval: {
+    averageWaitMs: 2000,
+    sampleCount: 3,
+    byEntry: [
+      {
+        entry: 'WEB',
+        clientId: null,
+        totalCount: 3,
+        approvedCount: 2,
+        rejectedCount: 1,
+        approvalRate: 2 / 3,
+        averageDecisionMs: 2000
+      }
+    ]
+  },
   tokens: { averageTotalTokens: 150, totalTokens: 300, sampleCount: 2 }
 };
 
@@ -62,6 +76,48 @@ describe('ExperienceDiagnosticsPanel', () => {
     expect(wrapper.text()).not.toContain('D:\\private');
   });
 
+  it('按入口拆分审批指标，自动来源不显示批准率', async () => {
+    vi.mocked(agentApi.getExperienceMetrics).mockResolvedValue({
+      ...metrics,
+      approval: {
+        averageWaitMs: 41000,
+        sampleCount: 3,
+        byEntry: [
+          {
+            entry: 'CLIENT',
+            clientId: 'vscode-abc12345',
+            totalCount: 2,
+            approvedCount: 2,
+            rejectedCount: 0,
+            approvalRate: 1,
+            averageDecisionMs: 900
+          },
+          {
+            entry: 'AUTO',
+            clientId: null,
+            totalCount: 1,
+            approvedCount: 0,
+            rejectedCount: 1,
+            approvalRate: null,
+            averageDecisionMs: 120000
+          }
+        ]
+      }
+    });
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const table = wrapper.find('[data-testid="approval-entry-metrics"]');
+    expect(table.text()).toContain('审批入口');
+    expect(table.text()).toContain('客户端 · vscode-abc12345');
+    expect(table.text()).toContain('100.0%');
+
+    const autoRow = table.findAll('.entry-row')[2];
+    expect(autoRow.text()).toContain('自动');
+    expect(autoRow.text()).toContain('—');
+    expect(autoRow.text()).toContain('120,000 ms');
+  });
+
   it('后端失败不掩盖本地异常，并可独立重试', async () => {
     recordExperienceError('error', 'local-only-error');
     vi.mocked(agentApi.getExperienceMetrics).mockRejectedValueOnce(new Error('offline'));
@@ -82,7 +138,7 @@ describe('ExperienceDiagnosticsPanel', () => {
       windowRuns: 0,
       firstToken: { p95Ms: null, sampleCount: 0 },
       tool: { failureRate: null, totalCount: 0, failedCount: 0, scope: 'PROCESS' },
-      approval: { averageWaitMs: null, sampleCount: 0 },
+      approval: { averageWaitMs: null, sampleCount: 0, byEntry: [] },
       tokens: { averageTotalTokens: null, totalTokens: 0, sampleCount: 0 }
     });
     const wrapper = mountPanel();

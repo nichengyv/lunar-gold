@@ -7,20 +7,47 @@ const experienceMetrics = {
   windowRuns: 20,
   firstToken: { p95Ms: 1900, sampleCount: 20 },
   tool: { failureRate: 0.25, totalCount: 8, failedCount: 2, scope: 'PROCESS' },
-  approval: { averageWaitMs: 2000, sampleCount: 3 },
+  approval: {
+    averageWaitMs: 2000,
+    sampleCount: 3,
+    byEntry: [
+      {
+        entry: 'WEB',
+        clientId: null,
+        totalCount: 2,
+        approvedCount: 1,
+        rejectedCount: 1,
+        approvalRate: 0.5,
+        averageDecisionMs: 1500
+      },
+      {
+        entry: 'CLIENT',
+        clientId: 'vscode-abc12345',
+        totalCount: 1,
+        approvedCount: 1,
+        rejectedCount: 0,
+        approvalRate: 1,
+        averageDecisionMs: 3000
+      }
+    ]
+  },
   tokens: { averageTotalTokens: 150, totalTokens: 300, sampleCount: 2 }
 };
 
 test('体验诊断展示白名单异常与后端指标，支持停用、导出和清除', async ({ page }) => {
   await mockApi(page, { experienceMetrics });
   await page.goto('/settings');
-  await page.locator('.settings-nav').getByRole('button', { name: '体验诊断' }).click();
+  await page.locator('.settings-nav').getByRole('button', { name: '应用信息' }).click();
+  await page.getByRole('button', { name: /高级诊断/ }).click();
+  await page.getByRole('checkbox').check();
 
   const backend = page.getByTestId('agent-experience-metrics');
   await expect(backend).toContainText('1,900 ms');
   await expect(backend).toContainText('25.0%');
   await expect(backend).toContainText('2,000 ms');
   await expect(backend).toContainText('150');
+  await expect(backend).toContainText('工作台');
+  await expect(backend).toContainText('客户端 · vscode-abc12345');
 
   await page.evaluate(() => {
     window.dispatchEvent(new ErrorEvent('error', {

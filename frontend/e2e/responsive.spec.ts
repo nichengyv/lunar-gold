@@ -102,3 +102,43 @@ test('1280×800：侧栏展开，三栏无横向滚动', async ({ page }) => {
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
   await expect(page.getByPlaceholder(/输入消息/)).toBeInViewport();
 });
+
+test('1280×800：工作台整列顶开会话区，标签与顶栏同一层', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockApi(page, { sessions });
+  await page.goto('/chat');
+
+  const topbar = page.locator('.topbar');
+  const topbarRight = page.locator('.topbar-right');
+  const before = await topbarRight.boundingBox();
+
+  await page.getByRole('button', { name: '任务详情侧边栏' }).click();
+  const dock = page.locator('.workbench');
+  await expect(dock).toBeVisible();
+
+  // 工作台是 .app 的直接子节点、main 的兄弟，整列顶开会话区，不再嵌在会话内部
+  await expect(page.locator('.app > .workbench')).toHaveCount(1);
+  await expect(page.locator('.pages .workbench')).toHaveCount(0);
+
+  // 区域之间靠 4px 背景留白分隔，工作台自身不再画贯穿整列的左边线；等入场动画结束再量
+  await expect.poll(async () => {
+    const box = await dock.boundingBox();
+    const main = await page.locator('.main').boundingBox();
+    return Math.round((box?.x ?? 0) - ((main?.x ?? 0) + (main?.width ?? 0)));
+  }).toBe(4);
+  expect(await dock.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe('0px');
+
+  const after = await topbarRight.boundingBox();
+  const dockBox = await dock.boundingBox();
+  const topbarBox = await topbar.boundingBox();
+  const headBox = await page.locator('.wb-header').boundingBox();
+  expect(after?.x ?? 0).toBeLessThan(before?.x ?? Number.MAX_SAFE_INTEGER);
+  expect((after?.x ?? 0) + (after?.width ?? 0)).toBeLessThanOrEqual((dockBox?.x ?? 0) + 1);
+  // 标签栏与顶栏同高同层
+  expect(Math.abs((headBox?.y ?? 0) - (topbarBox?.y ?? 0))).toBeLessThanOrEqual(1);
+  expect(Math.abs((headBox?.height ?? 0) - (topbarBox?.height ?? 0))).toBeLessThanOrEqual(1);
+  // 入场动画（translateX 8px）期间会临时溢出，动画结束后不应再有横向滚动
+  await expect.poll(() => horizontalOverflow(page)).toBeLessThanOrEqual(1);
+
+  await page.screenshot({ path: test.info().outputPath('responsive-1280x800-dock.png') });
+});
