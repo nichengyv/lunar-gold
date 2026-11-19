@@ -216,7 +216,7 @@ public class RuntimeEvalRunner {
                                                              String risk, long expiresAt) {
                         approvalCount.incrementAndGet();
                         runService.pauseForApproval(run.getId(), approvalId, tool);
-                        approvals.resolve(approvalId, USER_ID, approvalDecision, false);
+                        approvals.resolve(approvalId, USER_ID, approvalDecision, false, null);
                     }
                     @Override public void onApprovalResolved(String approvalId, String decision,
                                                              String source, String batchId) {

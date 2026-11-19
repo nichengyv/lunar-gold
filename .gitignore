@@ -50,3 +50,7 @@ data/
 # 评测运行时生成的报告
 eval/reports/
 eval/runtime-reports/
+eval/rag-reports/
+eval/index-reports/
+# 本地评测密钥（仅本机使用，绝不提交）
+.secrets/

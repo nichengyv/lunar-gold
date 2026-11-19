@@ -41,7 +41,7 @@ public class VerifyService {
      *
      * @param workspaceRoot 工作区根目录
      * @param attempt       当前 run 内的第几次验证（从 1 开始）
-     * @param cancelled     用户停止/断连标记
+     * @param cancelled     用户显式停止标记（断流不会置位）
      */
     public VerifyResult verify(Path workspaceRoot, int attempt, AtomicBoolean cancelled) {
         int safeAttempt = Math.max(1, attempt);

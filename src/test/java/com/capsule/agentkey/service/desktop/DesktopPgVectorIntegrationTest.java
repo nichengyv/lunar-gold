@@ -91,12 +91,11 @@ class DesktopPgVectorIntegrationTest {
                 assertTrue(rs.next(), "pg_extension 中应存在 vector 扩展");
                 assertTrue(rs.getString(1).startsWith("0.8"), "pgvector 版本应为 0.8.x，实际 " + rs.getString(1));
             }
-            // version 是字符串列，直接 max() 会得到 '9'；按安装顺序取最后一条
+            // 只断言 V15 已成功应用，不绑定“最新版本号”，避免每次新增迁移都要改断言
             try (ResultSet rs = statement.executeQuery(
-                    "SELECT version FROM flyway_schema_history WHERE success "
-                            + "ORDER BY installed_rank DESC LIMIT 1")) {
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '15' AND success")) {
                 assertTrue(rs.next());
-                assertEquals("15", rs.getString(1));
+                assertEquals(1, rs.getInt(1), "V15 应已成功应用");
             }
             try (ResultSet rs = statement.executeQuery(
                     "SELECT udt_name FROM information_schema.columns "

@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * A：Phase 4 出境验收——V16/V17/V18 在真实 PostgreSQL 上的迁移结果。
+ * A：Phase 4 出境验收——V16/V17/V18 在真实 PostgreSQL 上的迁移结果，P6-01 / P6-05 起追加 V20 / V21。
  *
  * <p>空库执行 classpath 全量迁移（含 V13 前置预检），断言表、列、索引与幂等性；
  * 依赖 DESKTOP_PG_RUNTIME 提供含 pgvector 的运行时，未设置时整类跳过。
@@ -58,17 +58,39 @@ class FlywayV18MigrationAcceptanceTest {
     }
 
     @Test
-    void 空库全量迁移到V18且结构完整() throws SQLException {
+    void 空库全量迁移到最新版本且结构完整() throws SQLException {
         assertNotNull(flyway.migrate());
-        assertEquals("18", flyway.info().current().getVersion().getVersion(), "应迁移到 V18");
-        assertEquals(18, flyway.info().applied().length, "V1~V18 共 18 条迁移应全部成功");
+        assertEquals("21", flyway.info().current().getVersion().getVersion(), "应迁移到 V21");
+        assertEquals(21, flyway.info().applied().length, "V1~V21 共 21 条迁移应全部成功");
 
         try (Connection connection = DriverManager.getConnection(
                 jdbcUrl, EmbeddedPgSupport.USER, EmbeddedPgSupport.USER);
              Statement statement = connection.createStatement()) {
 
-            for (String table : List.of("agent_run", "agent_run_event", "tool_approval")) {
+            for (String table : List.of("agent_run", "agent_run_event", "tool_approval", "api_client")) {
                 assertTrue(tableExists(statement, table), "缺少表 " + table);
+            }
+
+            // P6-01：客户端令牌表结构（只存 secret 哈希，撤销靠 revoked_at）
+            assertColumn(statement, "api_client", "client_id", "character varying", "NO");
+            assertColumn(statement, "api_client", "secret_hash", "character varying", "NO");
+            assertColumn(statement, "api_client", "revoked_at", "timestamp without time zone", "YES");
+            assertColumn(statement, "api_client", "last_used_at", "timestamp without time zone", "YES");
+
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT indexdef FROM pg_indexes "
+                            + "WHERE schemaname = 'public' AND tablename = 'api_client' "
+                            + "AND indexname = 'uk_api_client_client_id'")) {
+                assertTrue(rs.next(), "缺少 client_id 唯一约束");
+                assertTrue(rs.getString(1).toUpperCase().contains("UNIQUE"),
+                        "client_id 必须是唯一索引");
+            }
+
+            try (ResultSet rs = statement.executeQuery(
+                    "SELECT indexdef FROM pg_indexes "
+                            + "WHERE schemaname = 'public' AND tablename = 'api_client' "
+                            + "AND indexname = 'idx_api_client_user'")) {
+                assertTrue(rs.next(), "缺少 api_client 的 user_id 索引");
             }
 
             assertColumn(statement, "agent_run", "prompt_tokens", "bigint", "NO");
@@ -104,6 +126,9 @@ class FlywayV18MigrationAcceptanceTest {
                             + "AND indexname = 'idx_tool_approval_state'")) {
                 assertTrue(rs.next(), "缺少 tool_approval 的 state 索引");
             }
+
+            // P6-05：审批入口的客户端 id，可空；V21 之前的历史记录保持 NULL
+            assertColumn(statement, "tool_approval", "client_id", "character varying", "YES");
         }
     }
 

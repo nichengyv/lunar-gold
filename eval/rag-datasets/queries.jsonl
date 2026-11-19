@@ -1,0 +1,22 @@
+{"id":"q-sem-01","query":"没有完成支付的单据什么时候会被系统撤销","category":"semantic","concepts":["order-timeout","scheduler"],"relevantChunkIds":[10002],"expectEmpty":false}
+{"id":"q-sem-02","query":"退回的钱什么时候能进入我的账户","category":"semantic","concepts":["refund","payment-channel"],"relevantChunkIds":[10004],"expectEmpty":false}
+{"id":"q-sem-03","query":"优惠可以一起用吗","category":"semantic","concepts":["discount","pricing"],"relevantChunkIds":[10005],"expectEmpty":false}
+{"id":"q-sem-04","query":"东西卖完了系统会怎么处理下单","category":"semantic","concepts":["inventory","reservation"],"relevantChunkIds":[10006],"expectEmpty":false}
+{"id":"q-sem-05","query":"服务器需要哪些基础软件环境","category":"semantic","concepts":["prerequisites","runtime-versions"],"relevantChunkIds":[20001],"expectEmpty":false}
+{"id":"q-sem-06","query":"部署后怎么确认服务真的可以接手流量","category":"semantic","concepts":["health-check","probes"],"relevantChunkIds":[20003],"expectEmpty":false}
+{"id":"q-sem-07","query":"缓存读取时怎么避免同一份数据被重复加载","category":"semantic","concepts":["cache-read","concurrency"],"relevantChunkIds":[30001],"expectEmpty":false}
+{"id":"q-sem-08","query":"本地缓存满了会淘汰哪些条目","category":"semantic","concepts":["cache-config","lru"],"relevantChunkIds":[30008],"expectEmpty":false}
+{"id":"q-exact-01","query":"ORD-2207 的税费是怎么拆的","category":"exact","concepts":["billing-question"],"relevantChunkIds":[10003],"expectEmpty":false}
+{"id":"q-exact-02","query":"CFG-1042 是什么意思","category":"exact","concepts":["error-code-lookup"],"relevantChunkIds":[20002],"expectEmpty":false}
+{"id":"q-exact-03","query":"CACHE_MAX_LOCAL_ENTRIES 默认是多少","category":"exact","concepts":["env-var-lookup"],"relevantChunkIds":[30008],"expectEmpty":false}
+{"id":"q-exact-04","query":"以 RF 开头的退款单号是什么","category":"exact","concepts":["serial-format"],"relevantChunkIds":[10004],"expectEmpty":false}
+{"id":"q-exact-05","query":"RATE_LIMIT_PER_MINUTE 最大能设多少","category":"exact","concepts":["limit-config-lookup"],"relevantChunkIds":[20007],"expectEmpty":false}
+{"id":"q-exact-06","query":"invalidateByTag 超过 500 个 key 会怎样","category":"exact","concepts":["bulk-operation"],"relevantChunkIds":[30003],"expectEmpty":false}
+{"id":"q-mixed-01","query":"跨境订单的结算单怎么算","category":"mixed","concepts":["cross-border","tax-split"],"relevantChunkIds":[10003],"expectEmpty":false}
+{"id":"q-mixed-02","query":"优惠券叠加满减的顺序是什么","category":"mixed","concepts":["discount","pricing"],"relevantChunkIds":[10005],"expectEmpty":false}
+{"id":"q-mixed-03","query":"缓存 key 能不能拼用户输入","category":"mixed","concepts":["cache-key","tenant-isolation"],"relevantChunkIds":[30002],"expectEmpty":false}
+{"id":"q-cross-01","query":"发布前如何做数据库结构变更才不会导致回退失败","category":"cross-lingual","concepts":["rollback","release"],"relevantChunkIds":[20004],"expectEmpty":false}
+{"id":"q-cross-02","query":"日志级别调到调试会不会有性能影响","category":"cross-lingual","concepts":["logging","observability"],"relevantChunkIds":[20006],"expectEmpty":false}
+{"id":"q-noise-01","query":"明天上海天气如何","category":"noise","concepts":["weather"],"relevantChunkIds":[],"expectEmpty":true}
+{"id":"q-noise-02","query":"红烧肉怎么做","category":"noise","concepts":["cooking"],"relevantChunkIds":[],"expectEmpty":true}
+{"id":"q-noise-03","query":"推荐一部科幻电影","category":"noise","concepts":["movie"],"relevantChunkIds":[],"expectEmpty":true}

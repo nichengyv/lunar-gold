@@ -159,7 +159,7 @@ src/main/java/com/capsule/agentkey/
   dto/ exception/ util/
 src/main/resources/
   prompts/       版本化提示词与 index.json
-  db/migration/  Flyway V1~V18
+  db/migration/  Flyway V1~V21
 frontend/src/
   views/ components/ stores/ api/ types/ router/ styles/ utils/
 desktop/         Electron 主进程、侧车、更新、诊断
@@ -191,7 +191,7 @@ scripts/         评测、打包、合规脚本
 |---|---|
 | P5-05 LSP 诊断 | 已完成：编辑后采集诊断并回灌；无验证配置时完成状态保持“未验证” |
 | P5-06 Verify 回路 | 已完成：修改后自动运行项目验证命令，失败回环，未验证不伪装成功 |
-| P5-04 代码索引 / repo map | 基础完成：repo map（目录 + 关键符号）已注入 prompt；可插拔 CodeIndexer、符号查询与内存增量缓存已落地；持久缓存与收益量化未做 |
+| P5-04 代码索引 / repo map | **已完成**：repo map 符号索引/增量缓存已注入 prompt；96 run A/B 量化（deepseek-chat）保持默认开启（成功率 +37.5pp / token −83% / 时延 −83%）；持久缓存不建 |
 | P5-07 混合检索 / rerank | 基础完成：向量 + pg_trgm 词法召回、RRF 融合、chunk 级引用已落地；模型 reranker 与真实语料量化未做 |
 | P5-08 并行只读工具 | 已完成：连续只读批默认 3 并发，结果顺序不变；写/命令与 MCP 仍串行审批 |
 | P5-14 任务级 ChangeSet | 基础完成：Session 级聚合、按 Run 过滤、继续修复、逆序整体/按 Run 撤回与冲突检测已落地；前端交付看板已接入；关键路径 E2E 已由 P5-11-1 覆盖 |

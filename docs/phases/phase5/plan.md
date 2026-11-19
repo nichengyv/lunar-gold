@@ -1,7 +1,7 @@
-﻿﻿﻿﻿# Phase 5 更新规划：智能体能力与工作台体验增强
+﻿﻿﻿﻿﻿# Phase 5 更新规划：智能体能力与工作台体验增强
 
 > 更新日期：2026-11-15
-> 状态：实施中（质量地基、核心信息架构、P5-13 真实 ReAct 闭环、P5-05 LSP 诊断闭环、P5-06 Verify、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 混合检索/RRF/引用、P5-08 并行只读工具、P5-14 任务级 ChangeSet、P5-11-1 前端测试基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率与 P5-10-4 键盘与无障碍已完成；下一步推进 P5-07 模型 reranker/收益量化，以及 P5-09 剩余视觉项）
+> 状态：实施中（质量地基、核心信息架构、P5-13 真实 ReAct 闭环、P5-05 LSP 诊断闭环、P5-06 Verify、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 混合检索/RRF/引用与检索质量量化、P5-08 并行只读工具、P5-14 任务级 ChangeSet、P5-11-1 前端测试基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率与 P5-10-4 键盘与无障碍已完成；下一步推进 P5-04 代码索引收益量化与可选持久缓存，P5-09 剩余视觉项已收尾）
 > 主计划见 [UPDATE_PLAN.md](../../UPDATE_PLAN.md)；已完成工作见 [COMPLETED_WORK.md](../../COMPLETED_WORK.md)。
 > 视觉与交互原型见 [visual-ux-preview.html](visual-ux-preview.html)（静态、可直接浏览器打开）。
 > 本文只描述 Phase 5 的目标、现状、双轨路线、每项设计、评测与验收，不以日历工期作为承诺。
@@ -69,7 +69,7 @@
 | 批次 | 任务 | 交付标志 | 状态 |
 |---|---|---|---|
 | A1 真实执行与反馈闭环 | P5-13 真实 ReAct E2E / 完成控制 / 无进展检测 / 编程提示词 → P5-05 LSP → P5-06 Verify | 真实循环可评测；修改有诊断与验证；失败可回环，未验证如实呈现 | P5-05、P5-06 已完成 |
-| A2 代码理解与检索 | P5-04 代码索引 / repo map → P5-07 混合检索 / 引用 / rerank | 大型项目定位更准，上下文成本与检索收益可量化 | P5-04 与 P5-07 基础能力已完成 |
+| A2 代码理解与检索 | P5-04 代码索引 / repo map → P5-07 混合检索 / 引用 / rerank | 大型项目定位更准，上下文成本与检索收益可量化 | P5-04 基础能力已完成；P5-07 已完成并用离线语料量化（判定不启用模型 reranker） |
 | A3 执行效率 | P5-08 并行只读工具 | 只读调用并行且 p95 有收益，写入与命令仍串行审批 | 已完成 |
 
 ### 4.2 工作台体验增强轨道
@@ -214,7 +214,9 @@ A1 与 B1 可并行；P5-11-1 的断线重连 E2E 复用 P5-10-1 已完成实现
 
 ## 7. 智能体能力 A2/A3：代码理解、检索与并发（P5-04、P5-07、P5-08 已完成基础能力）
 
-### P5-04 代码索引 v1（repo map、符号索引与增量缓存已完成；收益量化未做）
+### P5-04 代码索引 v1（repo map、符号索引与增量缓存已完成；A/B 量化保持默认开启）
+
+2026-11-16 用 deepseek-chat 跑 96 run 真实 A/B：ON（repo map 开）成功率 100% / prompt tokens 4,126 / 耗时 1.76s，OFF 62.5% / 25,072 / 10.17s。repo map 净收益量级与 Aider 等行业方案一致，保持默认开启。持久缓存按 C2 判定不建（cold 271ms）。
 
 - `CodeIndexer` 可插拔抽象：v1 为 `LightweightCodeIndexer` 正则实现（Java 包/类型/方法，TS/Vue/Python/Go/Rust 顶层符号），零额外依赖；JavaParser / tree-sitter 作为后续实现按需替换，不影响扫描、缓存与渲染。
 - `CodeIndexService`：工作区扫描、符号查询、按工作区维护内存增量缓存（大小 + 修改时间判定，仅重扫变更文件，删除文件自动清理），并输出扫描/复用/移除文件数与符号数统计。
@@ -228,12 +230,12 @@ A1 与 B1 可并行；P5-11-1 的断线重连 E2E 复用 P5-10-1 已完成实现
 - `RepoMapService` 改为委托 `CodeIndexService` 渲染，输出格式、字符预算与截断行为保持不变；`RepoMapServiceTest` 7 项回归通过，新增 `CodeIndexServiceTest` 覆盖符号索引与查询、增量只重扫变更文件、缓存清理、忽略目录、超大文件降级与空查询。
 - `ReActAgentService` 已用 repo map 替换原单层目录树注入 system prompt（`【仓库结构（repo map）】`），原 `buildWorkspaceTree` 删除；开关、深度、文件数、字符预算与单文件符号数均可配置。
 - 验收：后端 `mvn -o -q compile`、`mvn -o -q test` 通过，`EvalGate,RuntimeEvalGate` 通过（组件 27/27、Runtime 15/15）。
-- 仍保留为后续项：JavaParser/tree-sitter 精确符号实现、可选 `code_index` 持久表（V19），以及命中符号对轮次/token 的量化报告；因此 P5-04 标记为“基础完成”，上述增强项不阻塞 P5-07 与 P5-14。
+- 后续增强项（已在 UPDATE_PLAN.md §5.2 列候选）：tree-sitter 替换正则抽取、repo map 相关性排序、预算动态化；**持久缓存（原候选 V19）已按 C2 判定不建**。上述增强不阻塞 P5-07 与 P5-14。
 
-### P5-07 RAG 增强（基础完成：混合检索 + RRF + 引用；模型 reranker 未启用）
+### P5-07 RAG 增强（完成：混合检索 + RRF + 引用 + 检索质量量化；模型 reranker 经评测判定不启用）
 
 - 混合检索：pgvector 向量召回 + pg_trgm `word_similarity` 词法召回（复用 V9 已创建的扩展，无需新表/新列），RRF 融合；向量与词法各自保留相关度阈值。
-- Rerank：`Reranker` 接口，v1 为 `RrfReranker`（k 默认 60）；先建立词法+向量融合对照，模型 reranker 只在离线收益不足时启用。
+- 融合（fusion）：`RankFusion` 接口，v1 为 `RrfRankFusion`（k 默认 60），只合并两路排名、不读取切片内容；模型 reranker 属于融合后的独立内容精排，只在离线收益不足时启用。
 - 引用：chunk/document 随 `sources` 事件返回，前端展示切片序号；页码因解析器暂未保留 PDF 版式而暂不提供。
 - 离线量化：`halfvec` 是可选技术子项，只有体积或检索性能成为实际瓶颈时才新增 V20 与回填；不得以量化替代检索质量目标。
 - 验收：向量漏召回但精确词命中的 fixture 在混合检索下命中；引用字段完整；默认排序相对单路向量有量化收益；启用 halfvec 时另行证明精度与体积收益。
@@ -241,12 +243,31 @@ A1 与 B1 可并行；P5-11-1 的断线重连 E2E 复用 P5-10-1 已完成实现
 **完成情况（2026-11-14）**：
 
 - `VectorStoreService` 新增 `searchLexicalForProject`：用 `word_similarity(query, content)` 在切片原文做词法召回，支持项目/点名资料过滤；pg_trgm 不可用或 SQL 失败时降级为纯向量检索。
-- 新增 `RagCandidate`、`Reranker` 与 `RrfReranker`：向量列表与词法列表按排名融合（`1/(k+rank)` 叠加），按 `chunkId` 去重并保留两路最高分；`RrfRerankerTest` 验证双路命中优先、去重、纯词法顺序与 topK 截断，其中“向量第 3 + 词法第 1”排在“仅向量第 1”之前，量化了排序收益。
+- 新增 `RagCandidate`、`RankFusion` 与 `RrfRankFusion`：向量列表与词法列表按排名融合（`1/(k+rank)` 叠加），按 `chunkId` 去重并保留两路最高分；`RrfRankFusionTest` 验证双路命中优先、去重、纯词法顺序与 topK 截断，其中“向量第 3 + 词法第 1”排在“仅向量第 1”之前，量化了排序收益。
 - `DocumentService.retrieveContext` 改为混合召回：向量未过门槛但词法过 `rag.lexical-gate-score` 时仍使用资料；点名资料跳过整体门槛；`rag.hybrid-enabled=false` 时行为与原来的单路向量完全一致。
 - `sources` 增加 `chunkId` / `chunkIndex`，前端来源 chip 的提示展示“第 N 段”；`DocumentServiceRagTest` 覆盖词法补召回、双弱门槛拒绝、点名跳过门槛、混合关闭降级与引用字段。
 - 配置新增 `rag.hybrid-enabled`、`rag.lexical-min-score`、`rag.lexical-gate-score`、`rag.rrf-k`。
-- 验收：`DocumentServiceRagTest`（4 项）与 `RrfRerankerTest`（5 项）通过；后端全量测试通过；`EvalGate,RuntimeEvalGate` 通过（组件 27/27、Runtime 15/15）。
-- 仍保留为后续项：模型 reranker 的离线对照、跨语言/长文档的真实语料收益报告、PDF 页码引用；`halfvec`（V20）仍按体积或检索性能数据决定是否实施。
+- 验收：`DocumentServiceRagTest`（4 项）与 `RrfRankFusionTest`（5 项）通过；后端全量测试通过；`EvalGate,RuntimeEvalGate` 通过（组件 27/27、Runtime 15/15）。
+- 仍保留为后续项：跨语言/长文档的真实语料扩展、PDF 页码引用；`halfvec`（V20）仍按体积或检索性能数据决定是否实施。
+
+**P5-07-2 检索质量量化与 reranker 决策（2026-11-15）**：
+
+- 数据集：`eval/rag-datasets/` 下 3 篇文档 / 24 个切片 / 22 条查询（semantic 8、exact 6、mixed 3、cross-lingual 2、noise 3），`exact` 类查询的编号与术语刻意不进入 `concepts`，确保向量路径真实漏召回。
+- 评测器：`RagRetrievalEvalRunner` 在真实内嵌 PG + Flyway 上写入语料，分别跑 vector / lexical / hybrid 三配置；模拟向量由 concept 哈希生成（`embedding=simulated`，不测量 bge-m3），设置 `RAG_EVAL_EMBEDDING_KEY` 时可切真实模型模式。
+- 实测（19 条正向查询，topK=5）：Recall@5 vector 68.42% / lexical 31.58% / hybrid 100%；`exact` 类 vector 0% → hybrid 100%；`semantic`、`mixed`、`cross-lingual` hybrid 均 100%；noise 3/3 三配置全部拒绝；context_tokens 24.89 → 36.32（估算），p95 1.63ms → 2.70ms。
+- 门禁：`RagEvalGateTest` 要求 hybrid Recall@5 ≥ vector、exact 类严格提升、noise 全部拒绝，并对比基线（Recall@5 / doc_hit_rate 下降 ≤2pp，p95 增幅 ≤20% + 25ms）；`scripts/run-rag-eval.ps1` 支持 `-UpdateBaseline`，`eval/rag-reports/` 已忽略。
+- 结论：按预写规则判定 **不启用模型 reranker**（hybrid 提升 31.58pp，exact 类提升 100pp，noise 全拒绝）；halfvec、PDF 页码与真实模型复跑仍为后续项，默认 `rag.*` 未改动。
+
+**P5-07-3 难例检索与真实模型 reranker 对照（2026-11-15，结论：仍不启用）**：
+
+- 目的：P5-07-2 的语料 hybrid 已达 100%，无法证明精排增量；本任务单独构造“正确切片在向量/词法两路排名靠后”的难例，用真实 embedding 复跑，只在评测环境对比 `hybrid` 与 `hybrid+rerank`。
+- 数据集（新增，不改 P5-07-2 文件）：`eval/rag-datasets/hard-chunks.jsonl` 160 个干扰切片（多主题长切片 + 查询同款措辞干扰）+ `hard-queries.jsonl` 12 条 hard / 2 条 noise；hard 查询唯一正确切片、与目标 concept 无交集。
+- 评测器：`RagRerankEvalRunner` 复用内嵌 PG + Flyway，候选池 `CANDIDATE_K=20`，向量/词法各 20 → `RrfRankFusion(60)` 融合 20；`hybrid` 截断 5，`hybrid+rerank` 交真实 `BAAI/bge-reranker-v2-m3` 取 5；门槛沿用生产值（向量 0.5/0.55、词法 0.3/0.35）。
+- 真实模型：embedding `BAAI/bge-m3`（1024 维，index 6430 / query 175 tokens 实测），reranker `/v1/rerank`，报告 `eval/rag-reports/rag-rerank-*.json`。
+- 校准：D3 目标两路排名 >5 占比 83.33%（10/12），D4 候选池缺口 0，D1/D2 通过。注意本集查询为同义改写，词法路仅 3/12 条有候选，实际对照接近“向量单路 top-20 → rerank”。
+- A/B（12 条 hard）：top-1 8.33% → 16.67%、Recall@5 16.67% → 41.67%、MRR@5 12.50% → 27.78%、nDCG@5 13.59% → 31.35%、noise 2/2 均拒绝；检索 p95 42.29ms 不变，rerank p95 482.81ms、总 p95 508.06ms；rerank 13120 tokens（1093.33/查询，约候选正文 1.18×），未配置单价故不输出货币成本。
+- 判定（阈值跑数据前写定）：Q1 top-1 +8.34pp（要求 ≥ +10pp）不通过、Q6 rerank p95 482.81ms（要求 ≤300ms）不通过，其余通过 → 结论 **保持不启用**；生产默认策略与 `rag.*` 未改动。
+- 门禁：`RagRerankEvalGateTest` 只校验数据有效性与报告结构，并对 `hybrid` 做基线回退防护；新增 `eval/baselines/rag-rerank-baseline.json`；`scripts/run-rag-rerank-eval.ps1` 缺 Key 时打印缺口并非 0 退出。
 
 ### P5-08 并行只读工具（已完成）
 
@@ -410,7 +431,7 @@ A1 与 B1 可并行；P5-11-1 的断线重连 E2E 复用 P5-10-1 已完成实现
 
 - **Vitest**：`frontend/vitest.config.ts` 复用 Vite 插件，环境 jsdom；`sse.test.ts`（8）、`stores/chat.test.ts`（4）、`ApprovalCard.test.ts`（6）、`MarkdownContent.test.ts`（4）共 4 文件 22 项通过。
 - **Playwright**：`frontend/playwright.config.ts` + `e2e/` 下 5 个 spec 共 7 条用例（发送与流式、审批允许、审批拒绝、停止生成、断线续传、接受全部不改写验证、整体撤回冲突）；`--repeat-each=3` 连续 21/21 通过。
-- **API 仿真**：原方案的外部 Spring E2E 进程（zonky EmbeddedPostgres + test-scope `ScriptedAgentClient` + 本机令牌文件）复现成本高，改为 `page.route('**/api/**')` 在浏览器层仿真后端响应；后端契约本身已由 `ChangeSetServiceTest` 等单测覆盖，此偏差已写回 `.trae/specs/p5-11-1-frontend-e2e` 的 FR-7/AC-5。
+- **API 仿真**：原方案的外部 Spring E2E 进程（zonky EmbeddedPostgres + test-scope `ScriptedAgentClient` + 本机令牌文件）复现成本高，改为 `page.route('**/api/**')` 在浏览器层仿真后端响应；后端契约本身已由 `ChangeSetServiceTest` 等单测覆盖，此偏差已写回 `.trae/specs/p5/p5-11-1-frontend-e2e` 的 FR-7/AC-5。
 - **CI**：`.github/workflows/ci.yml` 新增 `frontend-test`（`npm ci` + `npm run test`）与 `frontend-e2e`（`needs: frontend-test`、缓存 Playwright、`npx playwright install --with-deps chromium`、失败上传 `playwright-report` 与 `test-results`）。
 - **本地运行差异**：本机 CDN 下载浏览器失败，改用系统 Edge（`E2E_CHANNEL=msedge`）并手动起 dev server + `E2E_BASE_URL`；CI 用 `E2E_CHANNEL=none` 走 Playwright 自带 chromium，`webServer` 自动启动。
 - **边界**：E2E 是浏览器层仿真，不验证真实后端事务与真实模型链路；`test:coverage` 未接入（避免引入第 5 个 devDependency，违反 NFR-4）。
@@ -626,7 +647,7 @@ P5-13 已新增 5 个 `runtime-*.jsonl`、15 条带预期副作用/事件终态�
 ## 11. 数据与配置增量
 
 - 迁移：
-  - V19 `code_index`（P5-04，桌面端缓存，可选）。
+  - V19 已被 `tool_approval.decision_source` 占用（2026-11-14）；原候选 `code_index` 持久缓存按 P5-04 C2 判定不建，已取消。
   - V20 仅在决定启用 `halfvec` 时用于量化列与必要索引；混合检索/全文辅助单独评估，不与量化捆绑。
   - P5-13 已复用现有 Run/Event，无需新增迁移；P5-14 默认复用 Run/Event、审批与 `PendingFileChange`，不预设 Task/ChangeSet 新表，确需持久化新字段时使用下一条未占用版本并先检查迁移目录。
   - 视觉与体验批次不新增数据库迁移；断线续传复用 V18 的 `agent_run_event`。
@@ -680,6 +701,8 @@ P5-13 已新增 5 个 `runtime-*.jsonl`、15 条带预期副作用/事件终态�
 
 ## 14. 验收清单
 
+> **Phase 5 收口（2026-11-16）**：出口条件四条全部满足——真实 ReAct 可评测（P5-02/P5-03）、修改有诊断与验证（P5-05/P5-06）、任务可审查/恢复/撤回（P5-14）、既有功能增强有量化收益（P5-04 96 run A/B + P5-07 检索量化）。下方「工作台体验增强」区块中仍未勾选的项属于产品打磨与合规加固，不阻塞本阶段出口，转入后续批次；索引升级候选见 UPDATE_PLAN §5.2（已标暂缓）。
+
 ### 智能体能力增强
 
 - [x] P5-01 提示词资源化、版本化、热重载/回滚，单测通过
@@ -691,14 +714,14 @@ P5-13 已新增 5 个 `runtime-*.jsonl`、15 条带预期副作用/事件终态�
 - [x] P5-13 coding 场景提示词按版本生效，通用问答与编程完成规则分离
 - [x] P5-05 编辑后诊断进入下一轮，坏文件可定位，连续相同诊断可供无进展检测使用
 - [x] P5-06 verify 失败回环且预算内终止；未配置、失败、环境不可用与验证通过状态明确
-- [ ] P5-04 符号索引与 repo map 生效，并证明成功率、轮次或 token 至少一项改善
-- [ ] P5-07 混合检索/引用/rerank 有评测对比；若启用 halfvec，另行证明体积与精度收益
+- [x] P5-04 符号索引与 repo map 生效，并经 96 run A/B 证明成功率 +37.5pp / token −83% / 时延 −83%（保持默认开启，2026-11-16）
+- [x] P5-07 混合检索/引用/rerank 有评测对比（P5-07-2 hybrid Recall@5 100% vs vector 68.42%，P5-07-3 难例对照）；按预写阈值判定不启用 reranker，halfvec 未启用故无需体积/精度证明
 - [x] P5-08 只读工具并行、写操作串行且审批不变，同类用例 p95 有改善
 
 ### 工作台体验增强
 
-- [ ] P5-14 多 Run 任务统一展示 ChangeSet、审批与验证结果，继续修复保留原任务上下文
-- [ ] P5-14 整体撤回按逆序恢复 Agent 变更，外部修改触发冲突，未验证状态不被接受动作覆盖
+- [x] P5-14 多 Run 任务统一展示 ChangeSet、审批与验证结果，继续修复保留原任务上下文（`GET /api/file-changes/changeset` + `PendingChangesCard` 任务交付卡，见 COMPLETED_WORK §8.10）
+- [x] P5-14 整体撤回按逆序恢复 Agent 变更，外部修改触发冲突，未验证状态不被接受动作覆盖（`revert-session` / `revert-run`，写盘前比对磁盘内容，见 COMPLETED_WORK §8.10）
 - [x] P5-09 token 收口完成，组件内 hex 清零（主题预览白名单 4 处）
 - [x] P5-09 暗色 5 页面回归通过，关键配色对比度实测均 ≥4.5
 - [ ] P5-09 三态覆盖全部异步区域（会话骨架与错误态已完成；复核现有空态并补工具运行态，不重复新建 EmptyState）

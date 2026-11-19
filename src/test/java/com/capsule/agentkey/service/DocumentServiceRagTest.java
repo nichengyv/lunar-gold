@@ -4,7 +4,7 @@ import com.capsule.agentkey.entity.Document;
 import com.capsule.agentkey.entity.DocumentChunk;
 import com.capsule.agentkey.repository.DocumentChunkRepository;
 import com.capsule.agentkey.repository.DocumentRepository;
-import com.capsule.agentkey.service.rag.RrfReranker;
+import com.capsule.agentkey.service.rag.RrfRankFusion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,7 +49,7 @@ class DocumentServiceRagTest {
     @BeforeEach
     void setUp() throws Exception {
         service = new DocumentService(documentRepository, chunkRepository, embeddingService,
-                vectorStoreService, processingService, projectService, new RrfReranker(60));
+                vectorStoreService, processingService, projectService, new RrfRankFusion(60));
         ReflectionTestUtils.setField(service, "minScore", 0.5f);
         ReflectionTestUtils.setField(service, "gateScore", 0.55f);
         ReflectionTestUtils.setField(service, "hybridEnabled", true);

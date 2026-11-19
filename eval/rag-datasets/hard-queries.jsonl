@@ -1,0 +1,14 @@
+{"id":"h-01","query":"订单取消了，之前开的发票还能用吗","category":"hard","concepts":["invoice-cancel"],"relevantChunkIds":[40001],"expectEmpty":false}
+{"id":"h-02","query":"只退其中一件商品，用掉的优惠券会还给我吗","category":"hard","concepts":["coupon-partial-refund"],"relevantChunkIds":[40002],"expectEmpty":false}
+{"id":"h-03","query":"买完第二天就降价了，能退我差价吗","category":"hard","concepts":["price-drop"],"relevantChunkIds":[40003],"expectEmpty":false}
+{"id":"h-04","query":"公司月结的账什么时候能出","category":"hard","concepts":["enterprise-billing"],"relevantChunkIds":[40004],"expectEmpty":false}
+{"id":"h-05","query":"蓝绿发布怎么把流量切过去","category":"hard","concepts":["blue-green"],"relevantChunkIds":[40005],"expectEmpty":false}
+{"id":"h-06","query":"机房挂了切到异地要多久","category":"hard","concepts":["dr-switchover"],"relevantChunkIds":[40006],"expectEmpty":false}
+{"id":"h-07","query":"https 证书快过期了怎么换","category":"hard","concepts":["tls-rotation"],"relevantChunkIds":[40007],"expectEmpty":false}
+{"id":"h-08","query":"数据库连接池被打满了怎么查","category":"hard","concepts":["db-pool"],"relevantChunkIds":[40008],"expectEmpty":false}
+{"id":"h-09","query":"缓存里有个特别大的 key 怎么处理","category":"hard","concepts":["big-key"],"relevantChunkIds":[40009],"expectEmpty":false}
+{"id":"h-10","query":"本地缓存和 redis 里的数据对不上怎么办","category":"hard","concepts":["local-redis-consistency"],"relevantChunkIds":[40010],"expectEmpty":false}
+{"id":"h-11","query":"怎么发现某个 key 访问特别集中","category":"hard","concepts":["hot-key"],"relevantChunkIds":[40011],"expectEmpty":false}
+{"id":"h-12","query":"缓存整个挂了业务还能用吗","category":"hard","concepts":["cache-outage"],"relevantChunkIds":[40012],"expectEmpty":false}
+{"id":"hn-01","query":"今天食堂几点开饭","category":"noise","concepts":["canteen"],"relevantChunkIds":[],"expectEmpty":true}
+{"id":"hn-02","query":"年会抽奖什么时候开始","category":"noise","concepts":["annual-party"],"relevantChunkIds":[],"expectEmpty":true}

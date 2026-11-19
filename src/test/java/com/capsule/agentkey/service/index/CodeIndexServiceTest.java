@@ -52,6 +52,22 @@ class CodeIndexServiceTest {
     }
 
     @Test
+    void indexesAsyncExportedFunctionInTypeScript() throws IOException {
+        //export async function 是 TS 里最常见的异步导出写法，中间多一个 async 不能被漏掉
+        write("frontend/src/api/orderApi.ts", """
+                export async function cancelOrderRemote(id: string) {
+                  return id;
+                }
+                """);
+
+        CodeIndexService.WorkspaceIndex index = service.snapshot(workspace.toString(),
+                CodeIndexService.ScanOptions.defaults());
+
+        List<String> names = index.files().get(0).symbols().stream().map(CodeSymbol::name).toList();
+        assertTrue(names.contains("cancelOrderRemote"), names.toString());
+    }
+
+    @Test
     void rescansOnlyChangedFiles() throws IOException {
         write("A.java", "public class A {\n}\n");
         write("B.java", "public class B {\n}\n");

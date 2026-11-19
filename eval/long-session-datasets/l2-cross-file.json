@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "l2-cross-file-scope-review",
+  "level": "L2",
+  "description": "三个模块 24 个实现与注册表的跨文件修复，三次 execute 中改变 scope，写操作审批并进入待审/接受流。",
+  "minModelCalls": 40,
+  "reasoning": "DEEP",
+  "permission": "MANUAL",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# L2 跨文件修复\nmoduleA/moduleB/moduleC 中 Rule01 至 Rule24 的 value() 均应返回文件编号，初始错误值为 -1。\n全部修正后将 src/integration/Registry.java 的 RULE_COUNT 从 0 改为 24。\n各文件先读后改；审批通过不等于审查接受，最终变更还需统一审查。\n"
+      },
+      {
+        "path": "src/integration/Registry.java",
+        "content": "public final class Registry {\n    public static final int RULE_COUNT = 0;\n}\n"
+      }
+    ],
+    "series": [
+      {
+        "start": 1,
+        "count": 8,
+        "module": "A",
+        "pathTemplate": "src/module{module}/Rule{index2}.java",
+        "contentTemplate": "public final class Rule{index2} {\n    public int value() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 9,
+        "count": 8,
+        "module": "B",
+        "pathTemplate": "src/module{module}/Rule{index2}.java",
+        "contentTemplate": "public final class Rule{index2} {\n    public int value() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 17,
+        "count": 8,
+        "module": "C",
+        "pathTemplate": "src/module{module}/Rule{index2}.java",
+        "contentTemplate": "public final class Rule{index2} {\n    public int value() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      }
+    ]
+  },
+  "success": {
+    "fileContains": {
+      "src/integration/Registry.java": "RULE_COUNT = 24"
+    }
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "approvalScope": "APPROVAL_OR_SCOPE",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 2,
+    "minToolFailures": 1,
+    "minRecoveredTools": 0,
+    "minApprovals": 1,
+    "minScopeChanges": 1,
+    "minScopeRejections": 1,
+    "minReviewAccepted": 1,
+    "minExecuteTurns": 3,
+    "minSummaryInjectedCalls": 0,
+    "requireMemoryProbe": false
+  },
+  "memory": null,
+  "turns": [
+    {
+      "prompt": "开始 L2 跨文件修复。先 update_plan，然后按 TASK.md 要求读取 moduleB/Rule09.java 做一次边界确认；若被 scope 拒绝，保留该真实错误并继续在允许范围内工作，不要反复尝试。逐个读取并修正 Rule{first} 至 Rule{last}。每次响应最多一个工具调用，写入审批由评测回调处理。",
+      "scope": "src/moduleA",
+      "first": 1,
+      "last": 8
+    },
+    {
+      "prompt": "scope 现在切换到 moduleB。根据已有进度更新计划，只处理 Rule{first} 至 Rule{last}；每个文件仍须先读后改，不要重复上一 turn 的文件。",
+      "scope": "src/moduleB",
+      "first": 9,
+      "last": 16
+    },
+    {
+      "prompt": "最后扩大 scope 以完成集成。修正 moduleC 的 Rule{first} 至 Rule{last}，再读取并修正 src/integration/Registry.java。更新计划为真实完成状态；所有文件变更将进入统一待审流，不要声称审批通过就等于审查接受。",
+      "scope": "src",
+      "first": 17,
+      "last": 24
+    }
+  ]
+}

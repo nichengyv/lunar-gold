@@ -33,7 +33,7 @@ public class LightweightCodeIndexer implements CodeIndexer {
                     + "[\\w<>\\[\\],.?\\s]+\\s+(\\w+)\\s*\\(",
             Pattern.MULTILINE);
     private static final Pattern JS_EXPORT = Pattern.compile(
-            "^\\s*export\\s+(?:default\\s+)?(?:abstract\\s+)?"
+            "^\\s*export\\s+(?:default\\s+)?(?:async\\s+)?(?:abstract\\s+)?"
                     + "(?:class|interface|type|enum|function|const|let)\\s+(\\w+)",
             Pattern.MULTILINE);
     private static final Pattern PY_SYMBOL =

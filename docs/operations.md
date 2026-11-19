@@ -42,7 +42,7 @@ npm run dev     # http://localhost:5173, 代理 /api → 8080
 
 ### 1.4 后端（desktop 桌面模式，PR-06 / PR-07）
 
-桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.lunargold/desktop/db`，首次启动自动建库并执行 Flyway V1~V15。
+桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.lunargold/desktop/db`，首次启动自动建库并执行 Flyway V1~V21。
 
 **运行时清单与构建（P2-08，Windows x64）**：Maven 依赖内置的 zonky 二进制不含 pgvector，需先用脚本注入扩展。
 
@@ -154,7 +154,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-desktop-runtime.ps1
 
 脚本自动定位 JDK 21（JAVA_HOME 指向其他主版本时回退到本机默认安装位置），模块清单（19 个，含 `jdk.crypto.ec`、`jdk.localedata` + `--include-locales=zh,en`）写在脚本参数里，漏模块会以 `NoClassDefFoundError` 形式快速失败，补齐后重跑即可。桌面壳打包态优先使用 `resources/jre/bin/java.exe`（由 electron-builder extraResources 复制，P3-04），开发态仍走 `JAVA_HOME`/PATH。
 
-冒烟（裁剪 JRE 直跑自包含 jar）：已实测 12 秒就绪、Flyway 至 V15、`/actuator/health` UP、`/` 返回 SPA。注意：本机曾因安全软件/文件过滤驱动干扰导致 `initdb` 在 bootstrap 阶段必现 `could not create lock file "postmaster.pid": File exists`，与 JRE 无关；若新机器首启失败，先按 `sidecar.log` 确认是否卡在 initdb。
+冒烟（裁剪 JRE 直跑自包含 jar）：历史实测 12 秒就绪、当时 Flyway 至 V15、`/actuator/health` UP、`/` 返回 SPA。注意：本机曾因安全软件/文件过滤驱动干扰导致 `initdb` 在 bootstrap 阶段必现 `could not create lock file "postmaster.pid": File exists`，与 JRE 无关；2026-11-19 在全新 GUID 的 `target` 隔离目录复跑 P7-01 定向测试仍为 6 errors、0 条进入业务断言，排除旧临时目录或残留 pid。应在干净 CI/机器复跑，或由安全软件管理员排查/放行隔离目录；不要修改业务断言绕过。若新机器首启失败，先按 `sidecar.log` 确认是否卡在 initdb。
 
 ---
 
@@ -214,10 +214,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build-desktop-runtime.ps1
 
 dev 环境关闭 Flyway，以 `ddl-auto=update` 自动建表；prod 与 desktop 启动时自动执行 Flyway，并以 `ddl-auto=validate` 校验实体。
 
-当前迁移到 **Flyway V15**：
-- V13 为 `pending_file_change` 增加 `turn_id`，支持按轮次撤回。
-- V14 补建 `pending_file_change`；已有 dev 库可通过 `CREATE TABLE IF NOT EXISTS` 幂等处理。
-- V15 为 `user.email` 增加唯一索引。
+当前迁移到 **Flyway V21**：
+- V13 为 `pending_file_change` 增加 `turn_id`，支持按轮次撤回；V14 补建该表，V15 为 `user.email` 增加唯一索引。
+- V16/V17/V18 增加 `agent_run`、`agent_run_event`、`tool_approval` 与 Run token 统计。
+- V19/V21 增加审批决策来源与客户端标识，V20 增加 API 客户端凭证。
 - **全新库顺序缺陷已修复**：原始 V13 会先于 V14 对不存在的表执行 ALTER。PR-06 新增 `PendingFileChangePrecheckCallback`，在 `beforeMigrate` 一次幂等预检中按 V14 最终结构预建该表，随后 V13/V14 均为空操作；存量库不受影响，已执行迁移未被修改。
 - **Boot 4 依赖要求**：必须使用 `spring-boot-starter-flyway`。只引 `flyway-core` 时 Flyway 自动配置不会加载，启动会跳过迁移并直接被 JPA `validate` 报 `missing table`。
 

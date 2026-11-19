@@ -1,0 +1,187 @@
+{
+  "version" : 1,
+  "embedding" : "simulated",
+  "dataset" : {
+    "chunks" : 24,
+    "queries" : 22,
+    "top_k" : 5,
+    "vector_min_score" : 0.5,
+    "vector_gate_score" : 0.55,
+    "lexical_min_score" : 0.3,
+    "lexical_gate_score" : 0.35,
+    "rrf_k" : 60,
+    "latency_scope" : "retrieval_only_excluding_embedding",
+    "latency_repeats" : 3,
+    "context_tokens_note" : "CJK 1 字约 1 token，非 CJK 4 字符约 1 token，估算值"
+  },
+  "configs" : {
+    "vector" : {
+      "queries" : 19,
+      "recall@3" : 68.42,
+      "recall@5" : 68.42,
+      "mrr@5" : 68.42,
+      "ndcg@5" : 68.42,
+      "doc_hit_rate" : 68.42,
+      "context_tokens" : 24.89,
+      "p95_latency_ms" : 1.63
+    },
+    "lexical" : {
+      "queries" : 19,
+      "recall@3" : 31.58,
+      "recall@5" : 31.58,
+      "mrr@5" : 31.58,
+      "ndcg@5" : 31.58,
+      "doc_hit_rate" : 31.58,
+      "context_tokens" : 11.42,
+      "p95_latency_ms" : 1.09
+    },
+    "hybrid" : {
+      "queries" : 19,
+      "recall@3" : 100.0,
+      "recall@5" : 100.0,
+      "mrr@5" : 100.0,
+      "ndcg@5" : 100.0,
+      "doc_hit_rate" : 100.0,
+      "context_tokens" : 36.32,
+      "p95_latency_ms" : 2.7
+    }
+  },
+  "categories" : {
+    "semantic" : {
+      "vector" : {
+        "queries" : 8,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 35.38,
+        "p95_latency_ms" : 1.63
+      },
+      "lexical" : {
+        "queries" : 8,
+        "recall@3" : 0.0,
+        "recall@5" : 0.0,
+        "mrr@5" : 0.0,
+        "ndcg@5" : 0.0,
+        "doc_hit_rate" : 0.0,
+        "context_tokens" : 0.0,
+        "p95_latency_ms" : 1.29
+      },
+      "hybrid" : {
+        "queries" : 8,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 35.38,
+        "p95_latency_ms" : 2.7
+      }
+    },
+    "exact" : {
+      "vector" : {
+        "queries" : 6,
+        "recall@3" : 0.0,
+        "recall@5" : 0.0,
+        "mrr@5" : 0.0,
+        "ndcg@5" : 0.0,
+        "doc_hit_rate" : 0.0,
+        "context_tokens" : 0.0,
+        "p95_latency_ms" : 1.82
+      },
+      "lexical" : {
+        "queries" : 6,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 36.17,
+        "p95_latency_ms" : 0.87
+      },
+      "hybrid" : {
+        "queries" : 6,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 36.17,
+        "p95_latency_ms" : 2.73
+      }
+    },
+    "mixed" : {
+      "vector" : {
+        "queries" : 3,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 38.33,
+        "p95_latency_ms" : 1.54
+      },
+      "lexical" : {
+        "queries" : 3,
+        "recall@3" : 0.0,
+        "recall@5" : 0.0,
+        "mrr@5" : 0.0,
+        "ndcg@5" : 0.0,
+        "doc_hit_rate" : 0.0,
+        "context_tokens" : 0.0,
+        "p95_latency_ms" : 0.88
+      },
+      "hybrid" : {
+        "queries" : 3,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 38.33,
+        "p95_latency_ms" : 2.47
+      }
+    },
+    "cross-lingual" : {
+      "vector" : {
+        "queries" : 2,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 37.5,
+        "p95_latency_ms" : 1.47
+      },
+      "lexical" : {
+        "queries" : 2,
+        "recall@3" : 0.0,
+        "recall@5" : 0.0,
+        "mrr@5" : 0.0,
+        "ndcg@5" : 0.0,
+        "doc_hit_rate" : 0.0,
+        "context_tokens" : 0.0,
+        "p95_latency_ms" : 0.83
+      },
+      "hybrid" : {
+        "queries" : 2,
+        "recall@3" : 100.0,
+        "recall@5" : 100.0,
+        "mrr@5" : 100.0,
+        "ndcg@5" : 100.0,
+        "doc_hit_rate" : 100.0,
+        "context_tokens" : 37.5,
+        "p95_latency_ms" : 2.35
+      }
+    }
+  },
+  "noise" : {
+    "total" : 3,
+    "rejected" : {
+      "vector" : 3,
+      "lexical" : 3,
+      "hybrid" : 3
+    }
+  }
+}

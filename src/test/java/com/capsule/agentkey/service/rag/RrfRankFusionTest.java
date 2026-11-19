@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** P5-07：RRF 融合的排序、去重与截断。 */
-class RrfRerankerTest {
+class RrfRankFusionTest {
 
-    private final RrfReranker reranker = new RrfReranker(60);
+    private final RrfRankFusion rankFusion = new RrfRankFusion(60);
 
     @Test
     void fusionPromotesCandidateHitByBothPaths() {
@@ -20,7 +20,7 @@ class RrfRerankerTest {
         RagCandidate cLexical = candidate(3L, 0f, 0.90f);
         RagCandidate d = candidate(4L, 0f, 0.60f);
 
-        List<RagCandidate> ranked = reranker.rerank(
+        List<RagCandidate> ranked = rankFusion.fuse(
                 List.of(a, b, c), List.of(cLexical, d), 10);
 
         assertEquals(4, ranked.size());
@@ -32,7 +32,7 @@ class RrfRerankerTest {
 
     @Test
     void deduplicatesByChunkId() {
-        List<RagCandidate> ranked = reranker.rerank(
+        List<RagCandidate> ranked = rankFusion.fuse(
                 List.of(candidate(7L, 0.8f, 0f)),
                 List.of(candidate(7L, 0f, 0.9f)),
                 10);
@@ -44,7 +44,7 @@ class RrfRerankerTest {
 
     @Test
     void keepsLexicalOrderWhenVectorPathMisses() {
-        List<RagCandidate> ranked = reranker.rerank(
+        List<RagCandidate> ranked = rankFusion.fuse(
                 List.of(),
                 List.of(candidate(1L, 0f, 0.6f), candidate(2L, 0f, 0.5f)),
                 10);
@@ -54,7 +54,7 @@ class RrfRerankerTest {
 
     @Test
     void respectsTopK() {
-        List<RagCandidate> ranked = reranker.rerank(
+        List<RagCandidate> ranked = rankFusion.fuse(
                 List.of(candidate(1L, 0.9f, 0f), candidate(2L, 0.8f, 0f)),
                 List.of(candidate(2L, 0f, 0.8f)),
                 1);
@@ -65,7 +65,7 @@ class RrfRerankerTest {
 
     @Test
     void returnsEmptyForNonPositiveTopK() {
-        assertTrue(reranker.rerank(List.of(candidate(1L, 0.9f, 0f)), List.of(), 0).isEmpty());
+        assertTrue(rankFusion.fuse(List.of(candidate(1L, 0.9f, 0f)), List.of(), 0).isEmpty());
     }
 
     private static RagCandidate candidate(Long chunkId, float vectorScore, float lexicalScore) {

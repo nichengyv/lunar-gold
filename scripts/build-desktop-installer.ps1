@@ -1,4 +1,4 @@
-﻿<#
+﻿﻿﻿﻿<#
 .SYNOPSIS
     一条命令构建 Windows x64 桌面端 NSIS 安装包。
 

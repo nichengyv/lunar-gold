@@ -112,7 +112,7 @@
 | `frontend/src/styles/style.css` | 操作条 `:focus-within`、表格、密度应用、窄屏工作台 |
 | `frontend/src/stores/theme.test.ts` | 密度持久化与属性写入单测 |
 | `frontend/e2e/responsive.spec.ts` | 新增四组视口回归 |
-| `.trae/specs/p5-09-remaining-visual/*` | 本文档、tasks、checklist |
+| `.trae/specs/p5/p5-09-remaining-visual/*` | 本文档、tasks、checklist |
 
 ## 6. 验收标准
 

@@ -196,6 +196,9 @@ public class SpringAiAgentClient implements AgentClient {
             AgentStreamCallback wrapped = new AgentStreamCallback() {
                 @Override public void onChunk(String c) { sentChunk.set(true); callback.onChunk(c); }
                 @Override public void onToolCalls(List<ObjectNode> tc) { callback.onToolCalls(tc); }
+                @Override public void onUsage(long promptTokens, long completionTokens) {
+                    callback.onUsage(promptTokens, completionTokens);
+                }
                 @Override public void onComplete() { callback.onComplete(); }
                 @Override public void onError(Throwable t) { callback.onError(t); }
             };

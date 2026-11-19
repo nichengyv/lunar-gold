@@ -6,6 +6,7 @@ import com.capsule.agentkey.repository.AgentRunEventRepository;
 import com.capsule.agentkey.repository.AgentRunEventRepository.FirstModelChunkTime;
 import com.capsule.agentkey.repository.AgentRunRepository;
 import com.capsule.agentkey.repository.ToolApprovalRepository;
+import com.capsule.agentkey.service.AgentExperienceMetricsService.ApprovalEntryMetrics;
 import com.capsule.agentkey.service.AgentExperienceMetricsService.ExperienceMetrics;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -130,6 +131,7 @@ class AgentExperienceMetricsServiceTest {
         assertEquals("PROCESS", metrics.tool().scope());
         assertNull(metrics.approval().averageWaitMs());
         assertEquals(0, metrics.approval().sampleCount());
+        assertTrue(metrics.approval().byEntry().isEmpty());
         assertNull(metrics.tokens().averageTotalTokens());
         assertEquals(0, metrics.tokens().totalTokens());
         assertEquals(0, metrics.tokens().sampleCount());
@@ -180,6 +182,61 @@ class AgentExperienceMetricsServiceTest {
         assertEquals(4, otherMetrics.tool().failedCount());
     }
 
+    @Test
+    void groupsApprovalMetricsByEntry() {
+        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+                .thenReturn(List.of());
+        when(approvalRepository
+                .findTop100ByUserIdAndDecisionTimeIsNotNullOrderByCreateTimeDescIdDesc(USER_ID))
+                .thenReturn(List.of(
+                        approval(USER_ID, "APPROVED", "USER", null, 1000),
+                        approval(USER_ID, "REJECTED", "USER", null, 3000),
+                        approval(USER_ID, "APPROVED", "BATCH", null, 2000),
+                        approval(USER_ID, "APPROVED", "CLIENT", "cli-abc1234567", 500),
+                        approval(USER_ID, "REJECTED", "CLIENT", "cli-abc1234567", 1500),
+                        approval(USER_ID, "APPROVED", "CLIENT", "vscode-abc12345", 800),
+                        approval(USER_ID, "REJECTED", "TIMEOUT", null, 120000),
+                        approval(USER_ID, "APPROVED", null, null, 700)));
+
+        ExperienceMetrics metrics = service.getMetrics(USER_ID);
+
+        assertEquals(8, metrics.approval().sampleCount());
+        assertEquals(16187.5, metrics.approval().averageWaitMs(), 0.000001);
+        List<ApprovalEntryMetrics> entries = metrics.approval().byEntry();
+        assertEquals(8, entries.stream().mapToInt(ApprovalEntryMetrics::totalCount).sum());
+        // totalCount 倒序；同数量按 entry、clientId 升序
+        assertEquals(List.of("WEB", "CLIENT", "AUTO", "CLIENT", "UNKNOWN"),
+                entries.stream().map(ApprovalEntryMetrics::entry).toList());
+
+        ApprovalEntryMetrics web = entries.get(0);
+        assertNull(web.clientId());
+        assertEquals(3, web.totalCount());
+        assertEquals(2, web.approvedCount());
+        assertEquals(1, web.rejectedCount());
+        assertEquals(2.0 / 3, web.approvalRate(), 0.000001);
+        assertEquals(2000.0, web.averageDecisionMs(), 0.000001);
+
+        ApprovalEntryMetrics cli = entries.get(1);
+        assertEquals("cli-abc1234567", cli.clientId());
+        assertEquals(2, cli.totalCount());
+        assertEquals(0.5, cli.approvalRate(), 0.000001);
+        assertEquals(1000.0, cli.averageDecisionMs(), 0.000001);
+
+        ApprovalEntryMetrics auto = entries.get(2);
+        assertEquals(1, auto.totalCount());
+        assertEquals(1, auto.rejectedCount());
+        assertNull(auto.approvalRate());
+        assertEquals(120000.0, auto.averageDecisionMs(), 0.000001);
+
+        ApprovalEntryMetrics vscode = entries.get(3);
+        assertEquals("vscode-abc12345", vscode.clientId());
+        assertEquals(1.0, vscode.approvalRate(), 0.000001);
+
+        ApprovalEntryMetrics unknown = entries.get(4);
+        assertNull(unknown.clientId());
+        assertEquals(1.0, unknown.approvalRate(), 0.000001);
+    }
+
     private AgentRun run(long id, long userId, LocalDateTime startTime, long totalTokens) {
         AgentRun run = new AgentRun();
         run.setId(id);
@@ -194,6 +251,14 @@ class AgentExperienceMetricsServiceTest {
         approval.setUserId(userId);
         approval.setCreateTime(createTime);
         approval.setDecisionTime(createTime.plus(waitMs, ChronoUnit.MILLIS));
+        return approval;
+    }
+
+    private ToolApproval approval(long userId, String state, String source, String clientId, long waitMs) {
+        ToolApproval approval = approval(userId, BASE_TIME, waitMs);
+        approval.setState(state);
+        approval.setDecisionSource(source);
+        approval.setClientId(clientId);
         return approval;
     }
 

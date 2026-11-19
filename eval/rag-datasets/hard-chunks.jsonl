@@ -1,0 +1,160 @@
+{"chunkId":40001,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":0,"content":"售后单据的回收与重开由财务共享中心统一处理。已开具的电子票据在交易终止后需在 24 小时内做冲红处理，纸质票据需寄回后重新开具；跨月冲红还要附情况说明。发票抬头修改不受交易终止影响，可在次月 5 日前提交。票据邮寄地址变更需在寄出前 48 小时提出。红冲完成后原票据状态变为已作废，报销系统会在次日同步。若交易终止发生在开票当月且尚未认证，可直接作废而不必冲红。共享中心工作日 9:00-18:00 受理，节假日顺延。电子票据的 PDF 下载链接在冲红后立即失效。","concepts":["faq-red-flush","billing-ops"]}
+{"chunkId":40002,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":1,"content":"售后金额按分摊比例回算。整单终止时，未过期权益原路返还；仅退部分商品时，已分摊的立减额度不再返还，剩余权益仍可用于同单其他商品。权益是否延期由活动规则决定，最长不超过 7 天。退款进度可在售后中心按单据号查询，审核通过后进入渠道处理。客服可在工单中发起人工复核，复核时限 48 小时。分摊金额以订单实付为准，不含运费与包装费。若活动已结束，剩余权益只能用于同活动的其他商品。整单终止后原活动资格同步失效，再次下单按新价格计算。","concepts":["faq-proration","aftersale"]}
+{"chunkId":40003,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":2,"content":"商品详情页展示的价格随活动实时变化，下单时刻的成交价即为结算依据。若在签收后 7 天内出现同款商品成交价下调，可提交补差申请，审核通过后以余额形式返还；叠加券、赠品与限时秒杀不参与补差。申请入口在售后中心，单笔订单最多提交一次。补差金额不计入会员成长值。审核通常在 3 个工作日内完成，结果以站内信通知。跨店与第三方商品不在受理范围，同款不同规格也不参与。签收时间以物流签收记录为准，未签收订单需先完成收货。补差后的价格不重新开具发票，原发票继续有效。","concepts":["faq-price-protection","aftersale"]}
+{"chunkId":40004,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":3,"content":"对公客户的账务按自然月归集。每月第 3 个工作日生成上期汇总，遇节假日顺延；汇总包含消费明细、服务费与调整项三类。若对金额有异议，需在收到后 5 个工作日内发起复核，逾期视为确认。开票信息变更需在汇总生成前完成，否则顺延至下期处理。账单联系人可在财务中心维护，变更后次月生效。历史汇总保留 24 个月，可导出 CSV 或 PDF。调整项包含退款冲抵、补差与服务费减免，单独列示。若客户当月无交易，仍会生成零金额汇总。","concepts":["faq-corporate-settlement","finance-ops"]}
+{"chunkId":40005,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":0,"content":"生产环境保留两组实例，新版本先在备用组完成自检。切换由网关按 5%、50%、100% 三段放量，每段观察 10 分钟；异常时按 2 分钟回切窗口退回原组。切换期间长连接会被主动断开一次，客户端需支持重连。两组实例共用同一套配置中心命名空间。自检包含启动探针、依赖连通性与关键接口冒烟。观察指标以错误率、P99 与队列积压为主，任一项越过阈值即暂停放量。回切后备用组保留现场日志 24 小时。发布期间值班需在群内同步每一步结果。","concepts":["faq-traffic-shift","release-ops"]}
+{"chunkId":40006,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":1,"content":"容灾预案分冷备与温备两级，用于机房整体不可用时切换到异地。温备集群保持最小可用容量，切换由全局调度器执行，包含 DNS 生效、数据追平与健康确认三个阶段，目标恢复时间为 30 分钟，最近一次演练实测 22 分钟。冷备需要先扩容再切换，通常不低于 2 小时。演练结果归档在运维知识库。切换决策由应急小组发起，需同时确认数据追平位点与入口流量。日常同城双活不触发跨地域切换，仅在本地域整体故障时启用。异地集群的容量按峰值的三成预留，切换后需临时扩容。恢复演练每季度一次，覆盖数据库、缓存与对象存储三类依赖。","concepts":["faq-dr-rto","ops"]}
+{"chunkId":40007,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":2,"content":"网关凭据临近有效期时，平台会提前 30 天签发替代凭据并进入灰度。人工替换需在变更单中附指纹，先更新边缘节点再更新源站，两次操作间隔不少于 10 分钟。旧凭据在替换完成后保留 24 小时以便回退。私钥不得导出到个人设备。灰度期间按 5% 流量验证握手成功率，异常时回退旧凭据。凭据链需包含中间凭据，缺失会导致部分客户端握手失败。通配符凭据只覆盖一级子域，二级子域需单独申请。有效期前 7 天若仍未替换，平台会升级告警并通知安全值班。替换记录保留 12 个月备查。","concepts":["faq-cert-lifecycle","security-ops"]}
+{"chunkId":40008,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":3,"content":"连接耗尽通常由慢查询、未释放事务或突发流量引起。排查顺序为先看活跃会话与等待事件，再看应用侧连接租借时长；应急可临时提高上限并重启异常实例，但需同步限制入口流量。长期方案是拆分长事务并增加只读副本。连接使用率超过 80% 会触发预警。监控面板可按实例查看连接来源与持有时长，定位到具体接口。若等待事件集中在锁竞争，应先处理阻塞会话而非直接扩容。连接池上限调整需同步评估数据库侧的最大连接数，避免把压力转移给存储层。","concepts":["faq-db-triage","dba"]}
+{"chunkId":40009,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":0,"content":"集合类结构超过 5000 个成员或单值超过 1MB 时视为大对象。处理方式是按业务主键做哈希分片，读时聚合、写时定位分片；迁移采用双写并校验，完成后下线旧结构。分片后需同步调整过期策略，避免同一时刻整体失效。分片数量建议为 16 的整数倍。","concepts":["faq-big-object","cache-ops"]}
+{"chunkId":40010,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":1,"content":"两级存储采用先写远端再删本地的顺序，删除失败时投递补偿消息，由消费端重试最多 3 次。读路径若发现版本号落后，会主动回源并刷新本地副本。跨实例的本地副本依靠广播失效，延迟通常在 200ms 内。版本号写入与业务更新在同一事务内完成。","concepts":["faq-two-level-cache","cache-ops"]}
+{"chunkId":40011,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":2,"content":"访问频次统计在客户端侧按滑动窗口聚合，每分钟上报一次。单 key 超过 1000 QPS 或占实例总流量 20% 时标记为热点，触发本地副本与限流保护。热点清单可在监控面板按应用查看，保留 7 天。上报数据只包含频次与耗时，不包含具体业务值。阈值可按应用覆盖，调整后次日生效。热点标记不会自动扩容，需结合容量规划处理。客户端聚合采用无锁计数，额外开销低于 1%。若某 key 的访问集中在少数实例，面板会同时展示分布比例。","concepts":["faq-hotspot","observability"]}
+{"chunkId":40012,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":3,"content":"存储层不可用时，读请求回退到数据库并开启请求合并，写请求进入本地队列，队列上限 1000 条。降级开关由配置中心统一下发，恢复后需先清理积压再逐步放量。降级期间不保证强一致，页面会展示稍后重试提示。降级事件需在恢复后 24 小时内补录说明。开关支持按应用灰度，先放量一成观察错误率。本地队列满后新写入直接失败并返回可重试错误码。数据库兜底需同步开启限流，避免缓存故障扩散为存储故障。恢复阶段按 10%、50%、100% 三档回切。","concepts":["faq-degradation","cache-ops"]}
+{"chunkId":40013,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":4,"content":"发票开具：订单完成后 7 天内可申请电子发票，纸质发票 15 个工作日内寄出。","concepts":["invoice-issue","billing"]}
+{"chunkId":40014,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":5,"content":"发票抬头修改：支持在开票后 30 天内修改抬头，需上传营业执照并等待审核。","concepts":["invoice-title","billing"]}
+{"chunkId":40015,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":6,"content":"优惠券退回规则：整单退款后优惠券在 24 小时内退回账户，已过期优惠券不补发。","concepts":["coupon-return","discount"]}
+{"chunkId":40016,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":7,"content":"退款金额计算：按商品实付金额退回，整单退款时运费一并退回，部分退款不退运费。","concepts":["refund-amount","aftersale"]}
+{"chunkId":40017,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":8,"content":"降价提醒：收藏的商品降价后会推送通知，通知不代表可以补差价。","concepts":["price-drop-notice","marketing"]}
+{"chunkId":40018,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":9,"content":"价格展示：活动价在详情页实时刷新，购物车价格以下单时为准。","concepts":["price-display","pricing"]}
+{"chunkId":40019,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":10,"content":"企业认证：对公客户需提交营业执照与开户证明，审核通过后可使用月结服务。","concepts":["enterprise-verify","billing"]}
+{"chunkId":40020,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":11,"content":"月结额度：企业客户默认月结额度 5 万元，超额需提交财务补充材料。","concepts":["credit-line","billing"]}
+{"chunkId":40021,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":4,"content":"发布窗口：每周二、四 10:00-16:00 可发布，需提前一天提交变更单并附回归结果。","concepts":["release-window","release"]}
+{"chunkId":40022,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":5,"content":"灰度策略：新版本先对内部账号开放，观察 24 小时后逐步扩大流量范围。","concepts":["canary","release"]}
+{"chunkId":40023,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":6,"content":"备份保留：每日 03:00 执行全量备份，备份文件保留 14 天后自动清理。","concepts":["backup-retention","ops"]}
+{"chunkId":40024,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":7,"content":"监控告警：P1 告警需 5 分钟内响应，值班表在内部系统维护并每周轮换。","concepts":["oncall","ops"]}
+{"chunkId":40025,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":8,"content":"证书申请：在证书中心提交域名与组织信息，审核通过后 1 个工作日内签发。","concepts":["cert-apply","security"]}
+{"chunkId":40026,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":9,"content":"证书绑定：一个域名只能绑定一张有效证书，更换前需先解绑旧证书。","concepts":["cert-bind","security"]}
+{"chunkId":40027,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":10,"content":"连接池配置：默认最大连接数 20，空闲超时 10 分钟，可按键覆盖。","concepts":["pool-config","dba"]}
+{"chunkId":40028,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":11,"content":"只读副本：报表类查询走只读副本，主库只承担写入与事务提交。","concepts":["read-replica","dba"]}
+{"chunkId":40029,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":4,"content":"key 命名：缓存 key 采用业务前缀加主键，禁止包含空格与中文标点。","concepts":["key-naming","cache-key"]}
+{"chunkId":40030,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":5,"content":"key 过期：默认 TTL 为 10 分钟，可按业务覆盖，最长不超过 24 小时。","concepts":["key-ttl","cache"]}
+{"chunkId":40031,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":6,"content":"Redis 连接：默认连接超时 2 秒，最大连接数 50，空闲连接会被回收。","concepts":["redis-connection","cache"]}
+{"chunkId":40032,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":7,"content":"本地缓存开关：通过 CACHE_LOCAL_ENABLED 控制，默认开启，重启后生效。","concepts":["local-cache-switch","cache"]}
+{"chunkId":40033,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":8,"content":"监控指标：缓存命中率低于 80% 时触发告警，并通知业务负责人。","concepts":["hit-rate","observability"]}
+{"chunkId":40034,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":9,"content":"容量规划：单实例内存使用超过 80% 时扩容，扩容过程对业务无感。","concepts":["capacity","ops"]}
+{"chunkId":40035,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":10,"content":"故障演练：每季度执行一次缓存不可用演练，记录恢复时长与影响范围。","concepts":["drill","ops"]}
+{"chunkId":40036,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":11,"content":"告警升级：缓存错误率超过 5% 时通知值班与负责人，15 分钟未恢复升级。","concepts":["alert-escalation","observability"]}
+{"chunkId":40101,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":12,"content":"发票作废：开票后 30 天内可申请作废，需提交作废原因并退回原票据。","concepts":["invoice-void","billing"]}
+{"chunkId":40102,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":13,"content":"发票重开：抬头或税号错误时可申请重开，重开前必须先作废原票据。","concepts":["invoice-reissue","billing"]}
+{"chunkId":40103,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":14,"content":"电子发票下载：开票成功后可在订单详情下载 PDF，下载链接 30 天有效。","concepts":["invoice-download","billing"]}
+{"chunkId":40104,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":15,"content":"发票类型：默认开具电子普通发票，专用发票需企业认证后申请。","concepts":["invoice-type","billing"]}
+{"chunkId":40105,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":16,"content":"发票查询：可按订单号或发票号在发票中心查询开票进度。","concepts":["invoice-track","billing"]}
+{"chunkId":40106,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":17,"content":"优惠券失效：活动结束后未使用的优惠券自动失效，不补发。","concepts":["coupon-expire","discount"]}
+{"chunkId":40107,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":18,"content":"优惠分摊：多商品订单按实付金额比例分摊优惠，退款按分摊金额计算。","concepts":["discount-allocation","aftersale"]}
+{"chunkId":40108,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":19,"content":"使用限制：部分品类不支持优惠券，提交订单时统一校验。","concepts":["coupon-scope","discount"]}
+{"chunkId":40109,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":20,"content":"领取限制：每个账号每种券限领 1 张，领取后 30 天内有效。","concepts":["coupon-limit","discount"]}
+{"chunkId":40110,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":21,"content":"再次下单：退款后再次购买不再享受原活动价格。","concepts":["repurchase-price","pricing"]}
+{"chunkId":40111,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":22,"content":"降价通知：收藏商品降价后推送提醒，每天最多一条。","concepts":["price-alert","marketing"]}
+{"chunkId":40112,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":23,"content":"价保范围：仅同款同规格商品参与，跨店与第三方商品除外。","concepts":["price-protect-scope","aftersale"]}
+{"chunkId":40113,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":24,"content":"秒杀商品：限时秒杀不参与价格保护与补差。","concepts":["flash-sale","aftersale"]}
+{"chunkId":40114,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":25,"content":"优惠叠加：降价后不能再叠加店铺券，系统按最优价格结算。","concepts":["discount-stack","pricing"]}
+{"chunkId":40115,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":26,"content":"价格展示：详情页价格实时更新，下单价格以结算页为准。","concepts":["price-render","pricing"]}
+{"chunkId":40116,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":27,"content":"月结申请：企业认证通过后可申请月结，审批约 3 个工作日。","concepts":["monthly-apply","billing"]}
+{"chunkId":40117,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":28,"content":"月结额度：默认 5 万元，超额需提交财务补充材料。","concepts":["monthly-limit","billing"]}
+{"chunkId":40118,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":29,"content":"账单下载：账单生成后可在财务中心下载 PDF 与明细。","concepts":["bill-download","billing"]}
+{"chunkId":40119,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":30,"content":"对账方式：支持按订单号或结算单号对账，差异需在 5 个工作日内提出。","concepts":["reconcile","billing"]}
+{"chunkId":40120,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":31,"content":"统一开票：月结账单生成后可统一开票，开票周期 7 个工作日。","concepts":["bulk-invoice","billing"]}
+{"chunkId":40121,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":12,"content":"发布窗口：每周二、四 10:00-16:00 可发布，需提前一天提交变更单。","concepts":["release-window-2","release"]}
+{"chunkId":40122,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":13,"content":"灰度发布：先对内部账号开放，观察 24 小时后扩大范围。","concepts":["canary-2","release"]}
+{"chunkId":40123,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":14,"content":"回切确认：回切前需值班负责人确认，回切后保留现场日志。","concepts":["rollback-confirm","release"]}
+{"chunkId":40124,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":15,"content":"负载均衡：新实例权重从 10% 逐步提升，健康检查通过后加入。","concepts":["lb-weight","ops"]}
+{"chunkId":40125,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":16,"content":"发布检查单：上线前确认配置、迁移与回滚方案三项。","concepts":["release-checklist","release"]}
+{"chunkId":40126,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":17,"content":"容灾演练：每季度一次，记录目标与实际恢复时长。","concepts":["dr-drill","ops"]}
+{"chunkId":40127,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":18,"content":"备份恢复：备份保留 14 天，恢复需先在隔离环境验证。","concepts":["restore","ops"]}
+{"chunkId":40128,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":19,"content":"多活现状：同城双活已上线，异地多活仍在规划。","concepts":["multi-active","ops"]}
+{"chunkId":40129,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":20,"content":"切换细节：DNS 生效通常 1-5 分钟，客户端需支持重连。","concepts":["dns-failover","ops"]}
+{"chunkId":40130,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":21,"content":"机房分布：生产机房位于两个可用区，网络互通。","concepts":["idc-layout","ops"]}
+{"chunkId":40131,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":22,"content":"证书申请：提交域名与组织信息，1 个工作日内签发。","concepts":["cert-apply-2","security"]}
+{"chunkId":40132,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":23,"content":"证书绑定：一个域名只能绑定一张有效证书。","concepts":["cert-bind-2","security"]}
+{"chunkId":40133,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":24,"content":"到期提醒：到期前 30 天、7 天、1 天分别发送提醒。","concepts":["cert-reminder","security"]}
+{"chunkId":40134,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":25,"content":"证书类型：支持 DV 与 OV，通配符证书需单独申请。","concepts":["cert-type","security"]}
+{"chunkId":40135,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":26,"content":"私钥管理：私钥不得导出，托管与轮换由平台执行。","concepts":["key-custody","security"]}
+{"chunkId":40136,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":27,"content":"连接池配置：最大连接数 20，空闲超时 10 分钟。","concepts":["pool-config-2","dba"]}
+{"chunkId":40137,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":28,"content":"慢查询：执行超过 1 秒记录慢日志，保留 7 天。","concepts":["slow-query","dba"]}
+{"chunkId":40138,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":29,"content":"连接泄漏：未关闭的连接 30 分钟后被回收。","concepts":["connection-leak","dba"]}
+{"chunkId":40139,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":30,"content":"只读副本：报表查询走只读副本，主库只承担写入。","concepts":["replica-2","dba"]}
+{"chunkId":40140,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":31,"content":"数据库监控：活跃连接数与等待事件在监控面板展示。","concepts":["db-monitor","observability"]}
+{"chunkId":40141,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":12,"content":"key 命名：业务前缀加主键，禁止包含空格与中文标点。","concepts":["key-naming-2","cache-key"]}
+{"chunkId":40142,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":13,"content":"key 过期：默认 10 分钟，可按业务覆盖。","concepts":["key-ttl-2","cache"]}
+{"chunkId":40143,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":14,"content":"大对象告警：单值超过 1MB 触发告警并记录。","concepts":["big-object-alert","cache"]}
+{"chunkId":40144,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":15,"content":"集合容量：单个集合建议不超过 1000 个成员。","concepts":["collection-capacity","cache"]}
+{"chunkId":40145,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":16,"content":"key 删除：删除接口支持按 key 与标签清理。","concepts":["key-delete","cache"]}
+{"chunkId":40146,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":17,"content":"Redis 连接：超时 2 秒，最大连接数 50。","concepts":["redis-conn-2","cache"]}
+{"chunkId":40147,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":18,"content":"本地缓存开关：CACHE_LOCAL_ENABLED 默认开启。","concepts":["local-switch-2","cache"]}
+{"chunkId":40148,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":19,"content":"版本号：写入时递增版本号，读取时比较新旧。","concepts":["version-check","cache"]}
+{"chunkId":40149,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":20,"content":"广播失效：跨实例失效通过消息广播，通常 200ms 内到达。","concepts":["broadcast-invalidate","cache"]}
+{"chunkId":40150,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":21,"content":"双写校验：迁移期间双写并比对，差异写入日志。","concepts":["dual-write-check","cache"]}
+{"chunkId":40151,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":22,"content":"命中率告警：低于 80% 触发告警并通知负责人。","concepts":["hit-alert","observability"]}
+{"chunkId":40152,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":23,"content":"容量规划：内存超过 80% 扩容，扩容对业务无感。","concepts":["capacity-2","ops"]}
+{"chunkId":40153,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":24,"content":"QPS 监控：按接口统计 QPS，数据保留 7 天。","concepts":["qps-monitor","observability"]}
+{"chunkId":40154,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":25,"content":"热点打散：热点 key 增加随机后缀分散到多个分片。","concepts":["hot-shard","cache"]}
+{"chunkId":40155,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":26,"content":"限流保护：单 key 超过阈值时触发限流。","concepts":["key-rate-limit","cache"]}
+{"chunkId":40156,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":27,"content":"缓存监控：命中率、错误率与连接数在面板展示。","concepts":["cache-monitor","observability"]}
+{"chunkId":40157,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":28,"content":"故障演练：每季度一次缓存不可用演练。","concepts":["outage-drill","ops"]}
+{"chunkId":40158,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":29,"content":"告警升级：错误率超过 5% 通知值班，15 分钟未恢复升级。","concepts":["alert-upgrade","observability"]}
+{"chunkId":40159,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":30,"content":"连接超时：Redis 连接超时 2 秒，失败重试 1 次。","concepts":["conn-timeout","cache"]}
+{"chunkId":40160,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":31,"content":"容量告警：内存使用超过 80% 时扩容。","concepts":["capacity-alert","ops"]}
+{"chunkId":40161,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":32,"content":"证书申请流程：准备域名、组织信息与联系人，提交后由 CA 审核，DV 证书通常 1 个工作日内签发，OV 证书需要人工核验组织身份。","concepts":["cert-apply-flow","security"]}
+{"chunkId":40162,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":33,"content":"证书绑定：一个域名只能绑定一张有效证书，更换前需先解绑；泛域名与主域可以同时绑定在不同入口。","concepts":["cert-bind-rule","security"]}
+{"chunkId":40163,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":34,"content":"证书类型说明：DV 只校验域名所有权，OV 额外校验组织身份；通配符证书覆盖一级子域，二级子域需单独申请。","concepts":["cert-type-doc","security"]}
+{"chunkId":40164,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":35,"content":"到期提醒：平台在到期前 30 天、7 天、1 天分别发送提醒，提醒发送到安全值班邮箱与负责人。","concepts":["cert-expiry-alert","security"]}
+{"chunkId":40165,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":36,"content":"证书链配置：部署时需包含中间证书，缺失会导致部分客户端握手失败；链顺序从站点证书到根证书。","concepts":["cert-chain","security"]}
+{"chunkId":40166,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":37,"content":"私钥管理：私钥不得导出到个人设备，统一托管在密钥系统中，访问需审批并记录审计日志。","concepts":["private-key","security"]}
+{"chunkId":40167,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":38,"content":"证书灰度验证：新证书先在小流量验证握手成功率，再逐步全量生效，异常时回退旧证书。","concepts":["cert-gray","security"]}
+{"chunkId":40168,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":39,"content":"证书吊销：私钥泄露时需立即吊销并重新签发，吊销状态通过 CRL 与 OCSP 传播，传播延迟通常 1 小时。","concepts":["cert-revoke","security"]}
+{"chunkId":40169,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":40,"content":"域名过期：域名到期前 30 天需续费，未续费会进入赎回期并停止解析，赎回期最长 30 天。","concepts":["domain-expiry","ops"]}
+{"chunkId":40170,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":41,"content":"访问令牌过期：Token 过期后需重新登录或刷新，刷新失败需重新认证，刷新令牌有效期 7 天。","concepts":["token-expiry","security"]}
+{"chunkId":40171,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":42,"content":"https 证书过期后浏览器会提示不安全，用户可手动继续访问，但部分接口会直接拒绝连接。","concepts":["cert-expired-impact","security"]}
+{"chunkId":40172,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":43,"content":"https 证书更换前需确认新证书的域名覆盖范围与有效期，避免上线后再次过期。","concepts":["cert-precheck","security"]}
+{"chunkId":40173,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":44,"content":"https 证书更换后应验证浏览器锁标识、证书链与到期时间，可用在线工具检测。","concepts":["cert-postcheck","security"]}
+{"chunkId":40174,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":45,"content":"https 证书过期告警会发送到值班群，提醒频率为每天一次，直到证书更新。","concepts":["cert-alert-daily","security"]}
+{"chunkId":40175,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":46,"content":"https 证书的自动续期依赖域名验证，验证失败时需手动补充 DNS 记录。","concepts":["cert-auto-renew","security"]}
+{"chunkId":40176,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":47,"content":"https 证书更换窗口建议避开业务高峰，变更单需注明回退方式与联系人。","concepts":["cert-window","security"]}
+{"chunkId":40177,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":48,"content":"订单取消后发票处理进度：可在发票中心查看冲红状态与预计完成时间。","concepts":["cancel-invoice-progress","billing"]}
+{"chunkId":40178,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":49,"content":"订单取消时发票已寄出：需等纸质票据退回后才能继续处理后续申请。","concepts":["cancel-invoice-mailed","billing"]}
+{"chunkId":40179,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":50,"content":"订单取消后重新下单：新订单可重新申请开票，抬头沿用上次填写的信息。","concepts":["cancel-reorder-invoice","billing"]}
+{"chunkId":40180,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":51,"content":"订单取消的发票金额：按实付金额冲红，运费与优惠按订单分摊比例处理。","concepts":["cancel-invoice-amount","billing"]}
+{"chunkId":40181,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":52,"content":"订单取消后发票查询：输入原订单号即可查看关联票据的处理状态。","concepts":["cancel-invoice-query","billing"]}
+{"chunkId":40182,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":53,"content":"订单取消的时效：取消申请提交后 24 小时内完成票据处理并同步状态。","concepts":["cancel-invoice-sla","billing"]}
+{"chunkId":40183,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":54,"content":"部分退款后优惠券状态：可在账户优惠券列表查看是否退回以及新的有效期。","concepts":["partial-coupon-status","discount"]}
+{"chunkId":40184,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":55,"content":"部分退款金额：按商品实付金额退回，运费仅在整单退款时退回。","concepts":["partial-refund-amount","aftersale"]}
+{"chunkId":40185,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":56,"content":"部分退款申请：在售后中心选择商品与原因，审核通过后原路退回。","concepts":["partial-refund-apply","aftersale"]}
+{"chunkId":40186,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":57,"content":"部分退款时效：审核通过后 1-3 个工作日到账，节假日顺延。","concepts":["partial-refund-sla","aftersale"]}
+{"chunkId":40187,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":58,"content":"部分退款与积分：已抵扣积分按比例退回，过期积分不补发。","concepts":["partial-refund-points","aftersale"]}
+{"chunkId":40188,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":59,"content":"部分退款后再次购买：不再享受原活动价格，按当前价格结算。","concepts":["partial-repurchase","pricing"]}
+{"chunkId":40189,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":60,"content":"降价补差申请入口：售后中心-价格保护-提交申请，需选择订单与商品。","concepts":["price-claim-entry","aftersale"]}
+{"chunkId":40190,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":61,"content":"降价补差审核：提交后 3 个工作日内完成，结果通过站内信通知。","concepts":["price-claim-review","aftersale"]}
+{"chunkId":40191,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":62,"content":"降价补差金额：按差价以余额形式返还，不重新开具发票。","concepts":["price-claim-amount","aftersale"]}
+{"chunkId":40192,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":63,"content":"降价补差次数：单笔订单最多提交一次，重复提交不再受理。","concepts":["price-claim-limit","aftersale"]}
+{"chunkId":40193,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":64,"content":"降价补差材料：需上传商品页截图与订单号，材料不全会退回补充。","concepts":["price-claim-material","aftersale"]}
+{"chunkId":40194,"documentId":1004,"fileName":"订单与售后-FAQ摘编.md","chunkIndex":65,"content":"降价补差范围：仅同款同规格商品，秒杀、赠品与跨店商品不参与。","concepts":["price-claim-scope","aftersale"]}
+{"chunkId":40195,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":48,"content":"蓝绿发布切换前检查：确认新版本自检通过、配置一致与回滚包就绪。","concepts":["bg-precheck","release"]}
+{"chunkId":40196,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":49,"content":"蓝绿发布切换顺序：先切只读流量，再切写流量，最后切定时任务。","concepts":["bg-order","release"]}
+{"chunkId":40197,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":50,"content":"蓝绿发布切换观察：每段放量后观察错误率与 P99 十分钟，再决定下一步。","concepts":["bg-observe","release"]}
+{"chunkId":40198,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":51,"content":"蓝绿发布切换失败：立即回切原组并保留现场日志，由值班记录原因。","concepts":["bg-failure","release"]}
+{"chunkId":40199,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":52,"content":"蓝绿发布切换通知：开始与结束在值班群同步，附监控面板链接。","concepts":["bg-notify","release"]}
+{"chunkId":40200,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":53,"content":"蓝绿发布切换窗口：避开业务高峰，默认安排在周二、四上午执行。","concepts":["bg-window","release"]}
+{"chunkId":40201,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":54,"content":"机房故障切换决策：由应急小组发起，确认影响范围后执行并同步业务方。","concepts":["idc-failover-decision","ops"]}
+{"chunkId":40202,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":55,"content":"机房故障切换数据：以最近一次追平位点为准，缺失部分需在恢复后补录。","concepts":["idc-failover-data","ops"]}
+{"chunkId":40203,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":56,"content":"机房故障切换入口：全局调度器控制台，执行前需双人复核。","concepts":["idc-failover-entry","ops"]}
+{"chunkId":40204,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":57,"content":"机房故障切换演练：每季度一次，记录实际恢复时长与影响范围。","concepts":["idc-failover-drill","ops"]}
+{"chunkId":40205,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":58,"content":"机房故障切换通知：开始与完成通知业务负责人，并附影响说明。","concepts":["idc-failover-notify","ops"]}
+{"chunkId":40206,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":59,"content":"机房故障切换回退：本地域恢复后按 10% 流量逐步回切并观察。","concepts":["idc-failover-back","ops"]}
+{"chunkId":40207,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":60,"content":"线程池打满怎么查：查看活跃线程数、队列长度与拒绝次数，先定位阻塞任务。","concepts":["thread-pool-triage","dba"]}
+{"chunkId":40208,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":61,"content":"内存打满怎么查：查看堆使用曲线与 GC 次数，结合堆转储定位大对象。","concepts":["memory-triage","dba"]}
+{"chunkId":40209,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":62,"content":"磁盘打满怎么查：查看分区使用率与增长最快的目录，清理临时文件。","concepts":["disk-triage","dba"]}
+{"chunkId":40210,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":63,"content":"端口占用怎么查：用系统工具查看监听进程与连接状态，确认占用来源。","concepts":["port-triage","dba"]}
+{"chunkId":40211,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":64,"content":"队列积压怎么查：查看队列长度、消费速率与重试次数，定位消费瓶颈。","concepts":["queue-triage","dba"]}
+{"chunkId":40212,"documentId":1005,"fileName":"部署与运维-FAQ摘编.md","chunkIndex":65,"content":"连接数超限怎么查：对比数据库最大连接数与各应用占用，确认超限来源。","concepts":["conn-limit-triage","dba"]}
+{"chunkId":40213,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":48,"content":"怎么发现慢查询：开启慢日志并按耗时排序，结合执行计划定位。","concepts":["find-slow-query","observability"]}
+{"chunkId":40214,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":49,"content":"怎么发现大 key：扫描集合成员数与单值大小，生成大对象清单。","concepts":["find-big-key","observability"]}
+{"chunkId":40215,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":50,"content":"怎么发现连接泄漏：对比连接创建与关闭数量，观察长期未释放连接。","concepts":["find-leak","observability"]}
+{"chunkId":40216,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":51,"content":"怎么发现命中率下降：查看监控面板命中率曲线，结合发布记录定位。","concepts":["find-hit-drop","observability"]}
+{"chunkId":40217,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":52,"content":"怎么发现 QPS 突增：按接口统计 QPS 与同比，结合调用方排查。","concepts":["find-qps-spike","observability"]}
+{"chunkId":40218,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":53,"content":"怎么发现内存增长：查看实例内存曲线与 key 数量变化，定位新增数据。","concepts":["find-memory-growth","observability"]}
+{"chunkId":40219,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":54,"content":"缓存挂了的告警：错误率超过 5% 通知值班，15 分钟未恢复升级。","concepts":["outage-alert","observability"]}
+{"chunkId":40220,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":55,"content":"缓存挂了的演练：每季度一次，记录恢复时长与影响范围。","concepts":["outage-drill-2","ops"]}
+{"chunkId":40221,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":56,"content":"缓存挂了的监控：命中率、错误率与连接数在面板展示。","concepts":["outage-monitor","observability"]}
+{"chunkId":40222,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":57,"content":"缓存挂了的恢复：重启实例后逐步放量，先 10% 再全量。","concepts":["outage-recover","ops"]}
+{"chunkId":40223,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":58,"content":"缓存挂了的容量影响：内存与连接数需重新评估，避免恢复后再次打满。","concepts":["outage-capacity","ops"]}
+{"chunkId":40224,"documentId":1006,"fileName":"缓存使用-FAQ摘编.md","chunkIndex":59,"content":"缓存挂了的通知：值班与业务负责人同步，附预计恢复时间。","concepts":["outage-notify","ops"]}

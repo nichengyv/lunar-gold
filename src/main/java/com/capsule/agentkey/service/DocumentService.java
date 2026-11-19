@@ -5,7 +5,7 @@ import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.repository.DocumentChunkRepository;
 import com.capsule.agentkey.repository.DocumentRepository;
 import com.capsule.agentkey.service.rag.RagCandidate;
-import com.capsule.agentkey.service.rag.Reranker;
+import com.capsule.agentkey.service.rag.RankFusion;
 import com.capsule.agentkey.util.FileUploadValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,8 +41,8 @@ public class DocumentService {
     private final VectorStoreService vectorStoreService;
     private final DocumentProcessingService processingService;
     private final ProjectService projectService;
-    /** P5-07：向量 + 词法召回结果融合（默认 RRF），后续可替换为模型 reranker */
-    private final Reranker reranker;
+    /** P5-07：向量 + 词法召回的排名融合（默认 RRF）；模型精排若未来引入，属于独立后置环节 */
+    private final RankFusion rankFusion;
 
     // 文件存储目录（生产环境建议改为 OSS 或独立存储服务）
     private final Path uploadDir = Paths.get(System.getProperty("user.dir"), "uploads", "documents");
@@ -72,14 +72,14 @@ public class DocumentService {
                            VectorStoreService vectorStoreService,
                            DocumentProcessingService processingService,
                            ProjectService projectService,
-                           Reranker reranker) {
+                           RankFusion rankFusion) {
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
         this.embeddingService = embeddingService;
         this.vectorStoreService = vectorStoreService;
         this.processingService = processingService;
         this.projectService = projectService;
-        this.reranker = reranker;
+        this.rankFusion = rankFusion;
         try {
             Files.createDirectories(uploadDir);
         } catch (IOException e) {
@@ -237,7 +237,7 @@ public class DocumentService {
 
     /**
      * RAG 检索：只检索当前项目内的知识库，避免不同项目的资料互相串味。
-     * P5-07 起同时走向量召回与 pg_trgm 词法召回，再由 {@link Reranker}（默认 RRF）融合。
+     * P5-07 起同时走向量召回与 pg_trgm 词法召回，再由 {@link RankFusion}（默认 RRF）融合。
      * 两道门槛避免"答非所问却标出处"：
      * 1) 单片段相关度低于 minScore / lexicalMinScore 丢弃；
      * 2) 向量最高分低于 gateScore 且词法最高分低于 lexicalGateScore 时，判定本轮问题与资料无关。
@@ -275,7 +275,7 @@ public class DocumentService {
         }
 
         List<RagCandidate> fused = hybridEnabled
-                ? reranker.rerank(toCandidates(vectorResults, true), toCandidates(lexicalResults, false), topK)
+                ? rankFusion.fuse(toCandidates(vectorResults, true), toCandidates(lexicalResults, false), topK)
                 : toCandidates(vectorResults, true);
         if (fused.isEmpty()) return RagResult.empty();
 

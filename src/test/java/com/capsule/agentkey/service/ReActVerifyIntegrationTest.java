@@ -212,7 +212,7 @@ class ReActVerifyIntegrationTest {
                         @Override public void onApprovalRequired(String approvalId, String tool,
                                 com.capsule.agentkey.dto.ApprovalPreview preview,
                                 String risk, long expiresAt) {
-                            approvals.resolve(approvalId, USER_ID, "APPROVE", false);
+                            approvals.resolve(approvalId, USER_ID, "APPROVE", false, null);
                         }
                         @Override public void onNoProgress(ReActAgentService.NoProgress event) {
                             noProgress.set(event);

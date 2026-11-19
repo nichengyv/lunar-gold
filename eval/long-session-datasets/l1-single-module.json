@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "l1-single-module-refactor",
+  "level": "L1",
+  "description": "单模块 12 个策略实现的确定性重构，包含计划更新、过期路径失败与纠正恢复。",
+  "minModelCalls": 20,
+  "reasoning": "DEEP",
+  "permission": "AUTO",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# L1 重构任务\n将 Policy01 至 Policy12 的 value() 返回值从 -1 修正为各自文件编号，并将 Catalog.POLICY_COUNT 从 0 改为 12。\n登记入口 src/main/java/eval/l1/LegacyPolicy.java 已过期；失败后应通过目录定位真实文件。\n每个文件必须读取后再精确编辑，不得无变化重写。\n"
+      },
+      {
+        "path": "src/main/java/eval/l1/Catalog.java",
+        "content": "package eval.l1;\npublic final class Catalog {\n    public static final int POLICY_COUNT = 0;\n}\n"
+      }
+    ],
+    "series": [
+      {
+        "start": 1,
+        "count": 12,
+        "module": "",
+        "pathTemplate": "src/main/java/eval/l1/Policy{index2}.java",
+        "contentTemplate": "package eval.l1;\npublic final class Policy{index2} {\n    public int value() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      }
+    ]
+  },
+  "success": {
+    "fileContains": {
+      "src/main/java/eval/l1/Catalog.java": "POLICY_COUNT = 12"
+    }
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "toolRecovery": "TOOL_RECOVERY",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 2,
+    "minToolFailures": 1,
+    "minRecoveredTools": 1,
+    "minApprovals": 0,
+    "minScopeChanges": 0,
+    "minScopeRejections": 0,
+    "minReviewAccepted": 0,
+    "minExecuteTurns": 1,
+    "minSummaryInjectedCalls": 0,
+    "requireMemoryProbe": false
+  },
+  "memory": null,
+  "turns": [
+    {
+      "prompt": "按 TASK.md 完成单模块重构。先 update_plan 建立可追踪计划，再读取登记的 LegacyPolicy.java；若路径失败，用 list_dir 定位并恢复，不要重复同一失败调用。每个模型响应最多一个工具调用。逐个 read_file 后 edit_file 修正 Policy01 至 Policy12 的返回值，再读取并修正 Catalog.java。执行中至少再做一次 update_plan 反映真实进度，收口前将所有已完成步骤标为 completed。不要进行与这些交付无关的读取或写入。",
+      "scope": "",
+      "first": 1,
+      "last": 12
+    }
+  ]
+}

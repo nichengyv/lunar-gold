@@ -34,8 +34,10 @@ HTTP 请求
 | `DesktopTokenController` | 桌面端本机令牌换取 |
 | `DocumentController` | 知识库文档上传、列表、删除 |
 | `ProjectController` | 项目、工作区路径、项目指令 |
-| `WorkspaceController` | 工作区文件树、文件读写、文件审查与撤回 |
-| `FileReviewController` | 待处理文件变更与按轮撤回 |
+| `WorkspaceController` | 工作区文件树与文件读写（基路径 `/api/projects/{id}/workspace`） |
+| `WorkspacePickerController` | 系统文件夹选择窗口（`/api/workspace/pick-folder`） |
+| `FileReviewController` | 待处理文件变更与按项目撤回（`/api/file-changes`，按 projectId） |
+| `ChangeSetController` | 任务级变更集与按 Run 撤回（`/api/file-changes`，按 sessionId/runId） |
 | `AgentRuleController` | 用户自定义 Agent 规则 |
 | `SettingsController` | 模型、主题、上下文等设置 |
 | `ApiKeyController` | BYOK 密钥管理 |
@@ -43,6 +45,10 @@ HTTP 请求
 | `PromptAdminController` | 提示词热重载（仅本机） |
 | `MetaController` | 部署模式、版本、能力、下载声明 |
 | `HealthController` | 健康检查 |
+
+> `/api/file-changes` 由 `FileReviewController` 与 `ChangeSetController` 共用前缀：
+> 前者按 `projectId` 操作项目维度的待处理变更，后者按 `sessionId`/`runId` 操作任务维度的变更集，
+> 两者子路径不重叠。工作区相关路由不再挂在公共的 `/api` 下，而是按项目 id 收敛前缀。
 
 ---
 

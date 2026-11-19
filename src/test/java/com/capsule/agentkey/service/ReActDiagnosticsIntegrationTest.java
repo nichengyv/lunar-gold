@@ -101,6 +101,32 @@ class ReActDiagnosticsIntegrationTest {
     }
 
     @Test
+    void diagnosticsMessageFollowsToolResponseToKeepProtocolOrder() {
+        RunResult run = run(List.of(
+                ScriptedTurn.ofTools(List.of(new ToolCallSpec("write_file",
+                        writeArgs("src/main/java/Bad.java", "public class Bad { void x() { int a = ; } }")))),
+                ScriptedTurn.ofText("done")));
+
+        List<ObjectNode> second = run.snapshots().get(1);
+        int assistantIdx = -1;
+        for (int i = 0; i < second.size(); i++) {
+            ObjectNode m = second.get(i);
+            if ("assistant".equals(m.path("role").asText()) && m.path("tool_calls").size() > 0) {
+                assistantIdx = i;
+                break;
+            }
+        }
+        assertTrue(assistantIdx >= 0, "第二轮应包含 assistant(tool_calls)");
+        // OpenAI 协议要求 tool 响应紧跟 assistant(tool_calls)；诊断这类 user 消息插在中间会被 400 拒绝
+        ObjectNode next = second.get(assistantIdx + 1);
+        assertEquals("tool", next.path("role").asText());
+        assertEquals(second.get(assistantIdx).path("tool_calls").get(0).path("id").asText(),
+                next.path("tool_call_id").asText());
+        assertTrue(second.stream().anyMatch(m -> "user".equals(m.path("role").asText())
+                && m.path("content").asText("").contains("【变更文件诊断】")));
+    }
+
+    @Test
     void nonJavaChangeStaysUnverified() {
         RunResult run = run(List.of(
                 ScriptedTurn.ofTools(List.of(new ToolCallSpec("write_file",
@@ -175,7 +201,7 @@ class ReActDiagnosticsIntegrationTest {
                         @Override public void onApprovalRequired(String approvalId, String tool,
                                 com.capsule.agentkey.dto.ApprovalPreview preview,
                                 String risk, long expiresAt) {
-                            approvals.resolve(approvalId, USER_ID, "APPROVE", false);
+                            approvals.resolve(approvalId, USER_ID, "APPROVE", false, null);
                         }
                         @Override public void onNoProgress(ReActAgentService.NoProgress event) {
                             noProgress.set(event);

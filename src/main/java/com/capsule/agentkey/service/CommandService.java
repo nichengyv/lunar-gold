@@ -181,7 +181,7 @@ public class CommandService {
      * @param command       完整命令行，如 "npm run build"
      * @param cwd           相对工作区的执行目录，空则根目录
      * @param timeoutSeconds 超时秒数，null 用默认值
-     * @param cancelled     客户端停止/断连标记，运行中每 200ms 检查一次
+     * @param cancelled     用户显式停止标记（断流不会置位），运行中每 200ms 检查一次
      */
     public CommandResult run(String workspaceRoot, String command, String cwd,
                              Integer timeoutSeconds, AtomicBoolean cancelled) {

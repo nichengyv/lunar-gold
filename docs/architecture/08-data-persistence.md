@@ -1,7 +1,7 @@
 # 08 数据与持久化（已完成）
 
-> 更新日期：2026-11-13
-> 状态：PostgreSQL + pgvector、V1~V18 迁移、Run/Event/审批持久化已落地
+> 更新日期：2026-11-19
+> 状态：PostgreSQL + pgvector、V1~V21 迁移、Run/Event/审批与客户端凭证持久化已落地
 > 关联：[总架构](README.md)、[上下文与 RAG](04-context-rag.md)、[安全](09-security.md)
 
 ---
@@ -41,6 +41,9 @@
 | V16 | `agent_run` / `agent_run_event` |
 | V17 | `tool_approval` |
 | V18 | `agent_run` token 统计 |
+| V19 | 审批决策来源 |
+| V20 | API 客户端凭证 |
+| V21 | 审批客户端标识 |
 
 原则：
 
@@ -93,8 +96,8 @@ Project ──< PendingFileChange
 
 ## 5. 一致性与恢复
 
-- 服务启动把遗留 `QUEUED/RUNNING` 标为 `FAILED/PROCESS_RESTARTED`，并写事件。
-- 审批恢复时，未过期可继续决策，已过期直接 `REJECTED`。
+- 服务启动把遗留 `QUEUED/RUNNING/WAITING_APPROVAL` 标为 `FAILED/PROCESS_RESTARTED`，并写终态事件。
+- 重启残留的 `PENDING` 审批不再恢复为可决策：未过期标 `REJECTED/SYSTEM`，已过期标 `REJECTED/TIMEOUT`。
 - 更新升级前备份整个数据目录，失败自动回滚。
 - 数据库迁移失败不得删除工作区、会话、知识库或上传文件。
 
@@ -102,7 +105,7 @@ Project ──< PendingFileChange
 
 ## 6. 现状边界
 
-- `PendingFileChange` 只覆盖单轮/单 Run 范围，跨 Run 的任务级 ChangeSet（P5-14）未实现。
+- 任务级 ChangeSet 已复用 `PendingFileChange` + Run/Event 实现跨 Run 聚合；未新增独立 Task/ChangeSet 表，命令产生的未记录外部副作用不承诺回滚。
 - 没有分区、归档或事件清理策略；长期运行的事件表会持续增长。
 - 没有真实大数据量下的索引与查询压测。
 - 双实例共享数据库时，审批互斥与内存 Future 唤醒未解决。

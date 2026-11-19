@@ -16,21 +16,21 @@ import java.util.Map;
  * {@code score = Σ 1 / (k + rank)}。同一片段被两路同时命中时得分叠加，
  * 从而让“语义相近且精确词命中”的证据排在单路结果之前。</p>
  *
- * <p>k 默认 60，与常见 RRF 实践一致；后续接入模型 reranker 时替换本实现即可。</p>
+ * <p>k 默认 60，与常见 RRF 实践一致。本类只做排名融合，不是内容精排模型。</p>
  */
 @Component
-public class RrfReranker implements Reranker {
+public class RrfRankFusion implements RankFusion {
 
     private final int k;
 
-    public RrfReranker(@Value("${rag.rrf-k:60}") int k) {
+    public RrfRankFusion(@Value("${rag.rrf-k:60}") int k) {
         this.k = Math.max(1, k);
     }
 
     @Override
-    public List<RagCandidate> rerank(List<RagCandidate> vectorHits,
-                                     List<RagCandidate> lexicalHits,
-                                     int topK) {
+    public List<RagCandidate> fuse(List<RagCandidate> vectorHits,
+                                   List<RagCandidate> lexicalHits,
+                                   int topK) {
         if (topK < 1) {
             return List.of();
         }
