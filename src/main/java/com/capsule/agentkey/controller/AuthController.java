@@ -12,6 +12,7 @@ import com.capsule.agentkey.service.CapabilityService;
 import com.capsule.agentkey.service.EmailCodeService;
 import com.capsule.agentkey.service.LoginAttemptService;
 import com.capsule.agentkey.service.UserService;
+import com.capsule.agentkey.util.CurrentUser;
 import com.capsule.agentkey.util.JwtUtil;
 import com.capsule.agentkey.util.RsaUtil;
 import jakarta.validation.Valid;
@@ -121,6 +122,8 @@ public class AuthController {
     //RequestBody注解，自动读取body，根据字段名，在自动把它转换为LoginRequest对象
     //valid搭配实体类里的notblank验证对象字段是否为空     @RequestBody读取http请求体里的json字符串，自动反序列化为java对象
     public ApiResponse<Map<String, String>> login(@Valid @RequestBody LoginRequest req) throws Exception {
+        //桌面端没有账号体系：JWT 过滤器不装配，这里签发的 token 无法使用，直接按不存在处理
+        requireCloudAccount();
         //A7 防爆破：连续失败 5 次锁定 15 分钟，锁定期间直接拒绝，不校验密码
         if (loginAttemptService.isLocked(req.getUsername())) {
             throw new BusinessException(ErrorCode.RATE_LIMITED, "登录尝试次数过多，请15分钟后再试");
@@ -145,7 +148,7 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ApiResponse<Void> logout() {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String jti = auth != null && auth.getDetails() instanceof String ? (String) auth.getDetails() : null;
         if (jti != null) {
@@ -159,7 +162,7 @@ public class AuthController {
      */
     @GetMapping("/me")
     public ApiResponse<Map<String, Object>> getCurrentUser() {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         var user = userService.findById(userId)
                 .orElseThrow(() -> new BusinessException("用户不存在"));
         Map<String, Object> map = new HashMap<>();
@@ -175,7 +178,7 @@ public class AuthController {
      */
     @PostMapping("/change-password")
     public ApiResponse<Void> changePassword(@RequestBody Map<String, String> body) throws Exception {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         String oldEncrypted = body.get("oldPassword");
         String newEncrypted = body.get("newPassword");
         if (oldEncrypted == null || newEncrypted == null) {
@@ -234,16 +237,4 @@ public class AuthController {
         }
     }
 
-    private Long getCurrentUserId() {
-        //SecurityContextHolder存放本次登录信息的容器
-        //getContext()拿到请求上下文    getAuthentication()拿到认证对象
-        //上下文的数据是被JwtAuthenticationFilter放进去的
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        //instanceof Long判断取出的数据的类型是不是Long
-        //getPrincipal()：身份主体，这里存的是userid
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        throw new BusinessException("用户未认证");
-    }
 }

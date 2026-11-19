@@ -27,7 +27,7 @@ import java.util.ArrayList;
  * 行为约定：
  * 1. 没带令牌 → 直接放行，由 SecurityConfig 对受保护接口统一返回 401；
  * 2. 带了但校验失败 → 立即 401，避免无效凭证继续进入业务层；
- * 3. 校验通过 → 把本地用户 id 写入 SecurityContext，Controller 的 getCurrentUserId() 无需改动。
+ * 3. 校验通过 → 把本地用户 id 写入 SecurityContext，Controller 通过 CurrentUser.requireId() 读取。
  */
 @Component
 @Profile("desktop")
@@ -47,6 +47,12 @@ public class LocalTokenFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
+        // P6-01：ClientTokenFilter 已认证（客户端令牌）时直接放行，
+        // 否则这里会把 lgc_ 令牌当成本地令牌判为无效并 401
+        if (SecurityContextHolder.getContext().getAuthentication() != null) {
+            chain.doFilter(request, response);
+            return;
+        }
         String token = resolveToken(request);
         if (token == null) {
             chain.doFilter(request, response);

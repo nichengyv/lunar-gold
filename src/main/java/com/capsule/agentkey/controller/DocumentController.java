@@ -3,11 +3,9 @@ package com.capsule.agentkey.controller;
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.DocumentSummary;
 import com.capsule.agentkey.entity.Document;
-import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.service.DocumentService;
+import com.capsule.agentkey.util.CurrentUser;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,14 +24,6 @@ public class DocumentController {
         this.documentService = documentService;
     }
 
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();//从上下文拿取Authtication对象
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        throw new BusinessException("用户未认证");
-    }
-
     /**
      * 上传文档
      */
@@ -42,7 +32,7 @@ public class DocumentController {
             @RequestParam("file") MultipartFile file,//绑定表单里字段名为file的文件数据到这个变量
             @RequestParam(value = "projectId", required = false) Long projectId,
             @RequestParam(value = "description", required = false) String description) throws Exception {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         Document doc = documentService.upload(userId, projectId, file, description);
         Map<String, Object> map = new HashMap<>();
         map.put("id", doc.getId());
@@ -59,7 +49,7 @@ public class DocumentController {
     @GetMapping("/documents")
     public ApiResponse<List<DocumentSummary>> listDocuments(
             @RequestParam(value = "projectId", required = false) Long projectId) {
-        return ApiResponse.success(documentService.listByUserId(getCurrentUserId(), projectId)
+        return ApiResponse.success(documentService.listByUserId(CurrentUser.requireId(), projectId)
                 .stream().map(DocumentSummary::from).toList());
     }
 
@@ -69,7 +59,7 @@ public class DocumentController {
     @DeleteMapping("/documents/{id}")
     //@PathVariable从URL路径取出占位符的值
     public ApiResponse<Void> deleteDocument(@PathVariable Long id) {
-        documentService.deleteDocument(getCurrentUserId(), id);//前者是从上下文拿到的userid，后者是文档id
+        documentService.deleteDocument(CurrentUser.requireId(), id);//前者是从上下文拿到的userid，后者是文档id
         return ApiResponse.success(null);
     }
 
@@ -78,7 +68,7 @@ public class DocumentController {
      */
     @PostMapping("/documents/{id}/retry")
     public ApiResponse<Void> retryDocument(@PathVariable Long id) {
-        documentService.retryDocument(getCurrentUserId(), id);
+        documentService.retryDocument(CurrentUser.requireId(), id);
         return ApiResponse.success(null);
     }
 }

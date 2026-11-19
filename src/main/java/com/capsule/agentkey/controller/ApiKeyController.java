@@ -4,10 +4,9 @@ import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.entity.UserApiKey;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.service.ApiKeyService;
+import com.capsule.agentkey.util.CurrentUser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -23,14 +22,6 @@ public class ApiKeyController {
     @Autowired
     private ApiKeyService apiKeyService;
 
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        throw new BusinessException("用户未认证");
-    }
-
     @PostMapping
     public ApiResponse<Void> saveKey(@RequestBody Map<String, String> body) throws Exception {
         String provider = body.get("provider");
@@ -39,13 +30,13 @@ public class ApiKeyController {
         if (provider == null || plainKey == null) {
             throw new BusinessException("provider 和 apiKey 不能为空");
         }
-        apiKeyService.saveApiKey(getCurrentUserId(), provider, plainKey, alias);
+        apiKeyService.saveApiKey(CurrentUser.requireId(), provider, plainKey, alias);
         return ApiResponse.success(null);
     }
 
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> listKeys() {
-        List<UserApiKey> keys = apiKeyService.listByUserId(getCurrentUserId());
+        List<UserApiKey> keys = apiKeyService.listByUserId(CurrentUser.requireId());
         List<Map<String, Object>> result = keys.stream().map(k -> {
             Map<String, Object> map = new HashMap<>();
             map.put("id", k.getId());
@@ -59,7 +50,7 @@ public class ApiKeyController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteKey(@PathVariable Long id) {
-        apiKeyService.deleteById(id, getCurrentUserId());
+        apiKeyService.deleteById(id, CurrentUser.requireId());
         return ApiResponse.success(null);
     }
 

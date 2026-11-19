@@ -1,12 +1,12 @@
 package com.capsule.agentkey.controller;
 
+import com.capsule.agentkey.config.PublicApi;
+import com.capsule.agentkey.config.PublicApiCatalog;
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.ProjectSummary;
 import com.capsule.agentkey.entity.Project;
-import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.service.ProjectService;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import com.capsule.agentkey.util.CurrentUser;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,24 +24,17 @@ public class ProjectController {
         this.projectService = projectService;
     }
 
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        throw new BusinessException("用户未认证");
-    }
-
     @GetMapping
+    @PublicApi(scope = "project:read", group = PublicApiCatalog.GROUP_CONTEXT)
     public ApiResponse<List<ProjectSummary>> list() {
-        return ApiResponse.success(projectService.listByUserId(getCurrentUserId())
+        return ApiResponse.success(projectService.listByUserId(CurrentUser.requireId())
                 .stream().map(ProjectSummary::from).toList());
     }
 
     @PostMapping
     public ApiResponse<ProjectSummary> create(@RequestBody CreateProjectRequest request) {
         Project project = projectService.create(
-                getCurrentUserId(),
+                CurrentUser.requireId(),
                 request == null ? null : request.name(),
                 request == null ? null : request.description());
         return ApiResponse.success(ProjectSummary.from(project));
@@ -53,7 +46,7 @@ public class ProjectController {
     /** 删除工作区：会话、资料、向量一并删除；磁盘上的代码文件夹不受影响 */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
-        projectService.deleteOwned(getCurrentUserId(), id);
+        projectService.deleteOwned(CurrentUser.requireId(), id);
         return ApiResponse.success(null);
     }
 
@@ -61,7 +54,7 @@ public class ProjectController {
     @PatchMapping("/{id}/instruction")
     public ApiResponse<ProjectSummary> updateInstruction(@PathVariable Long id,
                                                           @RequestBody InstructionRequest request) {
-        Project project = projectService.updateInstruction(getCurrentUserId(), id,
+        Project project = projectService.updateInstruction(CurrentUser.requireId(), id,
                 request == null ? null : request.instruction());
         return ApiResponse.success(ProjectSummary.from(project));
     }
@@ -73,7 +66,7 @@ public class ProjectController {
     @PatchMapping("/{id}/default-permission")
     public ApiResponse<ProjectSummary> updateDefaultPermission(@PathVariable Long id,
                                                               @RequestBody DefaultPermissionRequest request) {
-        Project project = projectService.updateDefaultPermission(getCurrentUserId(), id,
+        Project project = projectService.updateDefaultPermission(CurrentUser.requireId(), id,
                 request == null ? null : request.permission());
         return ApiResponse.success(ProjectSummary.from(project));
     }

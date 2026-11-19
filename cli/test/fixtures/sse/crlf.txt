@@ -1,0 +1,8 @@
+event: session_id
+data: 9
+
+event: content
+data: {"text":"crlf"}
+
+event: done
+data: [DONE]

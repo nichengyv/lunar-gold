@@ -46,9 +46,13 @@ public class ToolApproval {
 
     private LocalDateTime decisionTime;
 
-    /** P5-10-2：决策来源 USER / BATCH / TIMEOUT / SESSION_STOP / SYSTEM；旧记录为 NULL */
+    /** P5-10-2：决策来源 USER / BATCH / CLIENT / TIMEOUT / SESSION_STOP / SYSTEM；旧记录为 NULL */
     @Column(length = 20)
     private String decisionSource;
+
+    /** P6-05：审批入口的客户端 id（CLI / VS Code）；Web 本地令牌与自动来源为 NULL */
+    @Column(length = 32)
+    private String clientId;
 
     @CreatedDate
     private LocalDateTime createTime;

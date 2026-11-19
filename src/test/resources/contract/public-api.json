@@ -1,0 +1,95 @@
+{
+  "contractVersion": 1,
+  "endpoints": [
+    {
+      "method": "DELETE",
+      "path": "/api/clients/self",
+      "scope": "client:admin",
+      "group": "客户端自管理"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/runs/{runId}/events",
+      "scope": "run:read",
+      "group": "任务闭环"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions",
+      "scope": "project:read",
+      "group": "只读上下文"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions/{sessionId}/approvals",
+      "scope": "run:read",
+      "group": "任务闭环"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions/{sessionId}/messages",
+      "scope": "run:read",
+      "group": "只读上下文"
+    },
+    {
+      "method": "GET",
+      "path": "/api/clients/self",
+      "scope": "client:admin",
+      "group": "客户端自管理"
+    },
+    {
+      "method": "GET",
+      "path": "/api/file-changes/changeset",
+      "scope": "changes:read",
+      "group": "任务闭环"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "scope": "",
+      "group": "客户端自管理"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "scope": "project:read",
+      "group": "只读上下文"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/approvals/batch",
+      "scope": "approval:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/approvals/{approvalId}",
+      "scope": "approval:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/chat/stop",
+      "scope": "chat:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/chat/stream",
+      "scope": "chat:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/file-changes/revert-run",
+      "scope": "changes:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/file-changes/revert-session",
+      "scope": "changes:write",
+      "group": "任务闭环"
+    }
+  ]
+}

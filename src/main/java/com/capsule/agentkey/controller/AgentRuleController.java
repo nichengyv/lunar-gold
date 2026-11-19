@@ -3,11 +3,10 @@ package com.capsule.agentkey.controller;
 import com.capsule.agentkey.entity.AgentRule;
 import com.capsule.agentkey.entity.AgentRule.RuleScope;
 import com.capsule.agentkey.repository.AgentRuleRepository;
+import com.capsule.agentkey.util.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,15 +29,6 @@ public class AgentRuleController {
 
     private final AgentRuleRepository ruleRepo;
 
-    /** 与其他 Controller 统一：从 SecurityContext 拿当前登录用户 */
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        return null;
-    }
-
     /**
      * 拉规则列表。优先级：sessionId > projectId > 当前用户的全局规则。
      * 前端不拉全局规则时不传任何参数也能拿到当前用户的 GLOBAL 规则。
@@ -58,7 +48,7 @@ public class AgentRuleController {
         // GLOBAL 分组 = 系统内置 + 当前用户自定义
         List<AgentRule> globals = new java.util.ArrayList<>();
         globals.addAll(ruleRepo.findByScopeAndBuiltin(RuleScope.GLOBAL, true));
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.idOrNull();
         if (userId != null) {
             globals.addAll(ruleRepo.findByUserIdAndScope(userId, RuleScope.GLOBAL));
         }
@@ -85,7 +75,7 @@ public class AgentRuleController {
             else {
                 // 全局规则：自动绑定当前登录用户
                 rule.setScope(RuleScope.GLOBAL);
-                rule.setUserId(getCurrentUserId());
+                rule.setUserId(CurrentUser.idOrNull());
             }
         }
         rule.setBuiltin(false);

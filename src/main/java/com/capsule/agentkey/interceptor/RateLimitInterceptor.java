@@ -1,6 +1,7 @@
 package com.capsule.agentkey.interceptor;
 
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.util.CurrentUser;
 import com.capsule.agentkey.util.ResponseWriter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -8,8 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.Nullable;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -75,7 +74,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.idOrNull();
         //登录用户按 userId，未登录接口按客户端 IP——未登录时没有凭据，只能用 IP 作为限流身份
         String identity = (userId != null) ? "user:" + userId : "ip:" + request.getRemoteAddr();
         String redisKey = KEY_PREFIX + identity;
@@ -132,11 +131,4 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         return window.count.incrementAndGet() <= maxRequests;
     }
 
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof Long) {
-            return (Long) auth.getPrincipal();
-        }
-        return null;
-    }
 }

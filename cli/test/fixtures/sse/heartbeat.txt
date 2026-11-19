@@ -1,0 +1,7 @@
+: ping
+
+event: session_id
+data: 7
+
+: keep-alive
+

@@ -1,0 +1,6 @@
+event: done
+data: [DONE]
+
+event: content
+data: {"text":"after-done"}
+

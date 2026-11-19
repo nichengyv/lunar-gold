@@ -4,6 +4,7 @@ import com.capsule.agentkey.aspect.CapabilityGuardAspect;
 import com.capsule.agentkey.config.Capability;
 import com.capsule.agentkey.config.RequiresCapability;
 import com.capsule.agentkey.dto.ApprovalDecisionRequest;
+import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.GlobalExceptionHandler;
 import com.capsule.agentkey.mcp.McpGlobalSwitch;
 import com.capsule.agentkey.mcp.McpHealthMonitor;
@@ -11,15 +12,18 @@ import com.capsule.agentkey.repository.PendingFileChangeRepository;
 import com.capsule.agentkey.repository.ProjectRepository;
 import com.capsule.agentkey.service.CapabilityService;
 import com.capsule.agentkey.service.ChangeSetService;
+import com.capsule.agentkey.service.ChatService;
 import com.capsule.agentkey.service.FolderPickerService;
 import com.capsule.agentkey.service.ProjectService;
-import com.capsule.agentkey.service.WorkspaceFileService;
 import io.modelcontextprotocol.client.McpSyncClient;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.MediaType;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -29,6 +33,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,34 +48,28 @@ class CapabilityGuardControllerTest {
 
     @Test
     void 云端工作区接口返回404且不调用业务服务() throws Exception {
-        ProjectService projectService = mock(ProjectService.class);
-        WorkspaceFileService workspaceFileService = mock(WorkspaceFileService.class);
         FolderPickerService folderPickerService = mock(FolderPickerService.class);
-        MockMvc mockMvc = mockMvc(new WorkspaceController(
-                projectService, workspaceFileService, folderPickerService), "cloud");
+        MockMvc mockMvc = mockMvc(
+                new WorkspacePickerController(folderPickerService), "cloud");
 
         mockMvc.perform(post("/api/workspace/pick-folder"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("当前部署模式未启用该功能"));
 
-        verifyNoInteractions(projectService, workspaceFileService, folderPickerService);
+        verifyNoInteractions(folderPickerService);
     }
 
     @Test
     void 桌面端工作区接口正常执行() throws Exception {
-        ProjectService projectService = mock(ProjectService.class);
-        WorkspaceFileService workspaceFileService = mock(WorkspaceFileService.class);
         FolderPickerService folderPickerService = mock(FolderPickerService.class);
         when(folderPickerService.pickDirectory()).thenReturn("D:\\workspace");
-        MockMvc mockMvc = mockMvc(new WorkspaceController(
-                projectService, workspaceFileService, folderPickerService), "desktop");
+        MockMvc mockMvc = mockMvc(
+                new WorkspacePickerController(folderPickerService), "desktop");
 
         mockMvc.perform(post("/api/workspace/pick-folder"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value("D:\\workspace"));
-
-        verifyNoInteractions(projectService, workspaceFileService);
     }
 
     @Test
@@ -122,7 +122,8 @@ class CapabilityGuardControllerTest {
         PendingFileChangeRepository changeRepository = mock(PendingFileChangeRepository.class);
         ChangeSetService changeSetService = mock(ChangeSetService.class);
         MockMvc mockMvc = mockMvc(new FileReviewController(
-                changeRepository, changeSetService), "cloud");
+                changeRepository, changeSetService,
+                mock(ProjectService.class), mock(ChatService.class)), "cloud");
 
         mockMvc.perform(get("/api/file-changes").param("projectId", "1"))
                 .andExpect(status().isNotFound())
@@ -133,18 +134,49 @@ class CapabilityGuardControllerTest {
 
     @Test
     void 桌面端文件审查接口正常执行() throws Exception {
+        authenticateAsLocalUser();
         PendingFileChangeRepository changeRepository = mock(PendingFileChangeRepository.class);
         ChangeSetService changeSetService = mock(ChangeSetService.class);
         when(changeRepository.findByProjectIdAndStatusOrderByCreateTimeDesc(1L, "PENDING"))
                 .thenReturn(List.of());
         MockMvc mockMvc = mockMvc(new FileReviewController(
-                changeRepository, changeSetService), "desktop");
+                changeRepository, changeSetService,
+                mock(ProjectService.class), mock(ChatService.class)), "desktop");
 
         mockMvc.perform(get("/api/file-changes").param("projectId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
 
         verifyNoInteractions(changeSetService);
+    }
+
+    /** 越权修复：projectId 不属于当前用户时，必须在触达变更数据前拒绝 */
+    @Test
+    void 文件审查拒绝非本人项目() throws Exception {
+        authenticateAsLocalUser();
+        PendingFileChangeRepository changeRepository = mock(PendingFileChangeRepository.class);
+        ChangeSetService changeSetService = mock(ChangeSetService.class);
+        ProjectService projectService = mock(ProjectService.class);
+        when(projectService.getOwned(anyLong(), eq(99L)))
+                .thenThrow(new BusinessException("项目不存在或无权访问"));
+        MockMvc mockMvc = mockMvc(new FileReviewController(
+                changeRepository, changeSetService,
+                projectService, mock(ChatService.class)), "desktop");
+
+        mockMvc.perform(post("/api/file-changes/revert-all").param("projectId", "99"))
+                .andExpect(status().is4xxClientError());
+
+        verifyNoInteractions(changeRepository, changeSetService);
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private void authenticateAsLocalUser() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(1L, null, List.of()));
     }
 
     @Test

@@ -1,0 +1,12 @@
+event: session_id
+data: 12
+
+event: run_id
+data: 34
+
+event: content
+data: {"text":"hello"}
+
+event: done
+data: [DONE]
+

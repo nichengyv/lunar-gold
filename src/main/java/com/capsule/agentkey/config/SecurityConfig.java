@@ -1,9 +1,14 @@
 package com.capsule.agentkey.config;
 
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.filter.ClientTokenFilter;
 import com.capsule.agentkey.filter.JwtAuthenticationFilter;
 import com.capsule.agentkey.filter.LocalTokenFilter;
+import com.capsule.agentkey.filter.LoopbackGuardFilter;
+import com.capsule.agentkey.filter.ScopeAuthorizationFilter;
 import com.capsule.agentkey.util.ResponseWriter;
+import jakarta.servlet.Filter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +35,11 @@ public class SecurityConfig {
     // 云端用 JWT、桌面端用本地令牌：两个过滤器都带 @Profile，用 ObjectProvider 取实际装配的那个
     private final ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider;
     private final ObjectProvider<LocalTokenFilter> localTokenFilterProvider;
+    /** P6-01：客户端令牌过滤器，仅 desktop profile 存在 */
+    private final ObjectProvider<ClientTokenFilter> clientTokenFilterProvider;
+    /** P6-01：客户端请求的回环边界校验与 scope 校验，均仅 desktop profile 存在 */
+    private final ObjectProvider<LoopbackGuardFilter> loopbackGuardFilterProvider;
+    private final ObjectProvider<ScopeAuthorizationFilter> scopeAuthorizationFilterProvider;
 
     @Value("${app.cors.allowed-origins:http://localhost:8080,http://127.0.0.1:8080}")
     private String allowedOrigins;
@@ -39,9 +49,15 @@ public class SecurityConfig {
     private String cspConnectSrc;
 
     public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider,
-                          ObjectProvider<LocalTokenFilter> localTokenFilterProvider) {
+                          ObjectProvider<LocalTokenFilter> localTokenFilterProvider,
+                          ObjectProvider<ClientTokenFilter> clientTokenFilterProvider,
+                          ObjectProvider<LoopbackGuardFilter> loopbackGuardFilterProvider,
+                          ObjectProvider<ScopeAuthorizationFilter> scopeAuthorizationFilterProvider) {
         this.jwtFilterProvider = jwtFilterProvider;
         this.localTokenFilterProvider = localTokenFilterProvider;
+        this.clientTokenFilterProvider = clientTokenFilterProvider;
+        this.loopbackGuardFilterProvider = loopbackGuardFilterProvider;
+        this.scopeAuthorizationFilterProvider = scopeAuthorizationFilterProvider;
     }
 
     //BCryptPasswordEncoder()，密码哈希加密工具
@@ -66,7 +82,13 @@ public class SecurityConfig {
 
                 //配置不需要认证的路由
                 .authorizeHttpRequests(auth -> auth
+                        // SSE / Async：Tomcat 在 SseEmitter 异步写入时会以 ASYNC dispatch 重跑 filter chain，
+                        // 此时原始 REQUEST 已完成、SecurityContext 可能已被清理。原始 REQUEST 已完成过认证，
+                        // ASYNC / FORWARD dispatch 不再重复鉴权，避免 FilterSecurityInterceptor 因 SecurityContext 缺失抛 AccessDenied。
+                        // FORWARD 也放行为 `/error` dispatch 会走 FORWARD（或 ERROR dispatch），SSE 期间 response already committed 时 Tomcat 会触发。
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.FORWARD, DispatcherType.ERROR).permitAll()
                         .requestMatchers(
+                                "/error",
                                 "/api/auth/**",
                                 "/api/public-key",
                                 "/api/meta",
@@ -131,6 +153,27 @@ public class SecurityConfig {
         LocalTokenFilter localTokenFilter = localTokenFilterProvider.getIfAvailable();
         if (localTokenFilter != null) {
             http.addFilterBefore(localTokenFilter, UsernamePasswordAuthenticationFilter.class);
+        }
+        // P6-01：客户端令牌与本地令牌同走 Authorization，必须先注册、先执行；
+        // 锚点用 LocalTokenFilter 而不是同一个 UsernamePasswordAuthenticationFilter，
+        // 避免依赖同序过滤器的插入顺序
+        ClientTokenFilter clientTokenFilter = clientTokenFilterProvider.getIfAvailable();
+        if (clientTokenFilter != null) {
+            http.addFilterBefore(clientTokenFilter,
+                    localTokenFilter != null ? LocalTokenFilter.class : UsernamePasswordAuthenticationFilter.class);
+        }
+        // P6-01：认证之后依次做回环边界校验、scope 校验；
+        // 两者都只对 ClientPrincipal 生效，Web / 云端请求直接放行
+        Class<? extends Filter> anchor =
+                localTokenFilter != null ? LocalTokenFilter.class : UsernamePasswordAuthenticationFilter.class;
+        LoopbackGuardFilter loopbackGuardFilter = loopbackGuardFilterProvider.getIfAvailable();
+        if (loopbackGuardFilter != null) {
+            http.addFilterAfter(loopbackGuardFilter, anchor);
+            anchor = LoopbackGuardFilter.class;
+        }
+        ScopeAuthorizationFilter scopeAuthorizationFilter = scopeAuthorizationFilterProvider.getIfAvailable();
+        if (scopeAuthorizationFilter != null) {
+            http.addFilterAfter(scopeAuthorizationFilter, anchor);
         }
         //构建并返回完整的安全过滤链
         return http.build();

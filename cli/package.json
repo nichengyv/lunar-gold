@@ -1,0 +1,17 @@
+{
+  "name": "lunargold-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lunar Gold 本地命令行：Node 24 type-stripping，无构建步骤、无运行时依赖",
+  "bin": {
+    "lg": "./src/main.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "lg": "node src/main.ts"
+  }
+}

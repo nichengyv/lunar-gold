@@ -1,0 +1,124 @@
+{
+  "name": "lunargold-vscode",
+  "displayName": "Lunar Gold",
+  "description": "在 VS Code 中发起 Lunar Gold 任务、查看流式过程、审批并审查变更。",
+  "version": "0.1.0",
+  "publisher": "lunargold",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:lunargold.panel",
+    "onView:lunargold.changes",
+    "onCommand:lunargold.connect",
+    "onCommand:lunargold.newTask",
+    "onCommand:lunargold.openPanel",
+    "onCommand:lunargold.stop",
+    "onCommand:lunargold.refreshChanges",
+    "onCommand:lunargold.revertRun",
+    "onCommand:lunargold.revertSession",
+    "onCommand:lunargold.disconnect"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "lunargold.connect",
+        "title": "连接本机后端",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.newTask",
+        "title": "发起任务",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.openPanel",
+        "title": "打开 Lunar Gold 面板",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.stop",
+        "title": "停止当前生成",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.refreshChanges",
+        "title": "刷新变更列表",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.revertRun",
+        "title": "撤回本次 Run 的变更",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.revertSession",
+        "title": "撤回本会话全部变更",
+        "category": "Lunar Gold"
+      },
+      {
+        "command": "lunargold.disconnect",
+        "title": "断开并撤销客户端",
+        "category": "Lunar Gold"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lunargold",
+          "title": "Lunar Gold",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lunargold": [
+        {
+          "id": "lunargold.panel",
+          "name": "任务",
+          "type": "webview"
+        },
+        {
+          "id": "lunargold.changes",
+          "name": "变更"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lunar Gold",
+      "properties": {
+        "lunargold.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8080",
+          "description": "本机 Lunar Gold 后端地址，仅支持回环地址。"
+        },
+        "lunargold.localTokenPath": {
+          "type": "string",
+          "default": "",
+          "description": "可选：覆盖桌面端本地用户令牌路径（默认 ~/.lunargold/desktop/local-token）。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "check": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

@@ -71,11 +71,11 @@ class CrossTenantAccessTest {
         ToolApprovalRegistry.Pending pending =
                 registry.create(1L, 10L, "write_file", "{\"path\":\"a.txt\"}", "WRITE");
 
-        assertFalse(registry.resolve(pending.approvalId(), 2L, "APPROVE", false),
+        assertFalse(registry.resolve(pending.approvalId(), 2L, "APPROVE", false, "cli-abc1234567"),
                 "非归属用户的审批提交必须被拒绝");
         assertFalse(pending.future().isDone(), "被拒绝的提交不能唤醒等待中的 ReAct 线程");
 
-        assertTrue(registry.resolve(pending.approvalId(), 1L, "APPROVE", false),
+        assertTrue(registry.resolve(pending.approvalId(), 1L, "APPROVE", false, null),
                 "归属用户仍可正常审批");
     }
 
