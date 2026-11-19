@@ -91,6 +91,28 @@ class AgentRunServiceTest {
         assertFalse(AgentRunService.transitionAllowed(RunState.QUEUED, RunState.WAITING_APPROVAL));
     }
 
+    @Test
+    void 重启把等待审批的Run一并终止为FAILED并写终态事件() {
+        AgentRun waiting = run(7L, RunState.WAITING_APPROVAL);
+        when(runRepo.findByStateIn(argThat((List<RunState> states) -> states != null
+                && states.contains(RunState.WAITING_APPROVAL)))).thenReturn(List.of(waiting));
+
+        service.recoverAfterRestart();
+
+        assertEquals(RunState.FAILED, waiting.getState(), "等待审批的 Run 重启后不能伪装成仍可继续");
+        assertEquals("PROCESS_RESTARTED", waiting.getErrorCode());
+        assertNotNull(waiting.getEndTime());
+        verify(runRepo).save(waiting);
+
+        ArgumentCaptor<AgentRunEvent> captor = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo).save(captor.capture());
+        AgentRunEvent event = captor.getValue();
+        assertEquals(7L, event.getRunId());
+        assertEquals(EventType.STATE_CHANGED, event.getEventType());
+        assertTrue(event.getPayload().contains("PROCESS_RESTARTED"),
+                "终态事件必须可被 sinceSeq 重放，客户端才能看到中断原因");
+    }
+
     // ------------------------------------------------------------------
     // 全链路 happy path + 事件验证
     // ------------------------------------------------------------------
@@ -164,8 +186,96 @@ class AgentRunServiceTest {
     }
 
     @Test
-    void 非法迁移抛IllegalStateException() {
-        AgentRun[] holder = new AgentRun[]{ run(9L, RunState.SUCCEEDED) };
+    void 决策询问路径_WAITING_USER_INPUT_回答后回到RUNNING() {
+        AgentRun[] holder = new AgentRun[]{ run(8L, RunState.RUNNING) };
+        when(runRepo.findById(8L)).thenAnswer(inv -> Optional.of(holder[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder[0] = inv.getArgument(0);
+            holder[0].setId(8L);
+            return holder[0];
+        });
+        when(eventRepo.findMaxSeqByRunId(8L)).thenReturn(1);
+
+        AgentRun paused = service.pauseForUserInput(8L, "scope", "选 A 还是 B？", "改动范围",
+                List.of(Map.of("label", "A")), false);
+        assertEquals(RunState.WAITING_USER_INPUT, paused.getState());
+
+        AgentRun resumed = service.resumeAfterUserInput(8L, "scope", List.of("A"), null);
+        assertEquals(RunState.RUNNING, resumed.getState());
+
+        // pause 写 USER_QUESTION + STATE_CHANGED；resume 写 USER_ANSWERED + STATE_CHANGED → 4 条
+        ArgumentCaptor<AgentRunEvent> cap = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo, times(4)).save(cap.capture());
+        List<AgentRunEvent> saved = cap.getAllValues();
+        assertEquals(EventType.USER_QUESTION, saved.get(0).getEventType());
+        assertTrue(saved.get(0).getPayload().contains("\"questionId\":\"scope\""), saved.get(0).getPayload());
+        assertEquals(EventType.STATE_CHANGED, saved.get(1).getEventType());
+        assertEquals(EventType.USER_ANSWERED, saved.get(2).getEventType());
+        assertEquals(EventType.STATE_CHANGED, saved.get(3).getEventType());
+    }
+
+    @Test
+    void 询问超时把Run拉回RUNNING并记录abandoned() {
+        AgentRun[] holder = new AgentRun[]{ run(18L, RunState.WAITING_USER_INPUT) };
+        when(runRepo.findById(18L)).thenAnswer(inv -> Optional.of(holder[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder[0] = inv.getArgument(0);
+            holder[0].setId(18L);
+            return holder[0];
+        });
+        when(eventRepo.findMaxSeqByRunId(18L)).thenReturn(0);
+
+        service.abandonUserQuestion(18L, "scope", "USER_INPUT_TIMEOUT");
+
+        assertEquals(RunState.RUNNING, holder[0].getState(), "超时后不能永久停在 WAITING_USER_INPUT");
+        ArgumentCaptor<AgentRunEvent> cap = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo, times(2)).save(cap.capture());
+        assertEquals(EventType.USER_ANSWERED, cap.getAllValues().get(0).getEventType());
+        String payload = cap.getAllValues().get(0).getPayload();
+        assertTrue(payload.contains("\"abandoned\":true"), payload);
+        assertTrue(payload.contains("USER_INPUT_TIMEOUT"), payload);
+        assertEquals(EventType.STATE_CHANGED, cap.getAllValues().get(1).getEventType());
+    }
+
+    @Test
+    void 已不在等待状态时abandon不覆盖状态() {
+        AgentRun resumed = run(19L, RunState.RUNNING);
+        when(runRepo.findById(19L)).thenReturn(Optional.of(resumed));
+
+        service.abandonUserQuestion(19L, "scope", "USER_INPUT_TIMEOUT");
+
+        assertEquals(RunState.RUNNING, resumed.getState());
+        verify(eventRepo, never()).save(any());
+        verify(runRepo, never()).save(any());
+    }
+
+    @Test
+    void 决策询问的合法迁移边界() {
+        // 进入：只能从 RUNNING
+        assertTrue(AgentRunService.transitionAllowed(RunState.RUNNING, RunState.WAITING_USER_INPUT));
+        assertFalse(AgentRunService.transitionAllowed(RunState.QUEUED, RunState.WAITING_USER_INPUT));
+        assertFalse(AgentRunService.transitionAllowed(RunState.WAITING_APPROVAL, RunState.WAITING_USER_INPUT));
+        // 退出：RUNNING / CANCELLED / FAILED，不能直接成功
+        assertTrue(AgentRunService.transitionAllowed(RunState.WAITING_USER_INPUT, RunState.RUNNING));
+        assertTrue(AgentRunService.transitionAllowed(RunState.WAITING_USER_INPUT, RunState.CANCELLED));
+        assertTrue(AgentRunService.transitionAllowed(RunState.WAITING_USER_INPUT, RunState.FAILED));
+        assertFalse(AgentRunService.transitionAllowed(RunState.WAITING_USER_INPUT, RunState.SUCCEEDED));
+    }
+
+    @Test
+    void 重启把等待用户输入的Run一并终止为FAILED() {
+        AgentRun waiting = run(17L, RunState.WAITING_USER_INPUT);
+        when(runRepo.findByStateIn(argThat((List<RunState> states) -> states != null
+                && states.contains(RunState.WAITING_USER_INPUT)))).thenReturn(List.of(waiting));
+
+        service.recoverAfterRestart();
+
+        assertEquals(RunState.FAILED, waiting.getState(), "等待用户输入的 Run 重启后无法恢复执行");
+        assertEquals("PROCESS_RESTARTED", waiting.getErrorCode());
+    }
+
+    @Test
+    void 非法迁移抛IllegalStateException() {        AgentRun[] holder = new AgentRun[]{ run(9L, RunState.SUCCEEDED) };
         when(runRepo.findById(9L)).thenAnswer(inv -> Optional.of(holder[0]));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,

@@ -97,6 +97,8 @@ public class AgentRun {
         RUNNING,
         /** 等待用户审批工具调用 */
         WAITING_APPROVAL,
+        /** P7-06：等待用户回答 agent 提出的决策询问 */
+        WAITING_USER_INPUT,
         /** 正常完成 */
         SUCCEEDED,
         /** 异常终止 */

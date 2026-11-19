@@ -3,7 +3,7 @@
  * 后端 /api/agent/chat/stream 是 POST 方式的 SSE 流，原生 EventSource 只支持 GET，
  * 因此必须用 fetch + ReadableStream 手动解析。
  */
-import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, FileChange, PlanSnapshot, RunUsage, SourceRef, StreamPayload, VerifyInfo } from '../types/chat';
+import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, FileChange, PlanSnapshot, RunUsage, SourceRef, StreamPayload, UserQuestion, VerifyInfo } from '../types/chat';
 
 export interface StreamHooks {
   onSessionId?: (id: number) => void;
@@ -25,6 +25,8 @@ export interface StreamHooks {
     source?: ApprovalDecisionSource,
     batchId?: string
   ) => void;
+  /** P7-06：agent 暂停等用户回答决策询问（ask_user_question 工具） */
+  onUserQuestion?: (question: UserQuestion) => void;
   onContent?: (fullText: string, chunk: string) => void;
   onSources?: (sources: SourceRef[]) => void;
   onFileChange?: (change: FileChange) => void;
@@ -200,6 +202,13 @@ export async function streamChat(
         try {
           const obj = JSON.parse(data);
           hooks.onApprovalResolved?.(obj.approvalId, obj.decision, obj.source, obj.batchId);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'user_question':
+        try {
+          hooks.onUserQuestion?.(JSON.parse(data) as UserQuestion);
         } catch {
           /* 忽略解析失败 */
         }

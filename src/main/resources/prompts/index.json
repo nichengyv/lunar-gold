@@ -5,7 +5,7 @@
       "version": "v1",
       "scenario": "agent",
       "path": "prompts/agent/system-v1.md",
-      "sha256": "bafd9aa94aa6c9d7351403ace2112ecb32404c86e4391a9727ef17f79db6ad57",
+      "sha256": "1bb5360a23e08197e10e5078277e42a3abcb283f2c32be81e512dbb293c3466e",
       "default": true
     },
     {
@@ -13,7 +13,7 @@
       "version": "v1",
       "scenario": "coding",
       "path": "prompts/coding/system-v1.md",
-      "sha256": "c2c4a0eec3b5b804fb2466a0ead66fbb5172b3c9964dd0166dc0004f30847bc2",
+      "sha256": "485d1f9630e979b678228bdaa9a538297ca73f9589c0a96186d85784c4e3afe6",
       "default": true
     },
     {

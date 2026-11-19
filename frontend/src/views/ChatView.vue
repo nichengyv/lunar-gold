@@ -1,7 +1,7 @@
 <template>
   <div class="page active chat-page">
     <div class="chat-layout">
-      <div ref="chatBodyEl" class="chat-body">
+      <div class="chat-body">
         <div class="chat-main">
           <!-- 缩略导航以消息区为定位基准：固定在消息区右侧，不随输入栏变高而移动 -->
           <div class="messages-zone">
@@ -18,40 +18,10 @@
               @retry="chat.reloadCurrentSession()"
               @export-diagnostics="exportDiagnostics"
             />
-            <!-- P5-12-1：空态不再用客服式开场白，直接给项目上下文与最近任务 -->
+            <!-- P5-12-1：空态只留金月标识与一句欢迎，不再堆任务列表与快捷键提示 -->
             <div v-else-if="chat.messages.length === 0" class="chat-empty">
-              <div class="chat-empty-head">
-                <Icon name="folder" :size="15" />
-                <span class="chat-empty-project">{{ project.currentProject?.name || '默认工作区' }}</span>
-                <span v-if="runningCount" class="chat-empty-running">{{ runningCount }} 个任务进行中</span>
-              </div>
-
-              <div v-if="recentTasks.length" class="chat-empty-block">
-                <div class="chat-empty-label">最近任务</div>
-                <button
-                  v-for="t in recentTasks"
-                  :key="t.id"
-                  class="chat-empty-task"
-                  @click="chat.switchSession(t.id)"
-                >
-                  <span class="chat-empty-dot" :class="'is-' + (chat.runningRunMap[t.id] || 'idle')"></span>
-                  <span class="chat-empty-task-title">{{ t.title || '未命名任务' }}</span>
-                  <span class="chat-empty-task-time">{{ formatDateTime(t.updateTime) }}</span>
-                </button>
-              </div>
-
-              <div class="chat-empty-block">
-                <div class="chat-empty-label">从一句话开始</div>
-                <p class="chat-empty-hint">
-                  直接描述你要做的事，例如「修复登录接口的空指针」或「给这个模块补单元测试」。
-                </p>
-                <div class="chat-empty-keys">
-                  <span><kbd>Ctrl</kbd><kbd>K</kbd> 聚焦输入框</span>
-                  <span><kbd>@</kbd> 引用文件与资料</span>
-                  <span><kbd>/</kbd> 命令</span>
-                  <span><kbd>Ctrl</kbd><kbd>/</kbd> 全部快捷键</span>
-                </div>
-              </div>
+              <span class="chat-empty-mark" aria-hidden="true"><Icon name="logo" :size="46" /></span>
+              <p class="chat-empty-greeting">您好，想和金月聊些什么</p>
             </div>
             <!-- data-msg-id 供全文搜索定位：点击侧栏「正文命中」后滚动到具体那一条 -->
             <template v-else>
@@ -148,6 +118,9 @@
               />
             </div>
           </div>
+
+          <!-- P7-06：agent 执行中决策询问卡片 -->
+          <AskUserCard v-if="chat.pendingUserQuestion" :question="chat.pendingUserQuestion" />
 
           <!-- P5-10-3：长任务执行进度：五阶段时间线 + 轮次/token/时间预算 -->
           <div v-if="showTaskProgress" class="task-progress" :class="{ 'is-warning': budgetWarning }">
@@ -314,8 +287,9 @@
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="deepseek-chat">deepseek-chat · 通用对话</el-dropdown-item>
-                      <el-dropdown-item command="deepseek-reasoner">deepseek-reasoner · 深度推理</el-dropdown-item>
+                      <el-dropdown-item v-for="m in modelOptions" :key="m.id" :command="m.id">
+                        {{ m.id }}<template v-if="m.name && m.name !== m.id"> · {{ m.name }}</template>
+                      </el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -350,27 +324,6 @@
           </div>
         </div>
 
-        <!-- 右侧工作台：变更 / 资料 / 当前文件共用一块区域，用 tab 切换，避免多层浮层互相压盖 -->
-        <!-- P5-09：768-1023 宽度下工作台改为浮层，遮罩点击即收起，不再挤压正文 -->
-        <div
-          v-if="chat.dockOpen && !dockFullscreen && isNarrowDock"
-          class="dock-backdrop"
-          @click="closeDockSafely"
-        ></div>
-        <div
-          v-if="chat.dockOpen && !dockFullscreen"
-          class="dock-resizer"
-          :class="{ dragging: dockDragging }"
-          title="拖动调整工作台宽度"
-          @mousedown="startDockDrag"
-        ></div>
-        <WorkbenchDock
-          v-if="chat.dockOpen"
-          :width="dockWidth"
-          :fullscreen="dockFullscreen"
-          @close="closeDockSafely"
-          @toggle-fullscreen="dockFullscreen = !dockFullscreen"
-        />
       </div>
     </div>
 
@@ -409,13 +362,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import { buildStageTimeline, isBatchApprovable, TASK_STAGES, useChatStore } from '../stores/chat';
 import { useMetaStore } from '../stores/meta';
 import { useProjectStore } from '../stores/project';
 import * as workspaceApi from '../api/workspace';
 import * as knowledgeApi from '../api/knowledge';
-import { formatDateTime } from '../utils/format';
+import * as settingsApi from '../api/settings';
+import type { ModelInfo } from '../api/settings';
 import { createFrameThrottle } from '../utils/frameThrottle';
 import { trapTabKey } from '../utils/focusTrap';
 import { isReducedMotion } from '../utils/motion';
@@ -424,9 +378,9 @@ import { useVirtualMessages } from '../composables/useVirtualMessages';
 import ChatMessage from '../components/ChatMessage.vue';
 import SkeletonMessage from '../components/state/SkeletonMessage.vue';
 import ErrorState from '../components/state/ErrorState.vue';
-import WorkbenchDock from '../components/WorkbenchDock.vue';
 import PendingChangesCard from '../components/PendingChangesCard.vue';
 import ApprovalCard from '../components/ApprovalCard.vue';
+import AskUserCard from '../components/AskUserCard.vue';
 import Icon from '../components/Icon.vue';
 import type { DocumentInfo } from '../types/api';
 import type { PermissionLevel, PlanSnapshot, ReasoningLevel, TaskStageItem } from '../types/chat';
@@ -485,11 +439,7 @@ function registerMessageEl(id: number, el: Element | ComponentPublicInstance | n
   registerVirtualItem(id, (node as Element | null) ?? null);
 }
 
-// ——— P5-12-1：空态概览 ———
-/** 进行中/待审批的轮次：状态放在 store，侧栏任务列表与空态共用同一份数据 */
-const recentTasks = computed(() => chat.sessions.slice(0, 4));
-const runningCount = computed(() => Object.keys(chat.runningRunMap).length);
-
+// ——— P5-12-1：空态 ———
 //会话头三个可切换参数：模型 / 推理档位 / 工作权限（选择对后续消息生效，并随请求下发）
 const REASONING_LABELS: Record<ReasoningLevel, string> = { FAST: '快速', STANDARD: '标准', DEEP: '深度' };
 const PERMISSION_LABELS: Record<PermissionLevel, string> = {
@@ -521,11 +471,26 @@ interface SlashCommand {
   run: (args: string) => void;
 }
 
+// 模型目录：与设置页共用 /api/settings/models（有 Key 时是账号实际可用模型），后端未就绪时回退静态两项
+const FALLBACK_MODELS: ModelInfo[] = [
+  { id: 'deepseek-chat', name: '通用对话', provider: 'DEEPSEEK', available: true },
+  { id: 'deepseek-reasoner', name: '深度推理', provider: 'DEEPSEEK', available: true }
+];
+const modelOptions = ref<ModelInfo[]>(FALLBACK_MODELS);
+
+async function loadModelOptions() {
+  try {
+    const list = await settingsApi.listModels();
+    const usable = list.filter((m) => m.available);
+    if (usable.length > 0) modelOptions.value = usable;
+  } catch {
+    // 后端未就绪：保留静态兜底，不阻塞聊天页
+  }
+}
+
 const MODEL_ALIASES: Record<string, string> = {
   chat: 'deepseek-chat',
-  reasoner: 'deepseek-reasoner',
-  'deepseek-chat': 'deepseek-chat',
-  'deepseek-reasoner': 'deepseek-reasoner'
+  reasoner: 'deepseek-reasoner'
 };
 
 const PERMISSION_ALIASES: Record<string, PermissionLevel> = {
@@ -556,13 +521,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
     hint: '查看或切换对话模型：/model reasoner',
     run: (args) => {
       const key = args.toLowerCase();
+      const availableIds = modelOptions.value.map((m) => m.id).join(' / ');
       if (!key) {
-        ElMessage.info(`当前模型：${chat.model}；切换用 /model deepseek-chat 或 /model deepseek-reasoner`);
+        ElMessage.info(`当前模型：${chat.model}；可切换：${availableIds}`);
         return;
       }
-      const model = MODEL_ALIASES[key];
+      const aliased = MODEL_ALIASES[key] ?? key;
+      const model = modelOptions.value.find((m) => m.id.toLowerCase() === aliased)?.id;
       if (!model) {
-        ElMessage.warning(`未知模型「${args}」，可用 deepseek-chat / deepseek-reasoner`);
+        ElMessage.warning(`未知模型「${args}」，可用 ${availableIds}`);
         return;
       }
       chat.model = model;
@@ -831,93 +798,16 @@ watch(
   { immediate: true }
 );
 
-// 右侧工作台（变更 / 资料 / 当前文件）：展开状态与 tab 放 store，侧栏点文件时也能直接切过去
-const DOCK_WIDTH_KEY = 'chat.dockWidth';
-// 对话区最小宽度：给会话头/消息里的按钮留位置，避免被工作台挤出去
-const MIN_CHAT_WIDTH = 420;
-const chatBodyEl = ref<HTMLElement | null>(null);
-
-const dockWidth = ref(Number(localStorage.getItem(DOCK_WIDTH_KEY)) || 520);
-const dockFullscreen = ref(false);
-const dockDragging = ref(false);
-// P5-09：<1024 时工作台浮层化，需要跟随 resize 切换遮罩
-const viewportWidth = ref(window.innerWidth);
-const isNarrowDock = computed(() => viewportWidth.value < 1024);
-
-function containerWidth() {
-  return chatBodyEl.value?.clientWidth || window.innerWidth;
-}
-
-/** 工作台宽度上限：容器 - 对话区最小宽度 - 手柄 */
-function maxDockWidth() {
-  return Math.max(300, Math.min(window.innerWidth * 0.7, containerWidth() - MIN_CHAT_WIDTH - 5));
-}
-
-function clampDockWidth(w: number) {
-  return Math.min(maxDockWidth(), Math.max(300, w));
-}
-
-// 布局尺寸要等容器挂载后才知道，这里再收敛一次初始值
 onMounted(() => {
-  dockWidth.value = clampDockWidth(dockWidth.value);
   // P5-11-3：首屏布局完成后同步一次视口高度，窗口化渲染才有正确的可视范围
   nextTick(() => {
     syncVirtualViewport();
     updateActiveTurn();
   });
+  loadModelOptions();
 });
 
 onUnmounted(disposeVirtual);
-
-/** 拖动手柄：以工作台左缘为准，鼠标向左拖工作台变宽；拖动期间禁掉文本选择避免误选 */
-function startDockDrag(e: MouseEvent) {
-  e.preventDefault();
-  const startX = e.clientX;
-  const startW = dockWidth.value;
-  dockDragging.value = true;
-  document.body.style.userSelect = 'none';
-  const onMove = (ev: MouseEvent) => {
-    dockWidth.value = clampDockWidth(startW + (startX - ev.clientX));
-  };
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    document.body.style.userSelect = '';
-    dockDragging.value = false;
-    localStorage.setItem(DOCK_WIDTH_KEY, String(dockWidth.value));
-  };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-/** 窗口变窄时立刻收敛宽度：改到下次拖动才修正会临时挤压对话区 */
-function onWindowResize() {
-  viewportWidth.value = window.innerWidth;
-  if (!chat.dockOpen || dockFullscreen.value) return;
-  const clamped = clampDockWidth(dockWidth.value);
-  if (clamped !== dockWidth.value) {
-    dockWidth.value = clamped;
-    localStorage.setItem(DOCK_WIDTH_KEY, String(clamped));
-  }
-}
-
-/** 收起工作台前先确认：编辑器里的未保存内容会随挂载一起消失 */
-async function closeDockSafely() {
-  if (chat.editorDirty) {
-    try {
-      await ElMessageBox.confirm('工作台里还有未保存的改动，收起后会丢失。', '未保存的改动', {
-        confirmButtonText: '放弃改动并收起',
-        cancelButtonText: '继续编辑',
-        type: 'warning'
-      });
-    } catch {
-      return;
-    }
-  }
-  chat.closeDock();
-}
-
-
 
 /** 消息底部文件清单点击：直接用编辑器打开该文件（本次改动会在文件里标色） */
 function openChangeFromMessage(path: string, action?: string) {
@@ -1584,7 +1474,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
-  window.addEventListener('resize', onWindowResize);
   // 侧栏任务列表与空态概览共用 store 里的运行态，这里刷新一次
   chat.refreshRunningRuns();
   // 首屏回填的草稿可能是多行，等 DOM 就绪后按内容撑高输入框
@@ -1599,7 +1488,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
-  window.removeEventListener('resize', onWindowResize);
   if (streamNoticeTimer) window.clearTimeout(streamNoticeTimer);
   if (approvalFlashTimer) window.clearTimeout(approvalFlashTimer);
 });
@@ -1965,40 +1853,6 @@ function removeChip(key: string) {
     gap: 6px;
 }
 
-/* 右侧工作台拖动手柄：5px 热区，悬停/拖动时给主色提示 */
-.dock-resizer {
-    width: 5px;
-    flex-shrink: 0;
-    cursor: col-resize;
-    background: transparent;
-    transition: background var(--dur-fast);
-}
-.dock-resizer:hover,
-.dock-resizer.dragging {
-    background: var(--primary);
-    opacity: 0.35;
-}
-
-/* P5-09：768-1023 时工作台不再内联挤压正文，改为右侧浮层 + 遮罩 */
-@media (max-width: 1023px) {
-    .dock-backdrop {
-        position: fixed;
-        inset: var(--header-height) 0 0 0;
-        z-index: 2399;
-        background: rgb(0 0 0 / 28%);
-    }
-    .workbench:not(.fullscreen) {
-        position: fixed;
-        top: var(--header-height);
-        right: 0;
-        bottom: 0;
-        z-index: 2400;
-        width: min(calc(100vw - 56px), 520px) !important;
-        box-shadow: var(--shadow-overlay);
-    }
-    .dock-resizer { display: none; }
-}
-
 /* P5-10：快捷键面板 */
 .shortcuts-mask {
     position: fixed;
@@ -2056,97 +1910,29 @@ function removeChip(key: string) {
     font-size: var(--fs-xs);
     text-align: center;
 }
-/* P5-12-1：空态概览，替代原来的客服式开场白 */
+/* P5-12-1：空态只留金月标识与一句欢迎，垂直居中、轻量 */
 .chat-empty {
-    width: min(720px, calc(100% - 48px));
-    margin: 6vh auto 0;
+    flex: 1;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 18px;
+    padding-bottom: 4vh;
     color: var(--text);
 }
-.chat-empty-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+/* 品牌金：月亮取品牌金 #f5c451，外圈是一层很淡的光晕 */
+.chat-empty-mark {
+    display: inline-flex;
+    color: #f5c451;
+    filter: drop-shadow(0 0 16px rgb(245 196 81 / 26%));
+}
+.chat-empty-greeting {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: 500;
     color: var(--text-secondary);
-    font-size: var(--fs-sm);
-}
-.chat-empty-project { color: var(--text); font-weight: 600; }
-.chat-empty-running {
-    margin-left: auto;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: var(--warning-bg);
-    color: var(--warning);
-    font-size: var(--fs-xs);
-}
-.chat-empty-block {
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-}
-.chat-empty-label {
-    margin-bottom: 8px;
-    color: var(--text-tertiary);
-    font-size: var(--fs-xs);
-    letter-spacing: .04em;
-}
-.chat-empty-task {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text);
-    text-align: left;
-    cursor: pointer;
-}
-.chat-empty-task:hover { background: var(--surface-2); border-color: var(--border); }
-.chat-empty-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--text-tertiary);
-    flex-shrink: 0;
-}
-.chat-empty-dot.is-RUNNING {
-    background: var(--primary);
-    animation: stream-pulse 1.2s ease-in-out infinite;
-}
-.chat-empty-dot.is-WAITING_APPROVAL { background: var(--warning); }
-.chat-empty-task-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--fs-sm);
-}
-.chat-empty-task-time { color: var(--text-tertiary); font-size: var(--fs-xs); }
-.chat-empty-hint {
-    margin: 0 0 10px;
-    color: var(--text-secondary);
-    font-size: var(--fs-sm);
-    line-height: 1.6;
-}
-.chat-empty-keys {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    color: var(--text-tertiary);
-    font-size: var(--fs-xs);
-}
-.chat-empty-keys kbd {
-    margin-right: 4px;
-    padding: 0 5px;
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    border-radius: 4px;
-    background: var(--surface-2);
-    font-family: inherit;
+    letter-spacing: .02em;
 }
 
 /* P5-12-4：审批队列——多项时不被互相遮蔽，超出高度内部滚动 */

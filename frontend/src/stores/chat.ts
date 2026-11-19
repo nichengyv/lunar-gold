@@ -27,6 +27,7 @@ import type {
   TaskStageItem,
   TaskStageKey,
   TaskStageStatus,
+  UserQuestion,
   VerifyInfo
 } from '../types/chat';
 
@@ -67,10 +68,15 @@ function delay(ms: number) {
 function applyRunEvents(
   events: agentApi.RunEventItem[],
   target: UiMessage
-): { truncated: boolean } {
+): {
+  truncated: boolean;
+  /** P7-06：事件重放后仍未回答的决策询问（刷新 / 断线恢复时用来还原卡片） */
+  userQuestion?: Omit<UserQuestion, 'runId'>;
+} {
   let text = '';
   let declaredLength = 0;
   const tools: ToolInvocation[] = [];
+  let userQuestion: Omit<UserQuestion, 'runId'> | undefined;
   for (const ev of events) {
     let payload: Record<string, any> | null = null;
     try {
@@ -99,11 +105,25 @@ function applyRunEvents(
       target.diagnostics = payload as DiagnosticsInfo;
     } else if (ev.type === 'VERIFY') {
       target.verify = payload as VerifyInfo;
+    } else if (ev.type === 'USER_QUESTION') {
+      if (payload.questionId) {
+        userQuestion = {
+          questionId: String(payload.questionId),
+          question: String(payload.question ?? ''),
+          header: payload.header,
+          options: payload.options,
+          multiSelect: !!payload.multiSelect
+        };
+      }
+    } else if (ev.type === 'USER_ANSWERED') {
+      if (userQuestion && userQuestion.questionId === payload.questionId) {
+        userQuestion = undefined;
+      }
     }
   }
   if (text) target.content = text;
   if (tools.length) target.tools = tools;
-  return { truncated: declaredLength > text.length };
+  return { truncated: declaredLength > text.length, userQuestion };
 }
 
 // 当前流式请求的中断句柄：用户点「停止」时直接 abort，
@@ -317,7 +337,7 @@ export const useChatStore = defineStore('chat', {
     fileFocusTick: 0,
     // 右侧工作台（变更 / 资料 / 当前文件）是否展开，以及当前停在哪个 tab
     dockOpen: false,
-    dockTab: 'changes' as 'changes' | 'docs' | 'file' | 'trace' | 'plan' | 'metrics',
+    dockTab: 'changes' as 'changes' | 'docs' | 'file' | 'trace' | 'plan',
     pendingChips: [] as AttachmentChip[],
     // sessionId -> 已随消息发送的附件（仅前端内存，用于切回会话时恢复 chips）
     sessionAttachments: {} as Record<number, SessionAttachment[]>,
@@ -343,6 +363,8 @@ export const useChatStore = defineStore('chat', {
     changeSetRunFilter: null as number | null,
     // 第六十八批 A2：等待用户确认的危险工具调用（按会话隔离）
     pendingApprovals: [] as PendingApproval[],
+    /** P7-06：agent 执行中等待用户回答的决策询问（同一时刻只可能有一个） */
+    pendingUserQuestion: null as (UserQuestion & { runId: number }) | null,
     /** P5-12-4：轨迹里点「待审批」步骤时递增，聊天区据此高亮并定位审批区 */
     approvalFocusToken: 0,
     /** P5-10-2：审批状态变化计数，追踪页据此刷新会话审批历史 */
@@ -458,7 +480,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 打开右侧工作台并切到指定 tab */
-    openDock(tab: 'changes' | 'docs' | 'file' | 'trace' | 'plan' | 'metrics') {
+    openDock(tab: 'changes' | 'docs' | 'file' | 'trace' | 'plan') {
       this.dockTab = tab;
       this.dockOpen = true;
     },
@@ -554,6 +576,8 @@ export const useChatStore = defineStore('chat', {
       this.currentSessionId = null;
       this.messages = [];
       this.pendingChips = [];
+      // P7-06：决策询问属于上一会话的 Run，切会话/新会话时清掉，避免答到别的会话
+      this.pendingUserQuestion = null;
       this.approvalHistory = [];
       this.changeSet = null;
       this.changeSetRunFilter = null;
@@ -710,7 +734,14 @@ export const useChatStore = defineStore('chat', {
             return;
           }
           failedAttempts = 0;
-          this.recoveredTruncated = applyRunEvents(result.events, target).truncated;
+          const applied = applyRunEvents(result.events, target);
+          this.recoveredTruncated = applied.truncated;
+          // P7-06：还原/清除等待中的决策询问卡片（刷新、断线重连都要能回到同一状态）
+          if (applied.userQuestion) {
+            this.pendingUserQuestion = { ...applied.userQuestion, runId };
+          } else if (this.pendingUserQuestion?.runId === runId) {
+            this.pendingUserQuestion = null;
+          }
           // P5-10-3：usage 不落库，恢复后至少用 run 的 token 汇总兜底；轮次保持未知
           if (!this.liveBudget && (result.totalTokens ?? 0) > 0) {
             this.liveBudget = {
@@ -719,7 +750,12 @@ export const useChatStore = defineStore('chat', {
               totalTokens: result.totalTokens as number
             };
           }
-          if (result.state === 'QUEUED' || result.state === 'RUNNING' || result.state === 'WAITING_APPROVAL') {
+          if (
+            result.state === 'QUEUED' ||
+            result.state === 'RUNNING' ||
+            result.state === 'WAITING_APPROVAL' ||
+            result.state === 'WAITING_USER_INPUT'
+          ) {
             target.streaming = true;
             target.failed = false;
             this.streamStatus = 'reconnecting';
@@ -873,6 +909,8 @@ export const useChatStore = defineStore('chat', {
         this.pendingApprovals = this.pendingApprovals.filter((a) => a.sessionId !== sessionId);
         this.approvalRevision += 1;
       }
+      // P7-06：Run 已停止，后端 ask_user_question 会在 500ms 内收到取消标记退出等待
+      this.pendingUserQuestion = null;
     },
 
     /** 第六十八批 A2：提交工具审批结果；不再在这里删卡片——等后端 approval_resolved 事件后切 resolved 态，或用户手动关叉 */
@@ -891,6 +929,27 @@ export const useChatStore = defineStore('chat', {
         this.pendingApprovals[idx] = { ...this.pendingApprovals[idx], resolved: decision, resolvedSource: 'USER' };
       }
       this.approvalRevision += 1;
+    },
+
+    // -----------------------------------------------------------------
+    // P7-06：ask_user_question 处理
+    // -----------------------------------------------------------------
+
+    /** SSE user_question 事件到达：agent 暂停等用户回答决策询问 */
+    handleUserQuestion(question: UserQuestion) {
+      if (!question.runId) {
+        // 没有 runId 的旧后端消息忽略
+        console.warn('handleUserQuestion: 缺少 runId', question);
+        return;
+      }
+      this.pendingUserQuestion = { ...question, runId: question.runId };
+    },
+
+    /** 提交用户回答；成功后清除 pending question */
+    async answerUserQuestion(runId: number, questionId: string, selected: string[] = [], custom?: string) {
+      await agentApi.answerUserQuestion(runId, questionId, selected, custom);
+      // 清除本地 pending——后端恢复 Run 后会继续 SSE 流，不需要额外事件
+      this.pendingUserQuestion = null;
     },
 
     /** P5-10-2：批量允许低风险写入；只按服务端返回的 resolvedIds 标记，不夸大成功 */
@@ -1178,6 +1237,10 @@ export const useChatStore = defineStore('chat', {
               // P5-12-2：处理完就回到运行中，终态由本轮收尾统一落
               this.markSessionRunState(this.currentSessionId, 'RUNNING');
             },
+            // P7-06：agent 暂停等用户回答决策询问
+            onUserQuestion: (question) => {
+              this.handleUserQuestion(question);
+            },
             //同一文件被多次改动时只保留最新一条，避免面板里重复堆叠
             onFileChange: (change: FileChange) => {
               if (!aiMsg.changes) aiMsg.changes = [];
@@ -1219,6 +1282,12 @@ export const useChatStore = defineStore('chat', {
             // P5-10-3：每轮实时预算进度；旧后端不会发 usage 时保持 null 降级展示
             onUsage: (usage) => {
               this.liveBudget = usage;
+              // 气泡上展示本轮用量：usage 是 Run 累计值，取最新一次即可
+              aiMsg.usage = {
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                totalTokens: usage.totalTokens
+              };
             },
             onDone: () => {
               // 先提交最后一段文本，再切到完成态：避免合帧丢掉结尾或最后一帧仍是流式渲染
@@ -1227,6 +1296,8 @@ export const useChatStore = defineStore('chat', {
               aiMsg.streaming = false;
               this.streamStatus = 'idle';
               this.activeRunId = null;
+              // P7-06：Run 已结束，等待中的询问不可能再被回答（超时/取消后后端会拉回 RUNNING）
+              this.pendingUserQuestion = null;
               // 思考内容保留：完成后折叠成「思考过程」入口，切回会话也仍能看到
             },
             onError: (message) => {
@@ -1235,6 +1306,8 @@ export const useChatStore = defineStore('chat', {
               aiMsg.failed = true;
               this.streamStatus = 'idle';
               this.activeRunId = null;
+              // P7-06：Run 已失败，残留的询问卡片不再可用
+              this.pendingUserQuestion = null;
               // 只记失败原因，不覆盖已经流出来的半截回答
               aiMsg.errorText = message || '这一轮没有完成';
             }
@@ -1416,7 +1489,7 @@ export const useChatStore = defineStore('chat', {
           void this.fetchChangeSet();
           return true;
         }
-        ElMessage.error(resp.error || '撤销失败');
+        ElMessage.error(resp.conflicts?.[0]?.reason || '撤销失败');
         return false;
       } catch (e: any) {
         ElMessage.error(e?.message || '撤销请求失败');
@@ -1456,6 +1529,30 @@ export const useChatStore = defineStore('chat', {
         ElMessage.error(e?.message || '批量保留失败');
         return false;
       }
+    },
+
+    /**
+     * P6-08：只保留传入的这些变更（卡片里列出的文件）。
+     * 不走项目级 accept-all，避免把其他会话的 PENDING 一起接受；失败合并成一条提示。
+     */
+    async acceptChanges(ids: number[]): Promise<boolean> {
+      if (!ids.length) return false;
+      const results = await Promise.allSettled(ids.map((id) => fileChangesApi.acceptChange(id)));
+      const accepted = new Set<number>();
+      results.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && result.value?.ok) accepted.add(ids[idx]);
+      });
+      if (accepted.size === 0) {
+        ElMessage.error('保留失败，请稍后重试');
+        return false;
+      }
+      this.pendingChanges = this.pendingChanges.filter((c) => !accepted.has(c.id));
+      const failed = ids.length - accepted.size;
+      ElMessage.success(
+        `已保留 ${accepted.size} 个文件变更${failed ? `（${failed} 个失败）` : ''}`
+      );
+      void this.fetchChangeSet();
+      return true;
     },
 
     async revertAll(projectId: number): Promise<boolean> {

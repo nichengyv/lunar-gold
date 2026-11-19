@@ -2,14 +2,12 @@ package com.capsule.agentkey.controller;
 
 import com.capsule.agentkey.entity.UserApiKey;
 import com.capsule.agentkey.entity.UserSetting;
-import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.repository.UserSettingRepository;
 import com.capsule.agentkey.service.ApiKeyService;
+import com.capsule.agentkey.util.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,17 +34,11 @@ public class SettingsController {
     private final UserSettingRepository settingRepo;
     private final ApiKeyService apiKeyService;
 
-    private Long getCurrentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof Long) return (Long) auth.getPrincipal();
-        throw new BusinessException("用户未认证");
-    }
-
     // ========== 默认对话参数 ==========
 
     @GetMapping("/defaults")
     public ResponseEntity<Map<String, String>> getDefaults() {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         UserSetting s = settingRepo.findByUserId(userId).orElseGet(UserSetting::new);
         Map<String, String> resp = new LinkedHashMap<>();
         resp.put("model", s.getDefaultModel());
@@ -58,7 +50,7 @@ public class SettingsController {
     @PutMapping("/defaults")
     @Transactional
     public ResponseEntity<Map<String, String>> updateDefaults(@RequestBody Map<String, String> body) {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         UserSetting s = settingRepo.findByUserId(userId).orElseGet(() -> {
             UserSetting created = new UserSetting();
             created.setUserId(userId);
@@ -86,13 +78,13 @@ public class SettingsController {
     // ========== 模型列表 ==========
 
     /**
-     * 模型列表：硬编码 AgentKey 支持的全部模型。
+     * 模型列表：DeepSeek 部分优先用已存 Key 实时拉取（GET /models），
+     * 避免硬编码目录与账号实际可用模型脱节；拉取失败/未配置 Key 时回退静态目录。
      * available 取决于当前用户是否为该 provider 配置了 API Key。
-     * 未来可改成从 application.yml 动态解析——现在模型数量固定，硬编码足够。
      */
     @GetMapping("/models")
     public ResponseEntity<List<Map<String, Object>>> listModels() {
-        Long userId = getCurrentUserId();
+        Long userId = CurrentUser.requireId();
         List<UserApiKey> myKeys = apiKeyService.listByUserId(userId);
         Set<String> configuredProviders = new HashSet<>();
         for (UserApiKey k : myKeys) {
@@ -102,9 +94,23 @@ public class SettingsController {
         }
 
         List<Map<String, Object>> models = new ArrayList<>();
-        // DeepSeek —— AgentKey 主要 provider
-        addModel(models, "deepseek-chat", "DeepSeek Chat", "DEEPSEEK", configuredProviders);
-        addModel(models, "deepseek-reasoner", "DeepSeek Reasoner", "DEEPSEEK", configuredProviders);
+        // DeepSeek —— AgentKey 主要 provider：有 Key 时以账号实际可用模型为准
+        List<String> liveDeepSeekModels = List.of();
+        if (configuredProviders.contains("DEEPSEEK")) {
+            try {
+                liveDeepSeekModels = apiKeyService.listRemoteModels(userId, "DEEPSEEK");
+            } catch (Exception e) {
+                log.warn("实时拉取 DeepSeek 模型列表失败，回退静态目录 [userId={}]: {}", userId, e.getMessage());
+            }
+        }
+        if (!liveDeepSeekModels.isEmpty()) {
+            for (String id : liveDeepSeekModels) {
+                addModel(models, id, id, "DEEPSEEK", configuredProviders);
+            }
+        } else {
+            addModel(models, "deepseek-chat", "DeepSeek Chat", "DEEPSEEK", configuredProviders);
+            addModel(models, "deepseek-reasoner", "DeepSeek Reasoner", "DEEPSEEK", configuredProviders);
+        }
         // OpenAI 兼容通用 —— 给用户留扩展空间
         addModel(models, "gpt-4o-mini", "GPT-4o Mini", "OPENAI", configuredProviders);
         addModel(models, "gpt-4o", "GPT-4o", "OPENAI", configuredProviders);

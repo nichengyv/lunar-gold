@@ -1,7 +1,7 @@
 # Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-06、P2-07、P2-08、P3-00、P3-00b、P3-01、P3-02、P3-03、PR-12。
+> 当前基线：Phase 5、Phase 6 已收口，Phase 7 进行中；P7-01、P7-02 统计切片与 P7-05 浏览器层 E2E 已完成。历史批次与双端改造完成证据见 `COMPLETED_WORK.md`。
 
 ---
 
@@ -36,7 +36,7 @@
 | `/login` | `LoginView` | RSA 加密密码、JWT；桌面端由路由守卫自动换取本地令牌，不走登录页 |
 | `/chat` | `ChatView` | SSE 流式、计划条、审批卡、工作台（变更/资料/文件/追踪/计划/**监控**）、@引用、斜杠命令、草稿持久化 |
 | `/knowledge` | `KnowledgeView` | 资料上传 / 重试 / 删除 |
-| `/settings` | `SettingsView` | 6 tab：对话默认 / 模型服务 / Agent 指令 / MCP 工具 / 外观 / 账号安全 |
+| `/settings` | `SettingsView` | 7 tab：对话默认 / 模型服务 / Agent 指令 / MCP 工具 / 外观 / 账号安全 / 应用信息；按部署能力与模式动态隐藏 |
 | `/download` | `DownloadView` | 公开页：桌面端能力介绍与最新版本，`DOWNLOAD` 能力缺失时重定向 |
 
 Pinia stores 5 个：`auth`、`chat`（最大，含 sessions/messages/pendingChanges/pendingApprovals/drafts/openFiles）、`project`、`meta`（部署能力，驱动入口显隐）、`theme`。
@@ -47,7 +47,7 @@ Pinia stores 5 个：`auth`、`chat`（最大，含 sessions/messages/pendingCha
 
 ### 数据库（PostgreSQL，dev `ddl-auto=update`）
 
-业务表 11 张 + `vector_record`（pgvector）。Flyway 到 V15（V15 为邮箱唯一索引）；V13 先于 V14 对 `pending_file_change` 执行 ALTER 的全新库顺序缺陷，已由 PR-06 的 Flyway `beforeMigrate` 幂等预检解决（预建表，V13/V14 变为空操作，不改已执行迁移）。
+PostgreSQL + `vector_record`（pgvector）。Flyway 当前到 **V21**：V16～V18 增加 Run/Event、审批与 token 统计，V19/V21 增加审批决策来源与客户端标识，V20 增加 API 客户端凭证。V13 先于 V14 对 `pending_file_change` 执行 ALTER 的全新库顺序缺陷，已由 PR-06 的 Flyway `beforeMigrate` 幂等预检解决（不改已执行迁移）。
 
 ---
 
@@ -108,14 +108,14 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 ### Level 4 🟡 当前方向
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| 设置中心产品化 | 🟡 | 默认值持久化、6 tab 完善 |
+| 设置中心产品化 | ✅ | 默认值持久化、7 tab；MCP 与账号安全按部署模式动态显示 |
 | 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
 | 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
-| 测试覆盖 | ⚠️ | 当前 156 项回归，0 失败、0 错误、5 项跳过（2 项既有环境相关 + 3 项未设置 `DESKTOP_PG_RUNTIME` 的桌面集成测试）；覆盖桌面数据库 V1~V15 与 pgvector 1024 维余弦检索、命令超时与进程树终止；desktop profile 已在 Windows x64 完成启动冒烟，SSE 端到端与前端自动化仍待补 |
-| 生产化缺口 | ❌ | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；Electron 壳与侧车生命周期已有（P3-01/P3-02），jlink 裁剪 JRE 已有（P3-03，约 49 MiB）；仍缺 macOS/Linux 运行时、安装包与签名（P3-04）与桌面端窗口端到端冒烟 |
+| 测试覆盖 | ⚠️ | 2026-11-19 验收：后端 358 项 / 0 失败 / 0 错误 / 16 跳过，前端 Vitest 92/92，Playwright 30 通过 + 1 性能跳过；P7-05 四条桌面模式浏览器 E2E 通过。浏览器 E2E 使用 API 仿真，真实 Electron + Java SSE 与真实 PG 定向复跑单独跟踪，不外推为真链路通过 |
+| 生产化缺口 | 🟡 | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；Electron 壳与侧车生命周期已有（P3-01/P3-02），jlink 裁剪 JRE 已有（P3-03，约 49 MiB）；macOS/Linux 运行时与安装包暂缓，Windows 签名、干净机器与真实桌面窗口链路冒烟未收口 |
 
-### Level 5 ⏳ 尚未实施
-桌面外壳与分发见 `UPDATE_PLAN.md` Phase 3；当前仍以浏览器作为 desktop 开发环境。
+### Level 5 🟡 Windows 桌面发布收尾
+Electron 壳、侧车、Windows 安装/卸载与更新主体已交付；签名、干净机器完整任务和真实窗口链路验收见 `UPDATE_PLAN.md` Phase 3 / Phase 7。
 
 ---
 
@@ -124,11 +124,11 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | 边界 | 影响 | 处理 |
 |---|---|---|
 | MCP 写入/删除类工具强制审批 | `AUTO` / `FULL` 也不会静默放行 | 用户可选择本会话「总是允许」 |
-| 审批状态存进程内存 | 重启丢正在等的卡 | 120s 超时自动拒绝兜底 |
+| 审批状态存进程内存 | 重启时等待线程已消失 | 启动即收口：未完成 Run（含 `WAITING_APPROVAL`）统一标 `FAILED`（`PROCESS_RESTARTED`），残留 `PENDING` 审批标 `REJECTED`（未过期 `SYSTEM` / 过期 `TIMEOUT`），不再接受批准 |
 | scope 拦截只覆盖文件类工具 | run_command 有自己的沙箱 | 设计如此，不在此处拦截 |
 | 撤回本轮只回滚 PENDING | 已 accept 或编辑器保存过的不回滚 | 文档说明 |
-| MCP 熔断冷却 5 分钟硬编码 | 期间不降级到内置等价工具 | 体验差，需补 |
-| aggregateStats 全量 parse trace JSON | 长会话慢 | 可考虑物化视图 |
+| MCP 熔断冷却默认 300s | 冷却期内不调用该 server，也不回退到内置工具 | 可用 `MCP_COOLDOWN_MS` 调整（`failure-threshold` / `probe-interval-ms` 同样可配） |
+| aggregateStats 全量 parse trace JSON | 实测 1000 条助手消息 / 15.6MB trace：p95 27～31ms（不含 JDBC） | 远低于 500ms 阈值，不做缓存；会话继续变长时用 `eval/reports` 下的基准复测 |
 | deepseek 硬编码改了但旧 profile 可能残留 | 模型通用性 | 前端 SettingsView 已切通用配置 |
 
 ---

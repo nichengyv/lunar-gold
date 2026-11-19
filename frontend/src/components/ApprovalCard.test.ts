@@ -47,11 +47,8 @@ describe('ApprovalCard', () => {
     expect(wrapper.text()).toContain('需要你确认');
     expect(wrapper.text()).toContain('写入文件');
     expect(wrapper.find('.file-name').text()).toBe('demo.ts');
-    expect(wrapper.findAll('.approval-btn').map((b) => b.text())).toEqual([
-      '拒绝D',
-      '本会话总是允许',
-      '允许A'
-    ]);
+    expect(wrapper.findAll('.approval-btn').map((b) => b.text())).toEqual(['拒绝D', '允许A']);
+    expect(wrapper.find('.approval-more-btn').exists()).toBe(true);
   });
 
   it('点击允许与拒绝提交对应决策', async () => {
@@ -63,8 +60,20 @@ describe('ApprovalCard', () => {
     await buttons[0].trigger('click');
     expect(spy).toHaveBeenLastCalledWith('ap-1', 'REJECT', false);
 
-    await buttons[2].trigger('click');
+    await buttons[1].trigger('click');
     expect(spy).toHaveBeenLastCalledWith('ap-1', 'APPROVE', false);
+  });
+
+  it('更多菜单里提交本会话总是允许', async () => {
+    const chat = useChatStore();
+    const spy = vi.spyOn(chat, 'respondApproval').mockResolvedValue();
+    const wrapper = mountCard();
+
+    await wrapper.find('.approval-more-btn').trigger('click');
+    await wrapper.find('.approval-menu-item').trigger('click');
+
+    expect(spy).toHaveBeenLastCalledWith('ap-1', 'APPROVE', true);
+    expect(wrapper.find('.approval-menu').exists()).toBe(false);
   });
 
   it('已处理状态不渲染操作按钮并显示结果', () => {
@@ -72,17 +81,19 @@ describe('ApprovalCard', () => {
     expect(wrapper.text()).toContain('已批准');
     expect(wrapper.findAll('.approval-btn')).toHaveLength(1);
     expect(wrapper.find('.approval-btn').attributes('disabled')).toBeDefined();
-    expect(wrapper.find('.approval-timer').exists()).toBe(false);
+    expect(wrapper.find('.approval-more-btn').exists()).toBe(false);
   });
 
-  it('倒计时到 0 自动关闭卡片', () => {
+  it('不显示倒计时，过期也不自行关闭卡片', () => {
     vi.useFakeTimers();
     try {
       const chat = useChatStore();
       const spy = vi.spyOn(chat, 'dismissApproval');
-      mountCard({ ...baseApproval, expiresAt: Date.now() + 1500 });
+      const wrapper = mountCard({ ...baseApproval, expiresAt: Date.now() + 1500 });
+
+      expect(wrapper.find('.approval-timer').exists()).toBe(false);
       vi.advanceTimersByTime(2500);
-      expect(spy).toHaveBeenCalledWith('ap-1');
+      expect(spy).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

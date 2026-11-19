@@ -9,6 +9,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,19 +36,20 @@ class ToolApprovalRegistryPersistenceTest {
     }
 
     @Test
-    void 启动恢复未过期审批且保留原截止时间() {
+    void 启动时未过期审批也按进程重启拒绝且不可再批准() {
         ToolApproval approval = saved("PENDING", System.currentTimeMillis() + 60_000);
         when(repository.findByState("PENDING")).thenReturn(List.of(approval));
         when(repository.findByStateAndRememberSessionTrue("APPROVED")).thenReturn(List.of());
         ToolApprovalRegistry registry = new ToolApprovalRegistry(repository);
         registry.restorePersistedApprovals();
 
-        when(repository.findByApprovalId("ap-persisted")).thenReturn(Optional.of(approval));
-        assertTrue(registry.resolve("ap-persisted", 1L, "APPROVE", true));
-        assertEquals("APPROVED", approval.getState());
-        assertEquals("USER", approval.getDecisionSource());
-        assertTrue(approval.isRememberSession());
+        assertEquals("REJECTED", approval.getState(), "重启后没有等待线程，残留审批必须落终态");
+        assertEquals("SYSTEM", approval.getDecisionSource());
+        assertFalse(approval.isRememberSession());
         assertNotNull(approval.getDecisionTime());
+        assertFalse(registry.resolve("ap-persisted", 1L, "APPROVE", true, null),
+                "残留审批不应再被批准，避免出现批准成功但无人继续执行的假动作");
+        assertEquals("REJECTED", approval.getState());
         verify(repository, atLeastOnce()).save(approval);
     }
 
@@ -59,7 +61,7 @@ class ToolApprovalRegistryPersistenceTest {
         ToolApprovalRegistry registry = new ToolApprovalRegistry(repository);
         registry.restorePersistedApprovals();
 
-        assertFalse(registry.resolve("ap-persisted", 1L, "APPROVE", false));
+        assertFalse(registry.resolve("ap-persisted", 1L, "APPROVE", false, null));
         assertEquals("REJECTED", approval.getState());
         assertEquals("TIMEOUT", approval.getDecisionSource());
     }
@@ -92,6 +94,86 @@ class ToolApprovalRegistryPersistenceTest {
         assertEquals("REJECTED", persisted.getState());
         assertEquals("SESSION_STOP", persisted.getDecisionSource());
         verify(repository, times(2)).save(any(ToolApproval.class));
+    }
+
+    @Test
+    void 断流期间拒绝写审批表并返回本人来源() {
+        ToolApprovalRegistry registry = new ToolApprovalRegistry(repository);
+        ToolApprovalRegistry.Pending pending = registry.create(1L, 10L, "write_file", "{}", "WRITE");
+        ToolApproval persisted = saved("PENDING", pending.expiresAt());
+        persisted.setApprovalId(pending.approvalId());
+        when(repository.findByApprovalId(pending.approvalId())).thenReturn(Optional.of(persisted));
+
+        // 断流后没有任何 SSE 连接参与：拒绝只按用户决策与审批表落库
+        assertTrue(registry.resolve(pending.approvalId(), 1L, "REJECT", false, null));
+        ToolApprovalRegistry.Resolution resolution = registry.await(pending, new AtomicBoolean(false));
+
+        assertEquals(ToolApprovalRegistry.Decision.REJECT, resolution.decision());
+        assertEquals(ToolApprovalRegistry.DecisionSource.USER, resolution.source());
+        assertEquals("REJECTED", persisted.getState());
+        assertEquals("USER", persisted.getDecisionSource());
+        assertNull(persisted.getClientId());
+        assertNotNull(persisted.getDecisionTime());
+        verify(repository, times(2)).save(any(ToolApproval.class));
+    }
+
+    @Test
+    void 客户端令牌审批写入口并记录客户端来源() {
+        when(repository.save(any(ToolApproval.class))).thenAnswer(inv -> inv.getArgument(0));
+        ToolApprovalRegistry registry = new ToolApprovalRegistry(repository);
+        ToolApprovalRegistry.Pending pending = registry.create(1L, 10L, "write_file", "{}", "WRITE");
+        ToolApproval persisted = saved("PENDING", pending.expiresAt());
+        persisted.setApprovalId(pending.approvalId());
+        when(repository.findByApprovalId(pending.approvalId())).thenReturn(Optional.of(persisted));
+
+        assertTrue(registry.resolve(pending.approvalId(), 1L, "APPROVE", false, "cli-abc1234567"));
+        ToolApprovalRegistry.Resolution resolution = registry.await(pending, new AtomicBoolean(false));
+
+        assertEquals(ToolApprovalRegistry.DecisionSource.CLIENT, resolution.source());
+        assertEquals("CLIENT", persisted.getDecisionSource());
+        assertEquals("cli-abc1234567", persisted.getClientId());
+    }
+
+    @Test
+    void 批量审批保留批量来源并记录客户端身份() {
+        when(repository.save(any(ToolApproval.class))).thenAnswer(inv -> inv.getArgument(0));
+        ToolApprovalRegistry registry = new ToolApprovalRegistry(repository);
+        ToolApprovalRegistry.Pending first = registry.create(1L, 10L, "write_file", "{}", "WRITE");
+        ToolApprovalRegistry.Pending second = registry.create(1L, 10L, "edit_file", "{}", "WRITE");
+        ToolApproval firstSaved = saved("PENDING", first.expiresAt());
+        firstSaved.setApprovalId(first.approvalId());
+        ToolApproval secondSaved = saved("PENDING", second.expiresAt());
+        secondSaved.setApprovalId(second.approvalId());
+        when(repository.findByApprovalId(first.approvalId())).thenReturn(Optional.of(firstSaved));
+        when(repository.findByApprovalId(second.approvalId())).thenReturn(Optional.of(secondSaved));
+
+        ToolApprovalRegistry.BatchResult result = registry.resolveBatch(1L, 10L,
+                List.of(first.approvalId(), second.approvalId()), "vscode-abc12345");
+
+        assertTrue(result.accepted());
+        assertEquals("BATCH", firstSaved.getDecisionSource());
+        assertEquals("vscode-abc12345", firstSaved.getClientId());
+        assertEquals("BATCH", secondSaved.getDecisionSource());
+        assertEquals("vscode-abc12345", secondSaved.getClientId());
+    }
+
+    @Test
+    void 等待超时写审批表并记录超时来源() {
+        ToolApprovalRegistry.Pending record = new ToolApprovalRegistry.Pending(
+                "ap-timeout", 1L, 10L, "write_file", "{}", "WRITE",
+                System.currentTimeMillis() - 1, new CompletableFuture<>());
+        ToolApproval persisted = saved("PENDING", record.expiresAt());
+        persisted.setApprovalId("ap-timeout");
+        when(repository.findByApprovalId("ap-timeout")).thenReturn(Optional.of(persisted));
+
+        ToolApprovalRegistry.Resolution resolution =
+                new ToolApprovalRegistry(repository).await(record, new AtomicBoolean(false));
+
+        assertEquals(ToolApprovalRegistry.Decision.REJECT, resolution.decision());
+        assertEquals(ToolApprovalRegistry.DecisionSource.TIMEOUT, resolution.source());
+        assertEquals("REJECTED", persisted.getState());
+        assertEquals("TIMEOUT", persisted.getDecisionSource());
+        verify(repository).save(persisted);
     }
 
     @Test

@@ -69,13 +69,15 @@
             <div class="card">
               <h3><Icon name="keyboard" :size="15" /> 快捷键</h3>
               <table class="shortcuts">
-                <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>K</kbd></td><td>聚焦输入框</td></tr>
-                <tr><td><kbd>Esc</kbd> × 2</td><td>停止生成（500ms 内连按两次）</td></tr>
-                <tr><td><kbd>/</kbd></td><td>打开命令面板</td></tr>
-                <tr><td><kbd>@</kbd></td><td>打开引用面板（文件/资料/会话）</td></tr>
-                <tr><td><kbd>Enter</kbd></td><td>发送消息</td></tr>
-                <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>输入换行</td></tr>
-                <tr><td><kbd>↑</kbd>/<kbd>↓</kbd></td><td>面板内选择上/下一个候选</td></tr>
+                <tbody>
+                  <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>K</kbd></td><td>聚焦输入框</td></tr>
+                  <tr><td><kbd>Esc</kbd> × 2</td><td>停止生成（500ms 内连按两次）</td></tr>
+                  <tr><td><kbd>/</kbd></td><td>打开命令面板</td></tr>
+                  <tr><td><kbd>@</kbd></td><td>打开引用面板（文件/资料/会话）</td></tr>
+                  <tr><td><kbd>Enter</kbd></td><td>发送消息</td></tr>
+                  <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>输入换行</td></tr>
+                  <tr><td><kbd>↑</kbd>/<kbd>↓</kbd></td><td>面板内选择上/下一个候选</td></tr>
+                </tbody>
               </table>
             </div>
 
@@ -250,15 +252,6 @@
           </div>
         </template>
 
-        <!-- ============ tab: 体验诊断 ============ -->
-        <template v-else-if="activeTab === 'diagnostics'">
-          <div class="section diagnostics-section">
-            <h2 class="section-title">体验诊断</h2>
-            <p class="section-desc">在本地定位页面异常、连接中断和 Agent 等待，不自动上传任何体验数据</p>
-            <ExperienceDiagnosticsPanel />
-          </div>
-        </template>
-
         <!-- ============ tab: 应用信息 ============ -->
         <template v-else-if="activeTab === 'about'">
           <div class="section">
@@ -291,6 +284,23 @@
                 <span class="about-value">{{ health ? formatUptime(health.uptimeMs) : '—' }}</span>
               </div>
             </div>
+
+            <div class="card advanced-card">
+              <button class="advanced-toggle" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
+                <Icon name="alert" :size="15" />
+                <span>高级诊断</span>
+                <span class="advanced-desc">连接、页面性能与本地排查记录</span>
+                <span class="advanced-action">{{ advancedOpen ? '收起' : '展开' }}</span>
+              </button>
+              <div v-if="advancedOpen" class="advanced-body">
+                <label class="advanced-checkbox">
+                  <input v-model="showAcceptanceMetrics" type="checkbox" />
+                  <span>显示验收指标（首字时延、工具失败率、审批分布）</span>
+                </label>
+                <ExperienceDiagnosticsPanel :show-acceptance="showAcceptanceMetrics" />
+                <MetricsPanel />
+              </div>
+            </div>
           </div>
         </template>
 
@@ -313,6 +323,7 @@ import * as mcpApi from '../api/mcp';
 import { encryptPassword } from '../utils/crypto';
 import RulesPanel from '../components/RulesPanel.vue';
 import ExperienceDiagnosticsPanel from '../components/ExperienceDiagnosticsPanel.vue';
+import MetricsPanel from '../components/MetricsPanel.vue';
 import KeysView from './KeysView.vue';
 import Icon from '../components/Icon.vue';
 import type { ModelInfo, HealthInfo, ChatDefaults } from '../api/settings';
@@ -341,7 +352,6 @@ const BASE_TABS = [
   { id: 'mcp', label: 'MCP 工具', icon: 'plug' },
   { id: 'appearance', label: '外观', icon: 'palette' },
   { id: 'account', label: '账号安全', icon: 'user' },
-  { id: 'diagnostics', label: '体验诊断', icon: 'alert' },
   { id: 'about', label: '应用信息', icon: 'info' },
 ] as const;
 
@@ -367,6 +377,12 @@ watch(tabs, (list) => {
     activeTab.value = 'chat';
   }
 });
+
+/** 高级诊断：默认收起；验收指标面向研发，默认不展示，选择结果记在本地 */
+const ACCEPTANCE_KEY = 'agent.diagnostics.show-acceptance.v1';
+const advancedOpen = ref(false);
+const showAcceptanceMetrics = ref(localStorage.getItem(ACCEPTANCE_KEY) === '1');
+watch(showAcceptanceMetrics, (val) => localStorage.setItem(ACCEPTANCE_KEY, val ? '1' : '0'));
 
 // 对话默认 —— 本地副本避免写一半错乱
 const local = reactive<{
@@ -667,6 +683,36 @@ function formatUptime(ms: number): string {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+/* 高级诊断：默认收起，避免把排障数据摊给普通用户 */
+.advanced-card { padding: 0; overflow: hidden; }
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.advanced-toggle:hover { background: var(--surface-2); }
+.advanced-desc { font-size: 12px; font-weight: 400; color: var(--text-tertiary); }
+.advanced-action { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.advanced-body { padding: 0 20px 18px; border-top: 1px solid var(--border); }
+.advanced-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
 .card-head h3 { margin: 0; }

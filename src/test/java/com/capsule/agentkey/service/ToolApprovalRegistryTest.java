@@ -43,7 +43,7 @@ class ToolApprovalRegistryTest {
     @Test
     void 批准后等待线程立即拿到结果且来源为本人() {
         ToolApprovalRegistry.Pending record = create();
-        assertTrue(registry.resolve(record.approvalId(), 1L, "APPROVE", false));
+        assertTrue(registry.resolve(record.approvalId(), 1L, "APPROVE", false, null));
 
         ToolApprovalRegistry.Resolution resolution = registry.await(record, new AtomicBoolean(false));
         assertEquals(ToolApprovalRegistry.Decision.APPROVE, resolution.decision());
@@ -55,7 +55,7 @@ class ToolApprovalRegistryTest {
     @Test
     void 拒绝后等待线程拿到拒绝且来源为本人() {
         ToolApprovalRegistry.Pending record = create();
-        assertTrue(registry.resolve(record.approvalId(), 1L, "REJECT", false));
+        assertTrue(registry.resolve(record.approvalId(), 1L, "REJECT", false, null));
 
         ToolApprovalRegistry.Resolution resolution = registry.await(record, new AtomicBoolean(false));
         assertEquals(ToolApprovalRegistry.Decision.REJECT, resolution.decision());
@@ -63,9 +63,26 @@ class ToolApprovalRegistryTest {
     }
 
     @Test
+    void 客户端令牌审批记录客户端来源() {
+        ToolApprovalRegistry.Pending approve = create();
+        assertTrue(registry.resolve(approve.approvalId(), 1L, "APPROVE", false, "cli-abc1234567"));
+
+        ToolApprovalRegistry.Resolution approved = registry.await(approve, new AtomicBoolean(false));
+        assertEquals(ToolApprovalRegistry.Decision.APPROVE, approved.decision());
+        assertEquals(ToolApprovalRegistry.DecisionSource.CLIENT, approved.source());
+
+        ToolApprovalRegistry.Pending reject = create();
+        assertTrue(registry.resolve(reject.approvalId(), 1L, "REJECT", false, "vscode-abc12345"));
+
+        ToolApprovalRegistry.Resolution rejected = registry.await(reject, new AtomicBoolean(false));
+        assertEquals(ToolApprovalRegistry.Decision.REJECT, rejected.decision());
+        assertEquals(ToolApprovalRegistry.DecisionSource.CLIENT, rejected.source());
+    }
+
+    @Test
     void 记住后本会话内不再询问() {
         ToolApprovalRegistry.Pending record = create();
-        assertTrue(registry.resolve(record.approvalId(), 1L, "APPROVE", true));
+        assertTrue(registry.resolve(record.approvalId(), 1L, "APPROVE", true, null));
 
         assertEquals(ToolApprovalRegistry.Decision.APPROVE,
                 registry.await(record, new AtomicBoolean(false)).decision());
@@ -77,8 +94,8 @@ class ToolApprovalRegistryTest {
     @Test
     void 其他用户不能提交审批() {
         ToolApprovalRegistry.Pending record = create();
-        assertFalse(registry.resolve(record.approvalId(), 2L, "APPROVE", false));
-        assertTrue(registry.resolve(record.approvalId(), 1L, "REJECT", false));
+        assertFalse(registry.resolve(record.approvalId(), 2L, "APPROVE", false, null));
+        assertTrue(registry.resolve(record.approvalId(), 1L, "REJECT", false, null));
     }
 
     @Test
@@ -89,11 +106,11 @@ class ToolApprovalRegistryTest {
         ToolApprovalRegistry.Resolution resolution = registry.await(record, new AtomicBoolean(false));
         assertEquals(ToolApprovalRegistry.Decision.REJECT, resolution.decision());
         assertEquals(ToolApprovalRegistry.DecisionSource.SESSION_STOP, resolution.source());
-        assertFalse(registry.resolve(record.approvalId(), 1L, "APPROVE", false), "已取消的记录不能再提交");
+        assertFalse(registry.resolve(record.approvalId(), 1L, "APPROVE", false, null), "已取消的记录不能再提交");
     }
 
     @Test
-    void 客户端断开按会话停止记录来源() {
+    void 显式停止标记按会话停止记录来源() {
         ToolApprovalRegistry.Pending record = pending(System.currentTimeMillis() + 60_000);
 
         ToolApprovalRegistry.Resolution resolution = registry.await(record, new AtomicBoolean(true));
@@ -143,7 +160,7 @@ class ToolApprovalRegistryTest {
         ToolApprovalRegistry.Pending second = registry.create(1L, 10L, "edit_file", "{}", "WRITE");
 
         ToolApprovalRegistry.BatchResult result =
-                registry.resolveBatch(1L, 10L, java.util.List.of(first.approvalId(), second.approvalId()));
+                registry.resolveBatch(1L, 10L, java.util.List.of(first.approvalId(), second.approvalId()), null);
 
         assertTrue(result.accepted());
         assertEquals(2, result.resolvedIds().size());
@@ -161,20 +178,20 @@ class ToolApprovalRegistryTest {
         ToolApprovalRegistry.Pending high = registry.create(1L, 10L, "run_command", "{}", "EXECUTE");
 
         ToolApprovalRegistry.BatchResult result =
-                registry.resolveBatch(1L, 10L, java.util.List.of(low.approvalId(), high.approvalId()));
+                registry.resolveBatch(1L, 10L, java.util.List.of(low.approvalId(), high.approvalId()), null);
 
         assertFalse(result.accepted());
-        assertTrue(registry.resolve(low.approvalId(), 1L, "APPROVE", false), "低风险项应保持待审批");
-        assertTrue(registry.resolve(high.approvalId(), 1L, "REJECT", false), "高危项应保持待审批");
+        assertTrue(registry.resolve(low.approvalId(), 1L, "APPROVE", false, null), "低风险项应保持待审批");
+        assertTrue(registry.resolve(high.approvalId(), 1L, "REJECT", false, null), "高危项应保持待审批");
     }
 
     @Test
     void 跨用户或跨会话的批量请求被拒绝() {
         ToolApprovalRegistry.Pending record = registry.create(1L, 10L, "write_file", "{}", "WRITE");
 
-        assertFalse(registry.resolveBatch(2L, 10L, java.util.List.of(record.approvalId())).accepted());
-        assertFalse(registry.resolveBatch(1L, 11L, java.util.List.of(record.approvalId())).accepted());
-        assertTrue(registry.resolveBatch(1L, 10L, java.util.List.of(record.approvalId())).accepted());
+        assertFalse(registry.resolveBatch(2L, 10L, java.util.List.of(record.approvalId()), null).accepted());
+        assertFalse(registry.resolveBatch(1L, 11L, java.util.List.of(record.approvalId()), null).accepted());
+        assertTrue(registry.resolveBatch(1L, 10L, java.util.List.of(record.approvalId()), null).accepted());
     }
 
     @Test
@@ -182,10 +199,10 @@ class ToolApprovalRegistryTest {
         ToolApprovalRegistry.Pending first = registry.create(1L, 10L, "write_file", "{}", "WRITE");
         ToolApprovalRegistry.Pending second = registry.create(1L, 10L, "edit_file", "{}", "WRITE");
         // 预检前第二项已被单条操作抢先完成
-        assertTrue(registry.resolve(second.approvalId(), 1L, "APPROVE", false));
+        assertTrue(registry.resolve(second.approvalId(), 1L, "APPROVE", false, null));
 
         ToolApprovalRegistry.BatchResult result =
-                registry.resolveBatch(1L, 10L, java.util.List.of(first.approvalId(), second.approvalId()));
+                registry.resolveBatch(1L, 10L, java.util.List.of(first.approvalId(), second.approvalId()), null);
 
         assertTrue(result.accepted());
         assertEquals(java.util.List.of(first.approvalId()), result.resolvedIds());

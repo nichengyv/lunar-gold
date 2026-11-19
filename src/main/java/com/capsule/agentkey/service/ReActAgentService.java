@@ -50,6 +50,12 @@ public class ReActAgentService {
     private final com.capsule.agentkey.verify.VerifyService verifyService;
     /** P5-04 前置：工作区 repo map（目录 + 关键符号），替代原来的单层目录树 */
     private final RepoMapService repoMapService;
+    /** P7-06：执行中用户询问——ask_user_question 的挂起/恢复机制；测试手动 new 时为 null，走 null check */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.capsule.agentkey.tool.AskUserQuestionTool askUserQuestionTool;
+    /** P7-06：询问超时/中断后把 Run 从 WAITING_USER_INPUT 拉回 RUNNING；测试手动 new 时为 null，走 null check */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AgentRunService agentRunService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
@@ -305,6 +311,9 @@ public class ReActAgentService {
         default void onDiagnostics(com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics) {}
         /** P5-06：项目验证结果，供 SSE、Run Event 与任务验证摘要使用 */
         default void onVerify(com.capsule.agentkey.verify.VerifyResult verify) {}
+        /** P7-06：agent 暂停等用户回答决策询问，questionId 用于用户回答时关联 */
+        default void onUserQuestion(String questionId, String question, String header,
+                                    java.util.List<java.util.Map<String, Object>> options, boolean multiSelect) {}
         void onComplete();//整套智能体流程全部结束
         void onError(Throwable t);//发生异常，推送错误报告
     }
@@ -323,11 +332,21 @@ public class ReActAgentService {
                         String imageContext,//截图经视觉模型转写后的文字（无图时为空）
                         String contextSummary,//较早对话的滚动摘要（长会话压缩后注入，无摘要时为空）
                         String sessionReferenceContext,//用户用 @会话 点名的其他会话的最近问答（无点名时为空）
-                        AtomicBoolean cancelled,//B3：客户端断连标记，SSE 写出失败即置位
+                        AtomicBoolean cancelRequested,//P6-06：用户显式停止标记，断流不会置位
                         StreamCallback callback) {//流式回调，向前端推送每一步状态
+        execute(apiKey, policy, userPrompt, history, userId, projectId, null, sessionId, turnId, useRag,
+                fileContext, imageContext, contextSummary, sessionReferenceContext, cancelRequested, callback);
+    }
+
+    /** P7-06：带 runId 的重载——ask_user_question 挂起/恢复需要 runId 做 key */
+    public void execute(String apiKey, AgentPolicy policy, String userPrompt, List<ChatMessage> history,
+                        Long userId, Long projectId, Long runId, Long sessionId, String turnId,
+                        boolean useRag, String fileContext, String imageContext, String contextSummary,
+                        String sessionReferenceContext, AtomicBoolean cancelRequested, StreamCallback callback) {
         //工作区工具需要 userId/projectId 上下文，用 ThreadLocal 透传（dispatch 签名不变）；
-        //cancelled 让 run_command 这类长耗时工具能在用户停止生成时杀掉子进程
-        WorkspaceContext.set(userId, projectId, cancelled);
+        //cancelRequested 让 run_command 这类长耗时工具能在用户停止生成时杀掉子进程
+        WorkspaceContext.set(userId, projectId, cancelRequested);
+        if (runId != null) WorkspaceContext.get().setRunId(runId);
         WorkspaceContext.get().setSessionId(sessionId);
         WorkspaceContext.get().setTurnId(turnId);
         // 记录本轮起始权限；运行中用户在会话里改档位会覆盖这里，下一次工具调用即刻生效
@@ -433,11 +452,10 @@ public class ReActAgentService {
             int repeatedVerifyFailures = 0;
             boolean verifyUnavailableNotified = false;
             while (round < policy.reasoning().maxToolRounds()) {
-                //B3：客户端已断开（SSE 写出失败）→ 立即中止，不再发起下一次 LLM 调用，
-                //避免用户关掉页面后智能体继续空转消耗 token
-                if (cancelled != null && cancelled.get()) {
-                    log.info("客户端已断开，中止 ReAct 推理 [round={}]", round + 1);
-                    // 批次 B：客户端断开前也标记剩余步骤 aborted
+                //P6-06：只有用户显式停止才中止；客户端断流不会进入这里，Run 继续执行
+                if (cancelRequested != null && cancelRequested.get()) {
+                    log.info("用户已停止生成，中止 ReAct 推理 [round={}]", round + 1);
+                    // 批次 B：停止前也标记剩余步骤 aborted
                     finalizePlan(callback);
                     callback.onCompletion(new Completion(CompletionStatus.INCOMPLETE, "CANCELLED",
                             "本轮执行已取消，任务尚未完成。", workspaceChanged));
@@ -519,7 +537,7 @@ public class ReActAgentService {
                     //失败且仍有预算时把输出回灌，继续修复，而不是直接收尾。
                     if (workspaceChanged && verifiedEpoch < changeEpoch) {
                         com.capsule.agentkey.verify.VerifyResult verify =
-                                runVerification(workspacePath, cancelled, ++verifyAttempts, callback);
+                                runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
                         verifiedEpoch = changeEpoch;
                         if (verify.failed()) {
                             String fingerprint = verify.failureFingerprint();
@@ -580,7 +598,7 @@ public class ReActAgentService {
                     //P5-08：到达新的批首时，先把连续只读调用并发执行；结果仍按原下标顺序回放
                     if (!readOnlyBatch.containsKey(callIndex)) {
                         readOnlyBatch = executeReadOnlyBatch(streamedToolCalls, callIndex,
-                                sessionId, policy, projectId, cancelled);
+                                sessionId, policy, projectId, cancelRequested);
                     }
 
                     callback.onToolCall(toolName, arguments);
@@ -600,7 +618,17 @@ public class ReActAgentService {
                     }
 
                     ToolResult result;//根据工具名称找到对应实现类
-                    String risk = ToolApprovalRegistry.riskOf(toolName, arguments);
+                    String risk = null; // 初始化为 null——ask_user_question 不走审批，risk 保持 null
+
+                    // P7-06：ask_user_question 拦截——绕开 ToolRegistry.dispatch()，走挂起/恢复链路
+                    // 原因：ask_user_question 需要挂起 ReAct 线程等用户回答，BaseTool.execute() 是同步返回的
+                    if ("ask_user_question".equals(toolName)
+                            && askUserQuestionTool != null
+                            && WorkspaceContext.get() != null
+                            && WorkspaceContext.get().runId() != null) {
+                        result = executeAskUserQuestion(arguments, callback, cancelRequested);
+                    } else {
+                        risk = ToolApprovalRegistry.riskOf(toolName, arguments);
                     if (readOnlyBatch.containsKey(callIndex)) {
                         //P5-08：连续只读批已并发执行完毕，按原顺序取结果；不进入审批与串行分发
                         result = readOnlyBatch.get(callIndex);
@@ -620,7 +648,7 @@ public class ReActAgentService {
                                     toolApprovalRegistry.create(userId, sessionId, toolName, arguments, risk);
                             var preview = buildApprovalPreview(toolName, arguments, userId, projectId);
                             callback.onApprovalRequired(approval.approvalId(), toolName, preview, risk, approval.expiresAt());
-                            ToolApprovalRegistry.Resolution decision = toolApprovalRegistry.await(approval, cancelled);
+                            ToolApprovalRegistry.Resolution decision = toolApprovalRegistry.await(approval, cancelRequested);
                             // 批次 B：无论结果如何，通知前端把卡片切到"已处理"态
                             callback.onApprovalResolved(approval.approvalId(), decision.decision().name(),
                                     decision.source().name(), decision.batchId());
@@ -638,8 +666,29 @@ public class ReActAgentService {
                             result = dispatchWithScopeCheck(toolName, arguments, effectivePermission, projectId);
                         }
                     }
+                    } // end else（非 ask_user_question 的常规审批 + dispatch 路径）
                     callback.onToolResult(toolName, result);
                     log.info("工具结果: success={}, cost={}ms", result.isSuccess(), result.getCostMs());
+
+                    //协议要求：assistant(tool_calls) 之后必须紧跟每个 id 的 tool 响应。
+                    //诊断/验证等 user 消息只能排在 tool 响应之后，否则模型侧会以 400 拒绝整段历史。
+                    ObjectNode toolMsg = mapper.createObjectNode();//新建一个空白的json对象
+                    //role标签规定该json对象的数据类型，方便大模型处理
+                    //user：人类输入
+                    //assistant：大模型自己说的
+                    //tool：外部程序返回
+                    toolMsg.put("role", "tool");
+
+                    toolMsg.put("tool_call_id", toolCallId);
+                    //工具执行成功：content填入返回数据
+                    //执行失败：填入错误提示文本
+                    //B2：无论成败都过一遍截断，防止超长内容进入上下文
+                    String toolContent = result.isSuccess() ? result.getContent() : "错误: " + result.getError();
+                    toolMsg.put("content", truncateForContext(toolContent));
+
+                    messages.add(toolMsg);//把组装完毕的tool消息存入全局消息数组
+
+
                     if (newToolSignature && result.isSuccess()) roundProgress = true;
                     if (result.isSuccess() && risk != null) {
                         unresolvedWriteFailure = false;
@@ -714,22 +763,6 @@ public class ReActAgentService {
                         callback.onPlan(ctx.plan());
                     }
 
-                    ObjectNode toolMsg = mapper.createObjectNode();//新建一个空白的json对象
-                    //role标签规定该json对象的数据类型，方便大模型处理
-                    //user：人类输入
-                    //assistant：大模型自己说的
-                    //tool：外部程序返回
-                    toolMsg.put("role", "tool");
-
-                    toolMsg.put("tool_call_id", toolCallId);
-                    //工具执行成功：content填入返回数据
-                    //执行失败：填入错误提示文本
-                    //B2：无论成败都过一遍截断，防止超长内容进入上下文
-                    String toolContent = result.isSuccess() ? result.getContent() : "错误: " + result.getError();
-                    toolMsg.put("content", truncateForContext(toolContent));
-
-                    messages.add(toolMsg);//把组装完毕的tool消息存入全局消息数组
-
                     if (!result.isSuccess()) {
                         String failureFingerprint = normalizeFailure(toolName, result);
                         repeatedFailures = failureFingerprint.equals(lastFailureFingerprint) ? repeatedFailures + 1 : 1;
@@ -748,7 +781,7 @@ public class ReActAgentService {
 
                     //P5-08：停止生成后不再执行本轮剩余调用（含已入池但未开始的只读任务），
                     //按取消语义立即收尾，而不是等下一轮开头才发现。
-                    if (cancelled != null && cancelled.get()) {
+                    if (cancelRequested != null && cancelRequested.get()) {
                         log.info("用户已停止生成，取消本轮剩余工具调用");
                         finalizePlan(callback);
                         callback.onCompletion(new Completion(CompletionStatus.INCOMPLETE, "CANCELLED",
@@ -763,7 +796,7 @@ public class ReActAgentService {
                 if (roundFileChanged) {
                     changeEpoch++;
                     com.capsule.agentkey.verify.VerifyResult verify =
-                            runVerification(workspacePath, cancelled, ++verifyAttempts, callback);
+                            runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
                     verifiedEpoch = changeEpoch;
                     if (verify.failed()) {
                         String fingerprint = verify.failureFingerprint();
@@ -809,9 +842,9 @@ public class ReActAgentService {
                 round++;
             }
 
-            //B3：断连后不再做收尾生成，但计划仍然要标记 aborted
-            if (cancelled != null && cancelled.get()) {
-                log.info("客户端已断开，跳过收尾生成");
+            //P6-06：停止后不再做收尾生成，但计划仍然要标记 aborted
+            if (cancelRequested != null && cancelRequested.get()) {
+                log.info("用户已停止生成，跳过收尾生成");
                 finalizePlan(callback);
                 callback.onCompletion(new Completion(CompletionStatus.INCOMPLETE, "CANCELLED",
                         "本轮执行已取消，任务尚未完成。", workspaceChanged));
@@ -880,6 +913,12 @@ public class ReActAgentService {
             finalizePlan(callback);
             callback.onError(e);
         } finally {
+            // P7-06：无论正常结束、异常还是取消，都清掉本 Run 可能残留的 pending question，
+            // 避免 AskUserQuestionTool 内部 map 泄漏；ask() 正常返回时已自行移除，这里是兜底
+            if (askUserQuestionTool != null && WorkspaceContext.get() != null) {
+                Long pendingRunId = WorkspaceContext.get().runId();
+                if (pendingRunId != null) askUserQuestionTool.cleanup(pendingRunId);
+            }
             WorkspaceContext.clear();
         }
     }
@@ -975,12 +1014,12 @@ public class ReActAgentService {
 
     /** P5-06：执行一次项目验证；任何异常都降级为 UNAVAILABLE，并始终推送 onVerify */
     private com.capsule.agentkey.verify.VerifyResult runVerification(
-            String workspacePath, AtomicBoolean cancelled, int attempt, StreamCallback callback) {
+            String workspacePath, AtomicBoolean cancelRequested, int attempt, StreamCallback callback) {
         com.capsule.agentkey.verify.VerifyResult result;
         try {
             java.nio.file.Path root = workspacePath == null || workspacePath.isBlank()
                     ? null : java.nio.file.Paths.get(workspacePath);
-            result = verifyService.verify(root, attempt, cancelled);
+            result = verifyService.verify(root, attempt, cancelRequested);
         } catch (Exception e) {
             log.warn("验证执行异常，降级为不可用: {}", e.getMessage(), e);
             result = new com.capsule.agentkey.verify.VerifyResult(
@@ -1010,6 +1049,98 @@ public class ReActAgentService {
     /** P5-10-3：时间预算是否已耗尽；maxSeconds <= 0 表示不限制。 */
     static boolean isTimeBudgetExceeded(long elapsedMs, long maxSeconds) {
         return maxSeconds > 0 && elapsedMs >= maxSeconds * 1000L;
+    }
+
+    // -----------------------------------------------------------------
+    // P7-06：ask_user_question 执行（从工具循环拦截点调用）
+    // -----------------------------------------------------------------
+
+    /**
+     * 解析 ask_user_question 的 arguments JSON，挂起 ReAct 线程等用户回答，返回 ToolResult。
+     * 绕开 ToolRegistry.dispatch()——因为 ask_user_question 需要挂起等待，
+     * 而 BaseTool.execute() 是同步返回的。
+     *
+     * <p>流程：</p>
+     * <ol>
+     *   <li>解析 arguments → questionId / question / header / options / multi_select</li>
+     *   <li>调 AskUserQuestionTool.ask() 挂起当前线程，推 SSE event:user_question</li>
+     *   <li>等待用户通过 {@code POST /api/agent/runs/{runId}/answer} 回答</li>
+     *   <li>返回 DHS 格式答案 JSON 包装的 ToolResult.success()</li>
+     * </ol>
+     */
+    private ToolResult executeAskUserQuestion(String arguments, StreamCallback callback,
+                                               AtomicBoolean cancelRequested) {
+        Long runId = WorkspaceContext.get().runId();
+        if (runId == null || askUserQuestionTool == null) {
+            return ToolResult.fail("ask_user_question 需要有效的 runId 和 AskUserQuestionTool bean");
+        }
+
+        // 1. 解析 arguments——schema 规定 questions 数组长度为 1
+        String questionId, question, header = null;
+        List<Map<String, Object>> options = null;
+        boolean multiSelect = false;
+        try {
+            var root = mapper.readTree(arguments);
+            var questions = root.path("questions");
+            if (!questions.isArray() || questions.size() < 1) {
+                return ToolResult.fail("ask_user_question 需要 questions 数组（长度 1）");
+            }
+            var q = questions.get(0);
+            questionId = q.path("id").asText(null);
+            question = q.path("question").asText(null);
+            if (questionId == null || questionId.isBlank()) {
+                return ToolResult.fail("ask_user_question 缺少 id");
+            }
+            if (question == null || question.isBlank()) {
+                return ToolResult.fail("ask_user_question 缺少 question");
+            }
+            if (q.hasNonNull("header")) header = q.path("header").asText();
+            if (q.hasNonNull("options") && q.path("options").isArray()) {
+                options = new java.util.ArrayList<>();
+                for (var opt : q.path("options")) {
+                    Map<String, Object> map = new java.util.LinkedHashMap<>();
+                    if (opt.has("label")) map.put("label", opt.path("label").asText());
+                    if (opt.has("description")) map.put("description", opt.path("description").asText());
+                    options.add(map);
+                }
+            }
+            multiSelect = q.path("multi_select").asBoolean(false);
+        } catch (Exception e) {
+            log.warn("解析 ask_user_question 参数失败: {}", e.getMessage());
+            return ToolResult.fail("ask_user_question 参数解析失败: " + e.getMessage());
+        }
+
+        // 2. 挂起等待 + 返回
+        String answerJson = askUserQuestionTool.ask(
+                runId, questionId, question, header, options, multiSelect,
+                callback, cancelRequested::get);
+
+        // 3. 包装成 ToolResult——DHS 格式：{ "answers": [{ "id": "...", "selected": [...], "custom": "..." }] }
+        try {
+            var parsed = mapper.readTree(answerJson);
+            if (parsed.has("error")) {
+                // 超时/中断/取消时 Run 还停在 WAITING_USER_INPUT，拉回 RUNNING 与实际执行保持一致；
+                // 用户已作答或 Run 已取消时该方法不改状态（内部按当前状态判断）
+                abandonQuestion(runId, questionId, parsed.path("error").asText("UNKNOWN"));
+                return ToolResult.fail("ask_user_question 失败: " + parsed.path("message").asText(answerJson));
+            }
+            return ToolResult.ok(answerJson);
+        } catch (Exception e) {
+            // answerJson 本身就是合法 JSON（AskUserQuestionTool 保证），解析失败说明格式有 bug
+            log.error("ask_user_question 返回值解析失败: {}", e.getMessage());
+            return ToolResult.ok(answerJson); // 降级——原样返回让模型自己理解
+        }
+    }
+
+    /** 询问没有被回答（超时/中断/取消）：把 Run 从 WAITING_USER_INPUT 拉回 RUNNING，失败不影响主循环 */
+    private void abandonQuestion(Long runId, String questionId, String reason) {
+        if (agentRunService == null) return;
+        try {
+            agentRunService.abandonUserQuestion(runId, questionId, reason);
+        } catch (Exception e) {
+            log.warn("恢复等待用户输入的 Run 状态失败: runId={}, reason={}, error={}",
+                    runId, reason, e.getMessage());
+        }
     }
 
     /** P5-06：预算耗尽时保留计划实况并如实给出 INCOMPLETE */
@@ -1129,11 +1260,12 @@ public class ReActAgentService {
                     .append("以下是当前工作区的目录与关键符号摘要（超出预算会截断），")
                     .append("可用 list_dir 查看子目录、read_file 读取文件内容：\n")
                     .append(repoMap);
-            //没有执行权限时整段终端说明都不注入，避免模型误以为可以跑命令
-            if (policy.permission().canExecute()) {
-                // P5-01：终端规则外置到 tool-notes/terminal-v1.md
-                systemContent.append("\n\n").append(promptCatalog.text("tool-terminal"));
-            }
+        }
+        //没有执行权限时整段终端说明都不注入，避免模型误以为可以跑命令。
+        //P5-04：终端规则与 repo map 解耦——工作区为空、repo map 关闭或不可读时仍应注入。
+        if (policy.permission().canExecute()) {
+            // P5-01：终端规则外置到 tool-notes/terminal-v1.md
+            systemContent.append("\n\n").append(promptCatalog.text("tool-terminal"));
         }
 
         //用户点名的其他会话：作为背景参考，不与本轮知识库/文件内容抢优先级
@@ -1234,6 +1366,9 @@ public class ReActAgentService {
      */
     private boolean isParallelReadOnlyCall(ObjectNode toolCall) {
         String toolName = toolCall.path("function").path("name").asText();
+        // P7-06：ask_user_question 虽然 readOnly，但必须串行走挂起/恢复拦截点；
+        // 若混入只读并行批，同轮后续工具会在用户回答之前被预执行，破坏"先问再做"的语义
+        if ("ask_user_question".equals(toolName)) return false;
         if (toolName.isBlank() || !toolRegistry.isReadOnly(toolName)) return false;
         if (toolRegistry.hasFallback(toolName)) return false;
         String arguments = toolCall.path("function").path("arguments").asText();
@@ -1247,7 +1382,7 @@ public class ReActAgentService {
      */
     private Map<Integer, ToolResult> executeReadOnlyBatch(List<ObjectNode> toolCalls, int start,
                                                           Long sessionId, AgentPolicy policy,
-                                                          Long projectId, AtomicBoolean cancelled) {
+                                                          Long projectId, AtomicBoolean cancelRequested) {
         int end = start;
         while (end < toolCalls.size() && isParallelReadOnlyCall(toolCalls.get(end))) {
             end++;
@@ -1265,7 +1400,7 @@ public class ReActAgentService {
             String toolName = call.path("function").path("name").asText();
             String arguments = call.path("function").path("arguments").asText();
             futures.add(readOnlyToolPool().submit(() -> {
-                if (cancelled != null && cancelled.get()) {
+                if (cancelRequested != null && cancelRequested.get()) {
                     return ToolResult.fail("本轮执行已取消，未执行只读工具 " + toolName);
                 }
                 if (parent == null) {
@@ -1280,7 +1415,7 @@ public class ReActAgentService {
 
         Map<Integer, ToolResult> results = new HashMap<>();
         for (int i = 0; i < size; i++) {
-            if (cancelled != null && cancelled.get()) {
+            if (cancelRequested != null && cancelRequested.get()) {
                 // 停止生成：取消尚未完成的任务，剩余调用标记为未执行
                 for (int j = i; j < size; j++) {
                     futures.get(j).cancel(true);

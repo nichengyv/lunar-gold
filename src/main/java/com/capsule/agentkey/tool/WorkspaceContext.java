@@ -19,11 +19,13 @@ public class WorkspaceContext {
 
     private final Long userId;
     private final Long projectId;
+    /** P7-06：当前 run id——ask_user_question 挂起/恢复的 key */
+    private Long runId;
     /** 当前会话 id（可为空，MCP 工具或后台任务无会话时） */
     private Long sessionId;
     /** 本轮执行 id：同一次 assistant 的多次文件改动共享，用于「撤回本轮」 */
     private String turnId;
-    /** 客户端停止/断连标记：长耗时工具（如终端命令）运行中轮询它，置位即中止 */
+    /** 用户显式停止标记：长耗时工具（如终端命令）运行中轮询它，置位即中止；断流不会置位 */
     private final AtomicBoolean cancelled;
     /** 本次生成中工具对工作区文件产生的变更，供上层逐个推送给前端 */
     private final List<FileChange> fileChanges = new ArrayList<>();
@@ -59,6 +61,7 @@ public class WorkspaceContext {
         this.userId = parent.userId;
         this.projectId = parent.projectId;
         this.cancelled = parent.cancelled;
+        this.runId = parent.runId;
         this.sessionId = parent.sessionId;
         this.turnId = parent.turnId;
         this.scope = parent.scope;
@@ -92,6 +95,8 @@ public class WorkspaceContext {
 
     public Long userId() { return userId; }
     public Long projectId() { return projectId; }
+    public Long runId() { return runId; }
+    public void setRunId(Long runId) { this.runId = runId; }
     public Long sessionId() { return sessionId; }
     public void setSessionId(Long sessionId) { this.sessionId = sessionId; }
     public String turnId() { return turnId; }

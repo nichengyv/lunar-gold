@@ -53,6 +53,7 @@ public class AgentRunService {
                 RunState.FAILED));           // 启动前异常（例如幂等冲突后拒绝调度）
         m.put(RunState.RUNNING, Set.of(
                 RunState.WAITING_APPROVAL,   // 工具调用需要审批
+                RunState.WAITING_USER_INPUT, // P7-06：agent 暂停等用户回答决策询问
                 RunState.SUCCEEDED,          // 正常完成
                 RunState.FAILED,             // 异常终止
                 RunState.CANCELLED));        // 用户停止
@@ -60,6 +61,10 @@ public class AgentRunService {
                 RunState.RUNNING,           // 批准
                 RunState.CANCELLED,          // 拒绝 / 超时
                 RunState.FAILED));           // 审批等待期间外层异常
+        m.put(RunState.WAITING_USER_INPUT, Set.of(
+                RunState.RUNNING,           // 用户回答，继续执行
+                RunState.CANCELLED,          // 用户停止
+                RunState.FAILED));           // 等待期间外层异常
         // 终态不再迁移
         m.put(RunState.SUCCEEDED, Set.of());
         m.put(RunState.FAILED, Set.of());
@@ -74,11 +79,16 @@ public class AgentRunService {
         return allowed != null && allowed.contains(target);
     }
 
-    /** 旧进程中的执行线程已消失，QUEUED/RUNNING 不能伪装成仍可恢复；审批记录单独持久化并保留。 */
+    /**
+     * 旧进程中的执行线程已消失，QUEUED / RUNNING / WAITING_APPROVAL / WAITING_USER_INPUT 都不能伪装成仍可恢复。
+     * 等待审批或等待用户输入的 Run 同样依赖进程内的 ReAct 线程，重启后恢复也无法继续执行，故一并终止；
+     * 残留 PENDING 审批由 {@link ToolApprovalRegistry#restorePersistedApprovals()} 落终态。
+     */
     @PostConstruct
     @Transactional
     public void recoverAfterRestart() {
-        List<AgentRun> stale = runRepo.findByStateIn(List.of(RunState.QUEUED, RunState.RUNNING));
+        List<AgentRun> stale = runRepo.findByStateIn(List.of(
+                RunState.QUEUED, RunState.RUNNING, RunState.WAITING_APPROVAL, RunState.WAITING_USER_INPUT));
         for (AgentRun run : stale) {
             run.setState(RunState.FAILED);
             run.setErrorCode("PROCESS_RESTARTED");
@@ -114,7 +124,7 @@ public class AgentRunService {
     @Transactional(readOnly = true)
     public List<AgentRun> findRunningByUser(Long userId) {
         return runRepo.findByUserIdAndStateIn(userId,
-                List.of(RunState.RUNNING, RunState.WAITING_APPROVAL));
+                List.of(RunState.RUNNING, RunState.WAITING_APPROVAL, RunState.WAITING_USER_INPUT));
     }
 
     /** P5-12-2：会话列表状态点——批量取每个会话最近一条 run 的状态 */
@@ -205,8 +215,76 @@ public class AgentRunService {
         payload.put("decision", decision);
         if (source != null) payload.put("source", source);
         if (batchId != null) payload.put("batchId", batchId);
+        // P6-01：客户端令牌发起的运行补审计字段；Web / 云端发起时保持原样，不带该字段
+        String clientId = clientIdOf(runId);
+        if (clientId != null) payload.put("clientId", clientId);
         appendInternal(runId, EventType.APPROVAL_RESOLVED, payload);
         return transition(runId, RunState.RUNNING, null, null);
+    }
+
+    // -----------------------------------------------------------------
+    // P7-06：ask_user_question（执行中决策询问）
+    // -----------------------------------------------------------------
+
+    /** RUNNING → WAITING_USER_INPUT；agent 暂停等用户回答决策询问 */
+    @Transactional
+    public AgentRun pauseForUserInput(Long runId, String questionId, String question,
+                                       String header, List<Map<String, Object>> options, boolean multiSelect) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("questionId", questionId);
+        payload.put("question", question);
+        if (header != null) payload.put("header", header);
+        if (options != null && !options.isEmpty()) payload.put("options", options);
+        payload.put("multiSelect", multiSelect);
+        appendInternal(runId, EventType.USER_QUESTION, payload);
+        return transition(runId, RunState.WAITING_USER_INPUT, null, null);
+    }
+
+    /** WAITING_USER_INPUT → RUNNING；payload 带用户回答（selected + 可选 custom） */
+    @Transactional
+    public AgentRun resumeAfterUserInput(Long runId, String questionId,
+                                          List<String> selected, String custom) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("questionId", questionId);
+        payload.put("selected", selected != null ? selected : List.of());
+        if (custom != null && !custom.isBlank()) payload.put("custom", custom);
+        appendInternal(runId, EventType.USER_ANSWERED, payload);
+        return transition(runId, RunState.RUNNING, null, null);
+    }
+
+    /**
+     * P7-06：等待超时 / 线程中断时把运行拉回 RUNNING，避免 Run 永久停在 WAITING_USER_INPUT。
+     *
+     * <p>只有当前仍是 WAITING_USER_INPUT 才迁移：用户已作答、Run 已取消或已终结时保持原状态，
+     * 不能覆盖并发路径写入的最终结果。事件记录 {@code USER_ANSWERED + abandoned=true}，
+     * 前端重放事件流时据此收起询问卡片。</p>
+     */
+    @Transactional
+    public void abandonUserQuestion(Long runId, String questionId, String reason) {
+        AgentRun run = runRepo.findById(runId).orElse(null);
+        if (run == null || run.getState() != RunState.WAITING_USER_INPUT) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("questionId", questionId);
+        payload.put("abandoned", true);
+        payload.put("reason", reason == null ? "UNKNOWN" : reason);
+        appendInternal(runId, EventType.USER_ANSWERED, payload);
+        transition(runId, RunState.RUNNING, null, null);
+    }
+
+    /** 从运行请求快照里读 clientId；解析失败按「非客户端发起」处理，不影响审批主流程 */
+    private String clientIdOf(Long runId) {
+        String requestJson = runRepo.findById(runId).map(AgentRun::getRequestJson).orElse(null);
+        if (requestJson == null || requestJson.isBlank()) {
+            return null;
+        }
+        try {
+            var clientId = objectMapper.readTree(requestJson).get("clientId");
+            return clientId == null || clientId.isNull() ? null : clientId.asText();
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /** RUNNING → SUCCEEDED；可带 resultJson */
@@ -235,6 +313,34 @@ public class AgentRunService {
         appendInternal(runId, EventType.CANCELED,
                 reason == null ? Map.of() : Map.of("reason", reason));
         return transition(runId, RunState.CANCELLED, null, null);
+    }
+
+    // ---------------------------------------------------------------------
+    // 聊天流收尾：已是终态则跳过，避免重复迁移
+    // ---------------------------------------------------------------------
+
+    /** RUNNING / WAITING_APPROVAL → SUCCEEDED；已终态直接跳过。异常由调用方兜底。 */
+    @Transactional
+    public void succeedIfActive(Long runId, String resultJson) {
+        runRepo.findById(runId)
+                .filter(run -> !AgentRun.isTerminal(run.getState()))
+                .ifPresent(run -> succeed(runId, resultJson));
+    }
+
+    /** 非终态 → FAILED；已终态直接跳过。异常由调用方兜底。 */
+    @Transactional
+    public void failIfActive(Long runId, String errorCode, String errorMessage) {
+        runRepo.findById(runId)
+                .filter(run -> !AgentRun.isTerminal(run.getState()))
+                .ifPresent(run -> fail(runId, errorCode, errorMessage));
+    }
+
+    /** 非终态 → CANCELLED；已终态直接跳过。异常由调用方兜底。 */
+    @Transactional
+    public void cancelIfActive(Long runId, String reason) {
+        runRepo.findById(runId)
+                .filter(run -> !AgentRun.isTerminal(run.getState()))
+                .ifPresent(run -> cancel(runId, reason));
     }
 
     // ---------------------------------------------------------------------

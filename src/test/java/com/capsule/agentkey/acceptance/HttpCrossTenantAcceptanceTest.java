@@ -5,10 +5,13 @@ import com.capsule.agentkey.entity.AgentRun;
 import com.capsule.agentkey.entity.AgentRun.RunState;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.GlobalExceptionHandler;
+import com.capsule.agentkey.filter.ClientTokenFilter;
 import com.capsule.agentkey.filter.JwtAuthenticationFilter;
 import com.capsule.agentkey.repository.AgentRunEventRepository;
 import com.capsule.agentkey.repository.AgentRunRepository;
+import com.capsule.agentkey.security.ClientPrincipal;
 import com.capsule.agentkey.service.AgentPolicyResolver;
+import com.capsule.agentkey.service.ApiClientService;
 import com.capsule.agentkey.service.AgentRunService;
 import com.capsule.agentkey.service.ApiKeyService;
 import com.capsule.agentkey.service.ChatAttachmentService;
@@ -40,7 +43,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -94,6 +99,7 @@ class HttpCrossTenantAcceptanceTest {
     private MeterRegistry meterRegistry;
 
     private ToolApprovalRegistry registry;
+    private AgentChatController controller;
     private MockMvc mvc;
     private String tokenUser1;
     private String tokenUser2;
@@ -104,10 +110,12 @@ class HttpCrossTenantAcceptanceTest {
         AgentRunService runService = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
         com.capsule.agentkey.service.PromptCatalog promptCatalog =
                 new com.capsule.agentkey.service.PromptCatalog(new org.springframework.mock.env.MockEnvironment());
-        AgentChatController controller = new AgentChatController(
+        controller = new AgentChatController(
                 apiKeyService, agentService, chatService, chatAttachmentService, projectService,
                 generationRegistry, visionService, contextSummaryService, policyResolver,
-                registry, memoryService, runService, promptCatalog, Runnable::run, meterRegistry);
+                registry, memoryService, runService,
+                new com.capsule.agentkey.tool.AskUserQuestionTool(),
+                promptCatalog, Runnable::run);
 
         JwtUtil jwtUtil = new JwtUtil();
         setField(jwtUtil, "secret", "acceptance-secret-key-must-be-at-least-32-bytes-long!!");
@@ -170,6 +178,42 @@ class HttpCrossTenantAcceptanceTest {
                         .content(body))
                 .andExpect(status().isOk());
         assertTrue(pending.future().isDone(), "本人决策应唤醒审批等待");
+    }
+
+    @Test
+    void 审批来源按入口记录为USER或CLIENT() throws Exception {
+        String body = "{\"decision\":\"APPROVE\",\"remember\":\"NONE\"}";
+
+        ToolApprovalRegistry.Pending web = registry.create(1L, 10L, "write_file", "{}", "WRITE");
+        mvc.perform(post("/api/agent/approvals/" + web.approvalId())
+                        .header("Authorization", "Bearer " + tokenUser1)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+        assertTrue(web.future().isDone());
+        assertEquals(ToolApprovalRegistry.DecisionSource.USER, web.future().getNow(null).source(),
+                "Web 本地令牌审批记 USER");
+
+        ApiClientService clientService = mock(ApiClientService.class);
+        ClientPrincipal principal =
+                new ClientPrincipal(1L, "abcdefghijkl", "cli", Set.of("approval:write"), "127.0.0.1");
+        when(clientService.authenticate("lgc_abcdefghijkl_secret")).thenReturn(Optional.of(principal));
+        MockMvc clientMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .addFilters(new ClientTokenFilter(clientService))
+                .build();
+
+        ToolApprovalRegistry.Pending client = registry.create(1L, 10L, "write_file", "{}", "WRITE");
+        // 上一个 MockMvc 请求把认证留在了线程上下文，先清空才能让 ClientTokenFilter 真正生效
+        SecurityContextHolder.clearContext();
+        clientMvc.perform(post("/api/agent/approvals/" + client.approvalId())
+                        .header("Authorization", "Bearer lgc_abcdefghijkl_secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+        assertTrue(client.future().isDone());
+        assertEquals(ToolApprovalRegistry.DecisionSource.CLIENT, client.future().getNow(null).source(),
+                "客户端令牌审批记 CLIENT");
     }
 
     @Test

@@ -117,6 +117,21 @@ export function respondApproval(
     .then(unwrap);
 }
 
+/** P7-06：回答 agent 执行中提出的决策询问（ask_user_question） */
+export function answerUserQuestion(
+  runId: number,
+  questionId: string,
+  selected: string[] = [],
+  custom?: string
+): Promise<{ runId: number; questionId: string; state: string }> {
+  return http
+    .post<never, ApiResponse<{ runId: number; questionId: string; state: string }>>(
+      `/api/agent/runs/${runId}/answer`,
+      { questionId, selected, custom }
+    )
+    .then(unwrap);
+}
+
 /** P5-10-2：批量允许当前会话的低风险写入审批，只返回实际完成的审批 */
 export function approveBatch(sessionId: number, approvalIds: string[]): Promise<ApprovalBatchResult> {
   return http

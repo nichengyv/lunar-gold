@@ -106,8 +106,35 @@ export interface ApprovalRequest {
   expiresAt: number;
 }
 
-/** P5-10-2：审批决策来源；旧记录为 null，展示为来源未知 */
-export type ApprovalDecisionSource = 'USER' | 'BATCH' | 'TIMEOUT' | 'SESSION_STOP' | 'SYSTEM';
+/** P7-06：agent 执行中提出的决策询问（SSE user_question 事件） */
+export interface UserQuestionOption {
+  label: string;
+  description?: string;
+}
+export interface UserQuestion {
+  /** 稳定 id，用户回答时回传用于关联 */
+  questionId: string;
+  /** 要问用户的问题文本 */
+  question: string;
+  /** 可选小标题 */
+  header?: string;
+  /** 可选选项列表；不提供时用户自由输入 */
+  options?: UserQuestionOption[];
+  /** 是否允许多选 */
+  multiSelect: boolean;
+  /** 后端 runId（前端据此调 /answer 端点） */
+  runId?: number;
+}
+
+/** P7-06：用户回答 ask_user_question 的请求体 */
+export interface UserQuestionAnswer {
+  questionId: string;
+  selected?: string[];
+  custom?: string;
+}
+
+/** P5-10-2：审批决策来源；旧记录为 null，展示为来源未知。P6-05：CLIENT 表示 CLI / 扩展入口 */
+export type ApprovalDecisionSource = 'USER' | 'BATCH' | 'CLIENT' | 'TIMEOUT' | 'SESSION_STOP' | 'SYSTEM';
 
 /** P5-10-2：会话内已处理审批历史项（不包含原始参数） */
 export interface ApprovalHistoryItem {
@@ -116,6 +143,8 @@ export interface ApprovalHistoryItem {
   risk: 'WRITE' | 'EXECUTE' | 'DESTRUCTIVE';
   state: 'APPROVED' | 'REJECTED';
   decisionSource?: ApprovalDecisionSource | null;
+  /** P6-05：审批入口的客户端 id；Web 审批与旧记录为空 */
+  clientId?: string | null;
   decisionTime?: string | null;
   createTime?: string | null;
   rememberSession: boolean;

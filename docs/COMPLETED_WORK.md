@@ -268,23 +268,27 @@
 - **基线说明**：Runtime 用例 reason 按新语义更新为 `VERIFY_NOT_CONFIGURED`；Runtime 基线 p95 因首例冷启动与 200ms 以下分类的计时噪声增加了保守余量，质量、轮次、token、任务成功率与验证覆盖率未放宽。
 - **边界**：验证命令由项目配置维护者提供；不自动安装工具链、不提供配置编辑器；人工接受未验证变更以提示和用户审查为准，不新增后端状态机。
 
-### 8.7 P5-04 代码索引（repo map + 符号索引/增量缓存，2026-11-14）
+### 8.7 P5-04 代码索引（repo map + 符号索引/增量缓存，2026-11-14；2026-11-16 补 A/B 量化）
 
 - 新增 `RepoMapService` 与 `AgentRepoMapProperties`（`agent.repo-map.*`）：递归扫描工作区，跳过依赖/构建/发布目录与隐藏文件，输出目录树并附加源码关键符号；Java 提取包/类型/方法，TS/Vue/Python/Go/Rust 使用轻量正则，Vue 无 export 时回退组件名。
 - 新增可插拔 `CodeIndexer` 抽象与 `LightweightCodeIndexer` 正则实现；`CodeIndexService` 提供工作区符号索引、`findSymbols` 查询与按工作区内存增量缓存：以文件大小 + 修改时间判断复用，只重扫新增/变更文件并清理已删除文件，同一工作区扫描串行化保证线程安全，并输出扫描/复用/移除文件数与符号数统计。
 - `RepoMapService` 改为委托 `CodeIndexService` 渲染，输出格式与预算行为保持不变；`max-chars`（默认 6000）超限时截断并提示改用 `list_dir` / `search_files`；`max-depth`、`max-files`、`max-symbols-per-file` 与总开关均可配置，扫描或读取失败时降级为空串，不影响对话。
 - `ReActAgentService` 已用 repo map 替换原单层目录树注入 system prompt（`【仓库结构（repo map）】`），删除 `buildWorkspaceTree`；`RepoMapServiceTest` 覆盖符号、忽略目录、深度、预算、符号上限、关闭与空工作区、确定性，`CodeIndexServiceTest` 覆盖符号索引与查询、增量只重扫变更文件、缓存清理、忽略目录、超大文件降级与空查询。
-- 验收：后端 `mvn -o -q compile`、`mvn -o -q test` 全量通过，`EvalGate,RuntimeEvalGate` 通过（组件 27/27、Runtime 15/15）。
-- **边界**：JavaParser/tree-sitter 精确符号、可选 `code_index` 持久表（V19）与命中符号对轮次/token 的量化报告仍为后续增强，不阻塞 P5-07 与 P5-14。
+- **前置解耦（P5-04 实施必须）**：repo map 关闭时终端工具说明仍要注入（只看执行权限），改动在 `ReActAgentService`，用 `ReActRepoMapInjectionTest` 3 用例回归。
+- **阶段 A（无模型）**：800 文件合成工作区，cold p95 271ms、warm 65ms、incremental 73ms、符号 recall 90.3%、repo map 5977/6000 字符截断。
+- **阶段 B（deepseek-chat × 96 run）**：ON（repo map 开）成功率 100% / locate 准确率 100% / edit 成功率 100% / prompt tokens 中位数 4,126 / 耗时 1.76s / 定位工具调用中位数 0；OFF 62.5% / 72.2% / 33.3% / 25,072 / 10.17s / 14。B1～B5 全部通过，结论：**保持默认开启**。
+- **持久缓存**：cold 271ms 属 C2 区间（200–500ms），判定不建 `code_index` 持久表；原候选版本 V19 已被 `tool_approval.decision_source` 占用，且无排队需求。
+- **已知短板**（升级候选见 UPDATE_PLAN.md §5.2）：`supports()` 声明了 kotlin/scala/groovy/c/cpp/cs/php/rb/swift，但 `index()` 没有对应分支，这些文件抽不到任何符号（C# 因此在 12 文件标注集里 recall 为 0）；Java 接口中无修饰符的方法、Java 静态导入等仍会漏；repo map 用 TreeMap 字母序遍历撞上字符预算即停，大仓库靠后目录永远进不了 map；maxChars 默认 6000 对 464 文件已打满。三项都不改“内存索引 + 会话内重建”架构。
+- 验收：后端 `mvn -o -q compile`、`mvn -o -q test` 全量通过，`EvalGate,RuntimeEvalGate` 通过（组件 27/27、Runtime 15/15）；`IndexBenefitEvalTest`、`IndexAbEvalTest` 门禁通过。
 
 ### 8.8 P5-07 RAG 混合检索与引用（2026-11-14）
 
 - `VectorStoreService.searchLexicalForProject`：基于 V9 已创建的 pg_trgm 扩展，用 `word_similarity(query, content)` 做词法召回，支持项目与点名资料过滤；pg_trgm/SQL 失败时降级为纯向量检索，不影响对话。
-- 新增 `RagCandidate`、可插拔 `Reranker` 与默认 `RrfReranker`：向量与词法两路按 `1/(k+rank)` 融合，按 `chunkId` 去重并保留两路最高分；k 由 `rag.rrf-k` 配置（默认 60）。
+- 新增 `RagCandidate`、可插拔 `RankFusion` 与默认 `RrfRankFusion`：向量与词法两路按 `1/(k+rank)` 融合，按 `chunkId` 去重并保留两路最高分；k 由 `rag.rrf-k` 配置（默认 60）。
 - `DocumentService.retrieveContext`：向量与词法并行召回；向量最高分未过 `gate-score` 但词法分过 `lexical-gate-score` 时仍使用资料；点名资料跳过整体门槛；`rag.hybrid-enabled=false` 时保持原单路向量行为。
 - 引用：`Source` 增加 `chunkId` / `chunkIndex`，`sources` SSE 事件同步下发，前端来源提示展示“第 N 段”；页码因解析器暂未保留版式而不提供。
 - 配置：`rag.hybrid-enabled`、`rag.lexical-min-score`、`rag.lexical-gate-score`、`rag.rrf-k`，均可通过环境变量覆盖。
-- 测试：`RrfRerankerTest`（双路命中优先、去重、纯词法顺序、topK）与 `DocumentServiceRagTest`（词法补召回、双弱拒绝、点名跳过门槛、混合关闭降级、引用字段）通过；后端全量测试与 `EvalGate,RuntimeEvalGate` 通过；前端 `vue-tsc --noEmit` 通过（vite 打包在本机因 esbuild 临时文件删除被拒而中止，与本次改动无关）。
+- 测试：`RrfRankFusionTest`（双路命中优先、去重、纯词法顺序、topK）与 `DocumentServiceRagTest`（词法补召回、双弱拒绝、点名跳过门槛、混合关闭降级、引用字段）通过；后端全量测试与 `EvalGate,RuntimeEvalGate` 通过；前端 `vue-tsc --noEmit` 通过（vite 打包在本机因 esbuild 临时文件删除被拒而中止，与本次改动无关）。
 - **边界**：模型 reranker 离线对照、真实语料上的排序收益报告、PDF 页码引用仍未完成；`halfvec`（V20）继续按体积或检索性能数据决定是否实施。
 
 ### 8.9 P5-08 并行只读工具（2026-11-14）
@@ -379,11 +383,158 @@
 - **实测归档**：新增 `e2e/responsive.spec.ts` 4 条。960×640 侧栏 56px、横向溢出 0、输入框与发送按钮在视口内；900×700 工作台浮层右缘 ≤900、遮罩可关闭；767×700 侧栏默认在屏幕外、菜单按钮可拉出；1280×800 侧栏 280px。截图输出到 `frontend/test-results/`，不入库。
 - **验证**：前端 `npx vitest run` **12 文件 88/88**；系统 Edge 下 Playwright **23 通过、1 跳过**（`@perf`）；`npm run build` 通过。无后端改动、无数据库迁移、无新增依赖。
 
+### 8.18 P5-07-2 检索质量量化与 reranker 决策（2026-11-15）
+
+- **数据集**：`eval/rag-datasets/chunks.jsonl` 3 篇文档 / 24 个切片（中文产品规格含编号、英文部署文档、代码说明含函数名与配置项），`queries.jsonl` 22 条查询（semantic 8 / exact 6 / mixed 3 / cross-lingual 2 / noise 3）。`exact` 查询的编号与术语刻意不进入 `concepts`，确保向量路径真实漏召回；`relevantChunkIds` 与 `expectEmpty` 在 runner 中做一致性校验。
+- **评测器**：`RagRetrievalEvalRunner` 用内嵌 PostgreSQL + pgvector 跑真实 Flyway 迁移，写入语料后分别执行 vector / lexical / hybrid 三配置（除召回范围外无其他差异）。`SimulatedEmbedding` 由 concept FNV-1a 哈希生成 1024 维归一化向量，报告写 `embedding=simulated`；设置 `RAG_EVAL_EMBEDDING_KEY` 时走 `EmbeddingService` 真实模型模式。为让小数据排序确定，评测前删除 HNSW 索引，`SingleConnectionDataSource` 避免把连接建立耗时计入检索。
+- **实测指标**（19 条正向查询，topK=5）：Recall@3/5、MRR@5、nDCG@5、doc_hit_rate —— vector 均 68.42%，lexical 均 31.58%，hybrid 均 100%；`exact` 类 vector 0% → hybrid 100%；`semantic` / `mixed` / `cross-lingual` vector 与 hybrid 均 100%、lexical 0%；noise 3 条三配置全部拒绝；`context_tokens` 24.89 → 36.32（估算），p95 1.63ms → 2.70ms（只含召回与融合）。
+- **门禁与基线**：`eval/baselines/rag-baseline.json` 记录三配置、分类别与 noise 拒绝数；`RagEvalGateTest` 要求 hybrid Recall@5 ≥ vector、`exact` 类严格提升、noise 全部拒绝，并对比基线（Recall@5 / doc_hit_rate 下降 ≤2pp，p95 增幅 ≤20% + 25ms）。负向验证时临时把 hybrid 降级为 vector，得到 4 条可读失败后删除临时代码。`scripts/run-rag-eval.ps1` 自动定位 pgvector 运行时并支持 `-UpdateBaseline`，`eval/rag-reports/` 已加入 `.gitignore`。
+- **结论**：按 spec 预写规则判定 **不启用模型 reranker**（hybrid 提升 31.58pp、exact 类提升 100pp、noise 全拒绝）；未改动任何生产代码、迁移与 `rag.*` 默认值，模型 reranker、halfvec（V20）与 PDF 页码仍为后续项。
+- **验证**：设置运行时后 `scripts/run-rag-eval.ps1 -UpdateBaseline` 实测成功（runner 与 gate 均通过、BUILD SUCCESS、无 JDBC 泄漏），同一数据集除 p95 外指标逐位一致；后端全量 `mvn -o test` **295 项，0 失败、0 错误、13 跳过**，`EvalGate` / `RuntimeEvalGate` 均通过；未设置 `DESKTOP_PG_RUNTIME` 时 `RagEvalGateTest` 跳过，`RagRetrievalEvalRunner` 因不匹配 surefire 默认命名只由脚本或显式 `-Dtest` 运行。
+- **环境事实**：本机 `mvn` 不在 PATH，改用 IDE 内置 Maven 并以 `C:\Users\16680\.jdks\temurin-24` 运行通过；同一套测试在 `ms-21.0.11` 下 `JavacDiagnosticsProviderTest.validJavaHasNoErrors` 会超过其 15s javac 超时，属既有用例的环境性能差异，与本任务改动无关。
+
+### 8.19 P5-07-3 难例检索与真实模型 reranker 对照（2026-11-15）
+
+- **数据集（新增，不改 P5-07-2 文件）**：`eval/rag-datasets/hard-chunks.jsonl` 160 个干扰切片（12 个“答案埋在长文中”的目标切片 + 多主题干扰 + 逐查询同款措辞干扰），`hard-queries.jsonl` 12 条 hard / 2 条 noise；每条 hard 唯一正确切片、与目标 concept 无交集，加载时硬校验。
+- **评测器**：`RagRerankEvalRunner` 复用内嵌 PG + Flyway；候选池 `CANDIDATE_K=20`（向量/词法各 20 → `RrfRankFusion(60)` 融合 20），`hybrid` 截断 5，`hybrid+rerank` 对 20 条调用真实 reranker 取 5；门槛沿用生产值（向量 0.5/0.55、词法 0.3/0.35）。报告输出 `calibration`（逐条两路排名、是否进池）与 `decision`（Q1～Q8 台账 + 三选一结论）。
+- **真实模型**：embedding `BAAI/bge-m3`（1024 维，index 6430 / query 175 tokens 均为实测 usage）、reranker `BAAI/bge-reranker-v2-m3`（`/v1/rerank`，13120 tokens / 12 次调用）；无 Key 时 runner 按前置缺口终止，脚本打印缺口并以非 0 退出。
+- **校准**：D1（12 hard / 160 干扰 / 2 noise）、D2、D3（目标两路排名 >5 占比 **83.33%**）、D4（候选池缺口 0）全部满足。边界：本集查询为同义改写，词法路仅 3/12 条有候选，实际对照接近“向量单路 top-20 → rerank”。
+- **A/B（12 条 hard）**：top-1 8.33% → 16.67%（+8.34pp）、Recall@5 16.67% → 41.67%、MRR@5 12.50% → 27.78%、nDCG@5 13.59% → 31.35%、noise 2/2 两配置全拒绝；检索 p95 42.29ms 不变，rerank p95 482.81ms、总 p95 508.06ms；rerank 1093.33 tokens/查询（约候选正文 1.18×），未配置单价故不输出货币成本。
+- **结论**：按跑数据前写定的阈值，Q1（top-1 需 ≥ +10pp）与 Q6（rerank p95 需 ≤300ms）不通过，其余通过 → **保持不启用**；生产默认策略、`rag.*` 与 P5-07-2 数据集/基线均未改动。
+- **门禁与脚本**：`RagRerankEvalGateTest` 只断言数据有效性、报告结构并对 `hybrid` 做基线回退防护，不做“reranker 必须提升”的硬断言；新增 `eval/baselines/rag-rerank-baseline.json`（`-Deval.updateBaseline=true` 写入）；`scripts/run-rag-rerank-eval.ps1` 自动定位 pgvector 运行时、缺 Key 不启动 Maven。
+- **验证**：`RagRerankEvalRunner`、`RagRerankEvalGateTest` 实测通过（gate 1 项通过）；`EvalGate`、`RuntimeEvalGate`、P5-07-2 的 `RagEvalGateTest` 均通过，`rag-baseline.json` 未变；后端全量 `mvn test` 296 项中 2 项失败为既有迁移计数断言（`FlywayV18MigrationAcceptanceTest` 期望 latest=18、`DesktopPgVectorIntegrationTest` 期望 latest=15，实际均为已提交的 V19），与本任务无关。
+
 详细分批状态见 [Phase 5 计划](phases/phase5/plan.md)。
 
 ---
 
-## 9. 完成档案使用规则
+## 9. Phase 6：多入口与本地 API 契约（2026-11-16 ～ 2026-11-17）
+
+Phase 6 的命题是让同一智能体能力与同一份任务数据可由 Web、CLI、VS Code 三个入口调用；不 fork VS Code，不复制第二套 controller。2026-11-17 出口检查通过，本阶段收口。计划与逐批次证据见 [Phase 6 计划](phases/phase6/plan.md)。
+
+### 9.1 P6-01 公开 API 子集与客户端凭证
+
+- 不新增 `/api/v1`，以显式公开子集清单约束客户端凭证；清单外接口对客户端一律 403，Web 现有路径不变。
+- 新增客户端凭证 `lgc_<12 位 client_id>_<secret>` 与 `api_client` 表（V20）；scope 最小集为 `chat:write`、`run:read`、`changes:read`、`changes:write`、`approval:write`、`project:read`、`client:admin`；仅监听回环地址，客户端可单独撤销且撤销后立即失效。
+- 契约防线落在「子集清单 + OpenAPI 快照 + 鉴权矩阵测试」，覆盖 401/403/scope 越权与非回环/伪造 Origin/Host 拒绝。
+- 响应补 `requestId`，日志与 Run Event 可关联。
+
+### 9.2 P6-02 CLI
+
+- 交付 `cli/`：零运行时依赖、Node 24 type-stripping、无构建步骤；8 条命令（`run`、`watch`、`changes`、`approve`、`revert`、`client`、`doctor` 等）与 `--json` NDJSON。
+- 退出码语义稳定：正常无变更 0 / 有变更 6 / `error` 5 / 停在审批 4 / 断流续看重放不重复；`watch` 0·5·6（401 不重试→3）；网络/5xx→1；未知命令/缺参→2。
+- 真机 e2e `scripts/cli-e2e.ps1` 在 desktop profile（18082、独立数据目录与工作区副本）跑通「client create → doctor → run（exit 6，生成 note.txt）→ changes → revert（文件还原）→ client show/revoke」。
+- 2026-11-17 收尾修复：`parseTokenClientId` 原先按首个 `_` 切分，`client_id` 以下划线开头时返回 `null`，导致 `doctor` 误报与 `client show/revoke` 丢 id；现与后端 `ApiClientService` 对齐为固定 12 字符解析并校验第 13 位分隔符与 secret 非空。CLI 单测 71 → 72，e2e 复跑通过。
+
+### 9.3 P6-03 VS Code 薄插件
+
+- 交付 `ide/vscode/`：TypeScript + esbuild 单文件 bundle，运行时零依赖；令牌只存 SecretStorage；变更使用 VS Code 原生 diff；不做 LSP、补全、多任务并发与远程适配。
+- 实测 VS Code 1.143.1 安装 vsix 后，连接、流式任务、批准/拒绝/本会话记住、原生 diff、按 Run/会话撤回、停止与工作区错位提示均通过；扩展 43 条单测。
+- 保留偏差：双待审批的「全部批准」成功路径未真机复现；远程窗口无真机环境。
+
+### 9.4 P6-05 / P6-05b 多入口一致性与审批入口审计
+
+- `DecisionSource` 增加 `CLIENT`；单条审批按调用方区分 Web（`USER`）与 CLI / VS Code（`CLIENT`），批量保持 `BATCH`；V21 增加 `tool_approval.client_id`，历史记录保持 `NULL`。
+- `GET /api/agent/metrics/experience` 的 `approval.byEntry` 按 `WEB` / `CLIENT`（按 `client_id` 分组）/ `AUTO` / `UNKNOWN` 输出审批量、批准率与平均决策耗时；自动来源不进入人为批准率分母。
+- 真机复核：Web 工作台 7 条审批来源为 `WEB`；VS Code 以 `CLIENT=FeBIz_31mXyW` 审批 1 条（批准率 100%，决策 8600ms）；CLI 由 `cli-e2e` 落 `CLIENT`。`$r.data.approval.byEntry` 在 Web 工作台与「设置 → 应用信息 → 高级诊断」可见分组表。
+
+### 9.5 P6-06 Run 生命周期与断流解耦
+
+- 拆分 `cancelRequested`（显式停止）与 `clientDetached`（SSE 断开）：断流只停止推送，Run 继续执行；事件先落库后发送；审批跨断流保持 `PENDING`；`GenerationRegistry` 支持同会话多 Run；CLI Ctrl-C 改为显式调用 `/chat/stop`。
+- 后端 351 tests（新增 20 条，其中 5 条为真实 Tomcat + HTTP 断流验收）通过；CLI 71、扩展 43 通过。
+- 已知偏差：`onError` / `onTimeout` 改为直接回调验证；后端进程重启仍不续跑（非本批次目标）。
+
+### 9.6 P6-07 交互收敛
+
+- 审批卡片去掉风险 chip 与秒级倒计时，`本会话总是允许` 收进更多菜单，过期不再自行隐藏；回答气泡显示本轮 token（悬停看输入/输出）；「体验诊断」移入「应用信息 → 高级诊断」并默认隐藏，需显式勾选。
+- 前端 92 tests / 12 files 与 `vue-tsc` 通过；真机复核确认新审批卡片、气泡 token 与诊断路径生效；`e2e/diagnostics.spec.ts` 1 条通过，覆盖分组表、异常白名单脱敏、导出、停用与清除。
+- 已知偏差：历史回答不回显 token（消息历史接口未返回 usage）。
+
+### 9.7 P6-04 工作区布局再评估
+
+- **结论：保留**现有「左侧栏 + 中间对话 + 右侧 `WorkbenchDock`」三栏结构，不新增中间工作区，本轮不改代码。
+- 依据：右 Dock 已覆盖变更/资料/计划/追踪/监控/文件 6 类内容，资源管理器点文件直接进入文件 tab 并支持多 tab、脏状态与关闭确认；宽度可拖拽并持久化，对话区保底 420px，支持全屏；<1024px 浮层 + 遮罩，<768px 侧栏抽屉，≥1024px 侧栏可折叠为 56px 图标轨。
+- 实测：`responsive.spec.ts` 4 条通过——960×640 无横向滚动且输入区可见；900×700 侧栏图标轨 + Dock 浮层不挤压正文；767×700 侧栏抽屉默认收起；1280×800 侧栏展开、三栏无横向滚动。
+- 后续可选（不立项）：Dock 默认宽度按屏幕分档、tab 顺序/快捷键、文件 tab 溢出策略，待真实反馈再立 spec。
+
+### 9.8 出口检查与测试基线（2026-11-17）
+
+| 项 | 结果 |
+|---|---|
+| 后端 | 368 tests / 0 fail / 15 skipped |
+| 前端 | 92 passed / 12 files + `vue-tsc` 通过 |
+| CLI | 72 条通过（收尾修复后） |
+| VS Code 扩展 | 43 条通过 |
+| CLI 真机 e2e | `scripts/cli-e2e.ps1 -KeepData` 通过（run exit 6、note.txt、revert、client show/revoke） |
+| 前端 E2E | `diagnostics.spec.ts` 1 passed；`responsive.spec.ts` 4 passed |
+| 多入口真机 | Web 7 条、VS Code `CLIENT=FeBIz_31mXyW` 1 条（100%、8600ms）、CLI `CLIENT` |
+
+环境偏差：本机未安装 Playwright Chromium，且 Vite 6 默认只监听 `::1`，Playwright `webServer` 轮询 `127.0.0.1` 会 120s 超时。本次通过已启动 Vite（localhost:5174）+ `E2E_BASE_URL` + `E2E_CHANNEL=msedge` 运行；CI/新机器需先 `npx playwright install chromium` 或统一监听地址。该偏差不修改仓库配置。
+
+### 9.9 遗留偏差
+
+1. 历史回答不回显 token（消息历史接口未返回 usage，需后端回填批次）。
+2. 历史审批记录不回填 `client_id`，来源保持 `UNKNOWN`。
+3. P6-03 双待审批「全部批准」成功路径与远程窗口未真机复现。
+4. 后端进程重启仍不续跑（P6-06 非目标）。
+5. 仓库无覆盖率门禁；CLI/扩展的退出码矩阵以单测与 e2e 为准。
+
+## 10. P7-01 重启后未完成 Run 与未决审批收口（2026-11-19）
+
+- `AgentRunService.recoverAfterRestart()` 的清理范围从 `QUEUED / RUNNING` 扩展到 `WAITING_APPROVAL`：统一置 `FAILED`、`errorCode=PROCESS_RESTARTED`、写结束时间，并补一条 `STATE_CHANGED` 事件，保证 `sinceSeq` 重放能看到终态。
+- `ToolApprovalRegistry.restorePersistedApprovals()` 不再把重启残留的 `PENDING` 装回内存：未过期落 `REJECTED / SYSTEM`，已过期保持 `REJECTED / TIMEOUT`；会话级「总是允许」白名单仍按库恢复。此后对残留审批调用 `resolve()` 返回 `false`，消除「批准成功但无人继续执行」的假动作。
+- 测试：定向 33 条通过；全量后端 `357 tests / 0 fail / 0 error`（未设置桌面运行时跳过 15 条；设置 `DESKTOP_PG_RUNTIME` 后跳过降至 4 条，`RestartRecoveryAndMultiInstanceAcceptanceTest` 5 条全部通过）。`ToolApprovalRegistryPersistenceTest`、`RestartRecoveryAndMultiInstanceAcceptanceTest` 与 `AgentRunServiceTest` 已按新语义改写/补充。
+- 已知边界：仍不做重启续跑与跨实例审批互斥/唤醒；本批次无接口、事件类型与数据库迁移变化。
+- 文档顺带修正：`STATUS.md` 中「MCP 熔断冷却硬编码」已过时（实际可用 `MCP_COOLDOWN_MS` 等配置），「审批状态存进程内存」的兜底说明改为启动收口。
+
+### 10.1 P7-02 会话统计成本基准（2026-11-19）
+
+- 新增 `ChatStatsBenchmarkTest`：默认不进入常规测试，`mvn -o "-Dperf=true" "-Dtest=ChatStatsBenchmarkTest" test` 显式运行；trace 形状对齐 `ChatStreamBridge.onComplete` 的真实落库结构，结果写入已忽略的 `eval/reports/stats-aggregation-*.json`。
+- 实测：400 条消息 / 3.11MB → p95 8～11ms；1000 条 / 7.79MB → p95 13～17ms；2000 条消息（1000 条助手消息）/ 15.57MB → p50 26ms、p95 27～31ms（两次运行区间）。口径为 trace 解析与聚合，不含 JDBC 往返与行解码。
+- 按预注册规则判定：未触发「1000 条会话 p95 > 500ms」阈值，**不引入统计缓存，P7-02a 不立项**；`STATUS.md` 中「aggregateStats 长会话慢」已改为实测结论。
+- 仍未做：L1～L3 长任务数据集与真实模型运行，计划漂移（规则 2/3）尚待基线数据。
+
+### 10.2 P7-05 桌面模式 SSE 浏览器 E2E（2026-11-19）
+
+- 新增 `frontend/e2e/desktop-sse.spec.ts` 4 条用例：不预置令牌，验证 `/api/meta` → `/api/desktop/token` 引导；覆盖 `thinking / tool_call / tool_result / plan / content / done` 事件消费；覆盖审批挂起后批准并恢复输出；覆盖断流按 `runId` 重放到成功及 `PROCESS_RESTARTED` 失败终态。
+- 定向 4 条全部通过（修复后于本机 Edge 通道再次复跑 4/4）；同一轮全量 Playwright 为 30 条通过、1 条性能用例按既有条件跳过，前端 Vitest 92/92 通过。
+- **边界**：测试使用 Vite + Chromium 内核浏览器，`e2e/fixtures/api.ts` 通过 `page.route` 仿真后端 API/SSE；这不是 Electron 窗口、Java 侧车、内嵌 PostgreSQL 或真实模型链路验收，真实桌面冒烟继续单独跟踪。
+- 同步修复 `SettingsView.vue` 快捷键表格缺少 `tbody` 的 Vue 编译警告；修复后 Vitest 92/92、`vue-tsc` 与 Vite 生产构建通过。
+
+## 11. P7-06 执行中决策询问 ask_user_question（2026-11-19）
+
+> 设计契约、时序与排障细节见 [phases/phase7/p7-06-ask-user-question.md](phases/phase7/p7-06-ask-user-question.md)。
+
+### 11.1 能力落地
+
+- 对齐 DeepSeek Harness `@deepseek-ai/dsh-tool-ask-user` 与 Trae 的「执行中停下来问用户」交互原语：模型在真实决策分叉点调用 `ask_user_question`，ReAct 循环挂起等待用户回答，回答作为工具结果回灌后继续执行。与审批解耦：审批管副作用，询问管方向。
+- 后端：`AgentRun` 新增 `WAITING_USER_INPUT` 状态与合法迁移；事件新增 `USER_QUESTION / USER_ANSWERED`；`AskUserQuestionTool` 以 `CompletableFuture` + 500ms 分片轮询挂起/恢复（总超时 15 分钟，停止信号在一个分片内生效）；`AskUserQuestionSchemaTool` 只负责向模型暴露 schema；`ReActAgentService` 在工具分发前拦截该工具，`WorkspaceContext` 增加 `runId`。
+- 新增 `POST /api/agent/runs/{runId}/answer`：校验 Run 归属与 `WAITING_USER_INPUT` 状态，先落 `USER_ANSWERED` 并迁回 `RUNNING`，再唤醒等待线程。
+- 前端：`user_question` SSE 事件、`AskUserCard.vue`（选项单选/多选/自由输入、Recommended、防重复提交、失败恢复）、`pendingUserQuestion` 状态、`answerUserQuestion` API；断线/刷新按 Run 事件重放还原或清除卡片；流结束、失败、停止、新会话均清理 pending。
+- 提示词：`coding/system-v1.md` 与 `agent/system-v1.md` 增加【决策询问】规则，`coding` 的 `PromptCatalog.REQUIRED_MARKERS` 同步加入，`prompts/index.json` 哈希已更新。
+- 非流式/无 Run 上下文不暴露该工具（`ToolRegistry.buildRankedToolCallbacks` 按 `runId` 过滤），避免模型发起永远无法回答的询问。
+
+### 11.2 真实链路与全量验证中修复的缺陷
+
+- **只读并行批抢跑**：`ask_user_question` 声明 `readOnly=true`，若与其他只读工具同轮，`executeReadOnlyBatch` 会在拦截点前预执行，后续工具在用户回答前就跑掉。已在 `isParallelReadOnlyCall` 显式排除，并有同轮「先问后读」回归用例。
+- **超时/中断状态泄漏**：询问等待超时或线程中断后 Run 会永久卡在 `WAITING_USER_INPUT`。新增 `AgentRunService.abandonUserQuestion()`（仅在该状态下迁移，写 `abandoned=true` 的 `USER_ANSWERED`），由 ReAct 在工具返回 error 时调用，前端重放时自动收起卡片。
+- **JSON Schema 被真实 provider 拒绝**：`options.items.required` 误写成 `{"type":"array","items":{"type":"string"},"const":["label"]}`，DeepSeek 返回 400。脚本模型不校验 schema，因此此前全绿无法发现；通过本地 HTTP 捕获出站请求定位后改为 `["label"]`，并新增 schema 结构回归测试（`required` 必须是数组）。
+- **全量套件挂起**：`RunDisconnectHttpAcceptanceTest.stubAgent` 仍 stub 旧 15 参 `execute`，P7-06 后 controller 走带 `runId` 的 16 参重载，mock 不命中导致行为体从未执行、SSE 永远无事件。修正 stub 参数后该类 41 秒跑完，全量套件不再卡住。
+
+### 11.3 测试与验收边界
+
+- 新增：`AskUserQuestionToolTest` 6 项、`AgentRunServiceTest` 询问路径/迁移边界/abandon 共 5 项、`AskUserQuestionReActIntegrationTest` 5 项（回答后继续、同轮只读不抢跑、停止分片退出、无 Run 不暴露、schema required 结构）、`SettingsControllerModelsTest` 3 项、`AskUserCard.test.ts` 7 项。
+- 后端全量：**388 tests，0 失败，0 错误，16 跳过，BUILD SUCCESS**；前端 Vitest 99/99、`vue-tsc --noEmit` 通过。
+- **真实模型冒烟已通过**：`AskUserQuestionLiveSmokeTest` 默认跳过，需 `LUNARGOLD_LIVE_API_KEY` 显式开启。2026-11-19 经用户授权用 `deepseek-flash` 实跑：第一次调用暴露上述 schema 缺陷，修复后复跑 **1 项通过 / 16.2s**，真实模型发起 `ask_user_question`、用户回答「加 wrapper」后循环继续并输出总结，`Completion=COMPLETED`。控制台中文显示为问号是 Windows 终端编码问题，不影响断言与链路。
+- P7-06 出口 4（L1/L2/L3 同一数据集前后对比）仍随 P7-02 真实模型基线一起执行，本轮未产生数据集对比结论。
+
+### 11.4 模型目录动态化（同轮附带完成）
+
+- 起因：设置页服务商下拉与模型目录均硬编码，且用户账号 `GET /models` 实际返回 `deepseek-flash / deepseek-v4-pro`，与硬编码的 `deepseek-chat / deepseek-reasoner` 不一致。
+- `ApiKeyService.listRemoteModels()` 用已存 Key 实时拉取 provider 模型列表；`GET /api/settings/models` 的 DeepSeek 部分优先使用实时结果，失败/无 Key 回退静态目录；前端设置页与聊天页模型下拉、`/model` 命令共用该目录，并修正前端误调 `/api/models` 为 `/api/settings/models`。
+- 边界：聊天执行链仍只取 `DEEPSEEK` Key，多 provider 执行链解硬编码未做；推理档位（FAST/STANDARD/DEEP）确认真实生效于工具轮次与历史预算，但**不映射**为模型的 `reasoning_effort` 参数。
+
+## 12. 完成档案使用规则
 
 1. 新任务完成后，将任务编号、实际改动、测试结果和验收边界移入本文。
 2. `UPDATE_PLAN.md` 只保留未完成工作、当前阻塞和下一步，不再持续追加长篇完成批注。

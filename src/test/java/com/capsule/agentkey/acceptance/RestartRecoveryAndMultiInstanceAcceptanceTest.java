@@ -121,9 +121,10 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
     // ------------------------------------------------------------------
 
     @Test
-    void 重启后遗留RUNNING与QUEUED变FAILED并写PROCESS_RESTARTED事件() {
+    void 重启后遗留运行中的Run全部变FAILED并写PROCESS_RESTARTED事件() {
         AgentRun queued = seedRun(1L, 10L, RunState.QUEUED);
         AgentRun running = seedRun(1L, 11L, RunState.RUNNING);
+        AgentRun waiting = seedRun(1L, 12L, RunState.WAITING_APPROVAL);
 
         // 模拟新进程启动：全新的 Service 实例扫描真实库
         AgentRunService restarted = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
@@ -139,14 +140,24 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
         assertEquals("PROCESS_RESTARTED", runningAfter.getErrorCode());
         assertNotNull(runningAfter.getEndTime());
 
+        // 等待审批的 Run 同样依赖进程内执行线程，重启后不能伪装成仍可继续
+        AgentRun waitingAfter = runRepo.findById(waiting.getId()).orElseThrow();
+        assertEquals(RunState.FAILED, waitingAfter.getState());
+        assertEquals("PROCESS_RESTARTED", waitingAfter.getErrorCode());
+        assertNotNull(waitingAfter.getEndTime());
+
         List<AgentRunEvent> events = eventRepo.findByRunIdOrderBySeqAsc(queued.getId());
         assertTrue(events.stream().anyMatch(e -> e.getEventType() == EventType.STATE_CHANGED
                         && e.getPayload() != null && e.getPayload().contains("PROCESS_RESTARTED")),
                 "恢复动作必须留下可重放的状态事件");
+        assertTrue(eventRepo.findByRunIdOrderBySeqAsc(waiting.getId()).stream()
+                        .anyMatch(e -> e.getEventType() == EventType.STATE_CHANGED
+                                && e.getPayload() != null && e.getPayload().contains("PROCESS_RESTARTED")),
+                "等待审批的 Run 也必须留下终态事件");
     }
 
     @Test
-    void 未过期审批重启可恢复并落库决策() {
+    void 未过期审批重启即被系统拒绝且不再可批准() {
         seedApproval("ap-live", 1L, 10L, "write_file", "WRITE", "PENDING",
                 System.currentTimeMillis() + 60_000, false);
         seedApproval("ap-remember", 1L, 10L, "edit_file", "WRITE", "APPROVED",
@@ -158,12 +169,12 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
         assertTrue(restarted.isSessionAllowed(10L, "edit_file"), "会话级「总是允许」应恢复");
         assertFalse(restarted.isSessionAllowed(11L, "edit_file"), "其他会话不应继承允许");
 
-        assertTrue(restarted.resolve("ap-live", 1L, "APPROVE", false),
-                "未过期审批恢复后应可被批准");
-
-        ToolApproval updated = approvalRepo.findByApprovalId("ap-live").orElseThrow();
-        assertEquals("APPROVED", updated.getState());
-        assertNotNull(updated.getDecisionTime());
+        ToolApproval orphaned = approvalRepo.findByApprovalId("ap-live").orElseThrow();
+        assertEquals("REJECTED", orphaned.getState(), "重启后没有等待线程，残留审批必须落终态");
+        assertEquals("SYSTEM", orphaned.getDecisionSource());
+        assertNotNull(orphaned.getDecisionTime());
+        assertFalse(restarted.resolve("ap-live", 1L, "APPROVE", false, null),
+                "残留审批不应再被批准");
     }
 
     @Test
@@ -177,7 +188,7 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
         ToolApproval updated = approvalRepo.findByApprovalId("ap-expired").orElseThrow();
         assertEquals("REJECTED", updated.getState(), "过期审批不能重新获得完整等待时间");
         assertNotNull(updated.getDecisionTime());
-        assertFalse(restarted.resolve("ap-expired", 1L, "APPROVE", false),
+        assertFalse(restarted.resolve("ap-expired", 1L, "APPROVE", false, null),
                 "过期审批不应还能被批准");
     }
 
@@ -207,7 +218,7 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
     }
 
     @Test
-    void 双实例审批决策落库可见_跨实例唤醒未实现() {
+    void 残留审批在双实例启动恢复时都落系统拒绝() {
         seedApproval("ap-multi", 1L, 10L, "write_file", "WRITE", "PENDING",
                 System.currentTimeMillis() + 60_000, false);
 
@@ -216,15 +227,14 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
         restore(instanceA);
         restore(instanceB);
 
-        assertTrue(instanceB.resolve("ap-multi", 1L, "APPROVE", false), "实例 B 应能提交决策");
-        assertEquals("APPROVED", approvalRepo.findByApprovalId("ap-multi").orElseThrow().getState(),
-                "决策应落在共享库，实例 A 也能读到");
-
-        // 已知边界：两个实例各自持有内存 future，实例 A 不会因 B 的决策而被唤醒，
-        // 且 A 仍能重复提交同一决策；跨实例互斥/唤醒未实现，报告中必须如实标注。
-        assertTrue(instanceA.resolve("ap-multi", 1L, "APPROVE", false),
-                "当前实现下实例 A 仍可重复接受决策（已知边界，不作为通过标准）");
-        assertEquals("APPROVED", approvalRepo.findByApprovalId("ap-multi").orElseThrow().getState());
+        // P7-01：残留 PENDING 按进程重启收口，两个实例都不能把它当作可批准项
+        ToolApproval rejected = approvalRepo.findByApprovalId("ap-multi").orElseThrow();
+        assertEquals("REJECTED", rejected.getState());
+        assertEquals("SYSTEM", rejected.getDecisionSource());
+        assertFalse(instanceA.resolve("ap-multi", 1L, "APPROVE", false, null));
+        assertFalse(instanceB.resolve("ap-multi", 1L, "APPROVE", false, null));
+        assertEquals("REJECTED", approvalRepo.findByApprovalId("ap-multi").orElseThrow().getState(),
+                "重复提交不得把已收口的审批改回可批准状态");
     }
 
     // ------------------------------------------------------------------

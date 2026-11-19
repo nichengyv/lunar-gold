@@ -146,6 +146,7 @@
     <div v-if="!msg.streaming && msg.content && !msg.failed" class="msg-actions">
       <button class="msg-action-btn" @click="onCopy"><Icon name="copy" :size="13" /> 复制</button>
       <button class="msg-action-btn" @click="chat.regenerate(msg.id)"><Icon name="refresh" :size="13" /> 重新生成</button>
+      <span v-if="usageText" class="msg-usage" :title="usageTitle">{{ usageText }}</span>
     </div>
 
     <!-- 本次改动放在回答最下面：先看总变动，展开是文件清单，点某个文件再到右侧查看逐行 diff -->
@@ -347,6 +348,23 @@ const verifyTitle = computed(() => {
   }
   return parts.filter(Boolean).join('\n');
 });
+
+/** 气泡操作栏右侧的本轮用量：耗时已在执行摘要里展示，这里只给 token */
+const usageText = computed(() =>
+  props.msg.usage?.totalTokens ? `${formatTokenCount(props.msg.usage.totalTokens)} token` : ''
+);
+
+const usageTitle = computed(() => {
+  const usage = props.msg.usage;
+  if (!usage) return '';
+  return `输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} token`;
+});
+
+function formatTokenCount(n: number): string {
+  if (n >= 10000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
 
 /** 毫秒转「秒 / 分 秒」，参考样式里的「已完成，用时 10 分 48 秒」 */
 function formatDuration(ms?: number): string {

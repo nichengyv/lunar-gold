@@ -1,10 +1,10 @@
-﻿﻿# Lunar Gold（金月）未完成更新规划（v1.4 · 免费版）
+﻿﻿﻿﻿﻿﻿﻿﻿# Lunar Gold（金月）未完成更新规划（v1.4 · 免费版）
 
-> 更新日期：2026-11-14
+> 更新日期：2026-11-17
 > 本文只记录未完成工作、当前阻塞、后续任务和验收标准。
 > 已完成任务与历史验收见 [COMPLETED_WORK.md](COMPLETED_WORK.md)；当前代码快照见 [STATUS.md](STATUS.md)。
-> Windows 安装排障见 [windows-nsis.md](troubleshooting/windows-nsis.md)。
-> 本文按“阶段 + 出口标准”组织，不以日历工期作为承诺。
+> Windows 安装排障见 [troubleshooting/windows-nsis.md](troubleshooting/windows-nsis.md)。
+> 本文按"阶段 + 出口标准"组织，不以日历工期作为承诺。
 
 ---
 
@@ -14,20 +14,21 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 **最终产品形态：Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面端是首个完整客户端。** Agent Runtime 只是内部的基础执行层之一，不是独立产品类型，也不是差异化本身；现有 ReAct 循环继续保留，差异化由任务成功率、可控性、验证、恢复与使用体验共同证明。
 
-**当前产品主线：Phase 5，按双轨推进，功能增强仍是每批交付的主体。**
+**当前产品主线：Phase 5（2026-11-16）与 Phase 6（2026-11-17）均已收口，下一步待定。**
 
-1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与 P5-08 并行只读工具均已完成；下一步继续 P5-07 模型 reranker 与真实语料量化、P5-04 收益量化与可选持久缓存，不取消既有功能增强。
-2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率、P5-10-4 键盘与无障碍与 P5-09 视觉体系已落地；下一步转向功能增强收益量化，体验项只做回归与缺陷修复。
+1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与检索质量量化、P5-08 并行只读工具均已完成；P5-07-2 用 24 切片 / 22 查询的标注语料实测 hybrid Recall@5 100% vs vector 68.42%（exact 类 0%→100%），按预写规则判定不启用模型 reranker。P5-04 已于 2026-11-16 用 deepseek-chat 完成 96 run A/B：repo map 开成功率 100% vs 关 62.5%，prompt tokens 4,126 vs 25,072，耗时 1.76s vs 10.17s，B1～B5 全过，判定保持默认开启；持久缓存按 C2 判定不建。**Phase 5 出口条件四条已全部满足，本阶段收口。**
+2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率、P5-10-4 键盘与无障碍与 P5-09 视觉体系已落地；剩余未勾选项（三态覆盖、长回答折叠、三档宽度、断网实测、J/K 与批量审批、axe 校验、500 会话性能）为打磨与合规加固，不阻塞 Phase 5 出口，转入后续批次。
 3. **并行 Windows 发布收尾**：签名、诊断 ZIP 导出人工复核、干净机器完整任务验收和 P3-08 所有者确认项单独跟踪，不阻塞 Phase 5。
-4. **后续多入口候选**：本地 API v1 → CLI → IDE 薄插件，复用同一后端能力；不属于当前 Phase 5 出口，不 fork VS Code。
+4. **Phase 6（已收口，2026-11-17）**：本地 API 子集与客户端凭证 → CLI → VS Code 薄插件，复用同一后端能力；不 fork VS Code。收尾完成 CLI 令牌解析修复、diagnostics E2E、P6-04 布局评估（结论保留）与出口检查；计划与证据见 [docs/phases/phase6/plan.md](phases/phase6/plan.md)，完成档案见 [COMPLETED_WORK.md](COMPLETED_WORK.md)。
+5. **P7 稳定性与长会话（进行中，2026-11-19）**：P7-01 已收口重启后未完成 Run 与残留审批；P7-02 的统计成本切片已完成——1000 条助手消息 / 15.6MB trace 聚合 p95 27～31ms，未触发 500ms 缓存阈值，**统计慢不再是已知边界**。P7-05 的 4 条桌面模式浏览器 E2E 已通过，且 SSE 真机链路已验证畅通。P7-06 ask_user_question（执行中用户询问）已立项，将补上"agent 停下来问用户"的交互原语缺口。当前剩余为长任务（L1～L3）的真实模型基线与真实 Electron + Java SSE 冒烟，详见第 13 节。
 
 ---
 
 ## 1. 不变的产品与技术边界
 
-- **产品类型**：对外统一称“AI 编程工作台”；“Agent Runtime / 智能体执行引擎”只用于描述模型、工具、审批、执行、状态和验证等内部机制。
+- **产品类型**：对外统一称"AI 编程工作台"；"Agent Runtime / 智能体执行引擎"只用于描述模型、工具、审批、执行、状态和验证等内部机制。
 - **执行架构**：保留 ReAct 作为基础循环，以计划、代码上下文、LSP、Verify、无进展检测和评测补强；没有评测证据时，不为了架构名词改做多智能体或复杂状态图。
-- **明确不做**：不 fork VS Code，不建设“万物皆插件”的平台或插件市场，不做泛桌面自动化；模型、MCP、LSP 与未来客户端入口可以扩展，执行约束、审批、验证和恢复保持统一。
+- **明确不做**：不 fork VS Code，不建设"万物皆插件"的平台或插件市场，不做泛桌面自动化；模型、MCP、LSP 与未来客户端入口可以扩展，执行约束、审批、验证和恢复保持统一。
 - **网页端**：注册/登录、对话、知识库 RAG、附件问答和桌面端下载；不操作本地工作区、不执行命令。
 - **桌面端**：本地项目读写、命令执行、Git、MCP、LSP、审批、审查流和按轮撤回；完全本地、不强制登录。
 - **双端共用**：同一套后端和 Vue 前端，通过 `DeploymentMode`、`CapabilityService` 与 `/api/meta` 区分能力。
@@ -43,9 +44,10 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 |---|---|---|
 | Phase 3 发布收尾 | Windows 签名、诊断导出人工复核、干净机器完整任务、合规所有者确认 | Release 可安装、首启、执行并验证首个编程任务、审查与撤回、卸载 |
 | P3-07 | Windows 发布流水线 | 构建、安装包冒烟、签名、制品上传可追溯；其他平台恢复时另立计划 |
-| Phase 4 剩余风险 | 桌面重启恢复、双实例审批互斥、完整安全链、真实预算与并发验证 | 剩余场景行为明确且有对应验收，不用已完成单测代替端到端结论 |
+| Phase 4 剩余风险 | 双实例审批互斥、完整安全链、真实预算与并发验证（P7-01 已收口重启时未完成 Run 与残留审批） | 剩余场景行为明确且有对应验收，不用已完成单测代替端到端结论 |
 | Phase 5 | 智能体能力增强 + 工作台体验增强 | 真实 ReAct 可评测，修改有诊断与验证，任务可审查/恢复/撤回，既有功能增强有量化收益 |
-| Phase 6 候选 | 本地 API、CLI、IDE 薄插件与信息架构再评估 | 不同入口复用同一后端；不进入当前 Phase 5 出口 |
+| Phase 6 | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | **已收口（2026-11-17）**：不同入口复用同一后端；P6-04 结论为保留现有三栏布局；详见 [phase6/plan.md](phases/phase6/plan.md) |
+| Phase 7 | 长会话：统计成本已测（不缓存）→ ask_user_question 已落地 → 长任务计划漂移基线 → 按数据决定是否做 plan-first；桌面 SSE 链路已通 | **进行中**：P7-01 已完成；P7-02 统计切片已按预注册规则判定「不做缓存」；P7-05 SSE 链路真机已通；P7-06 ask_user_question 已落地（后端挂起/恢复 + 前端选项卡 + 测试）；剩余 L1～L3 长任务基线；详见第 13 节 |
 
 ---
 
@@ -157,7 +159,7 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 
 ## 4. Phase 4：安全与可靠性加固
 
-**目标**：从“能跑”到“敢开放”。开放给真实用户操作不可信项目时，P4-01 和 P4-08 是高优先级。
+**目标**：从"能跑"到"敢开放"。开放给真实用户操作不可信项目时，P4-01 和 P4-08 是高优先级。
 
 | ID | 任务 | 验收 | 状态 |
 |---|---|---|---|
@@ -177,7 +179,7 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 | ID | 落地内容 | 验证边界 |
 |---|---|---|
 | P4-02 | `AgentRun` 实体 + `AgentRunService` 状态机；V16 建 `agent_run` / `agent_run_event`；非法迁移抛 `IllegalStateException`；启动时把遗留 `QUEUED/RUNNING` 标为 `FAILED/PROCESS_RESTARTED` | `AgentRunServiceTest` 8 项通过；**出境验收（2026-11-12）**：`FlywayV18MigrationAcceptanceTest` 在真实 PostgreSQL 16.11 上完成 V1~V18 全量迁移、重复迁移 0 条、`validate` 通过；`RestartRecoveryAndMultiInstanceAcceptanceTest` 验证遗留 RUNNING/QUEUED → FAILED + `PROCESS_RESTARTED` 事件 |
-| P4-03 | V17 `tool_approval`；`ToolApprovalRegistry` 数据库权威 + 内存加速；启动恢复待审批、过期直接 `REJECTED`、恢复“本会话总是允许” | `ToolApprovalRegistryTest` 6 项、`ToolApprovalRegistryPersistenceTest` 4 项通过；**出境验收**：真实库重启恢复（未过期可批准、过期即拒绝、会话总是允许恢复）与双实例决策落库可见均通过；**已知边界**：两实例各持内存 future，跨实例唤醒与重复决策互斥未实现 |
+| P4-03 | V17 `tool_approval`；`ToolApprovalRegistry` 数据库权威 + 内存加速；启动恢复待审批、过期直接 `REJECTED`、恢复"本会话总是允许" | `ToolApprovalRegistryTest` 6 项、`ToolApprovalRegistryPersistenceTest` 4 项通过；**出境验收**：真实库重启恢复（未过期可批准、过期即拒绝、会话总是允许恢复）与双实例决策落库可见均通过；**已知边界**：两实例各持内存 future，跨实例唤醒与重复决策互斥未实现 |
 | P4-05 | `clientRequestId` 全链路；`create()` 返回 `created` 标记，并发命中已存在记录时不重复建消息、不重复调度 | 单元级；并发压测未做 |
 | P4-04 | SSE 自增事件 id、15s 心跳注释帧（连接结束即取消）、`GET /agent/runs/{runId}/events?sinceSeq=`；`tool_call` / `tool_result` 落事件表以便重放 | 后端能力完成；P5-10-1 已用 runId 全量重放 + 正文检查点实现前端刷新恢复与自动重连，人工断网 10s 复核仍待补 |
 | P4-06 | Provider 级熔断；瞬时错误指数退避重试（已输出 chunk 不重试）；流式空闲超时 + 非流式总时长兜底；fallback 改为显式配置 | `ProviderCircuitBreakerTest` 5 项、`SpringAiAgentClientResilienceTest` 4 项通过；**出境验收**：`ProviderOutageAcceptanceTest` 6 项用本机 stub HTTP server 真实收到 500/429/连接拒绝/流式空闲超时/首片后卡死，验证退避重试、已输出不重试、错误只回调一次、熔断后不再发请求；**观察**：Spring AI SDK 自身带内部重试，原始 HTTP 请求数约为外层尝试的 4 倍（重试放大） |
@@ -200,10 +202,10 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 | P5-01 | 提示词外置与版本化 | 可热更新/回滚，按场景配置 | 已完成 |
 | P5-02 | 组件级评测集 | 覆盖工具选择、文件编辑/删除、命令审批、RAG、拒答 | 已完成 |
 | P5-03 | 评测门禁 | 完成率、轮次、token、时延有基线，回归即失败 | 已完成 |
-| P5-04 | 代码索引 v1 | 符号索引和 repo map（可插拔 CodeIndexer，v1 轻量正则） | 基础完成：repo map 已注入 prompt，符号索引与增量缓存已落地；收益量化与可选持久缓存未做 |
+| P5-04 | 代码索引 v1 | repo map 符号索引与增量缓存 | **已完成**：A/B 量化保持默认开启，成功率 +37.5pp / token −83% / 时延 −83%；持久缓存按 C2 判定不建；正则抽取与字母序截断为已知短板，升级候选见 5.2 |
 | P5-05 | LSP 诊断闭环 | 编辑后自动取诊断并反馈给模型 | 已完成 |
 | P5-06 | 验证回路 | 修改后自动运行 verify，失败回到循环，未验证不得伪装成功 | 已完成 |
-| P5-07 | RAG 增强 | 向量 + pg_trgm 词法召回、RRF 融合、chunk 级引用；halfvec 按体积与精度数据决定 | 基础完成：混合检索与引用已落地；模型 reranker 与真实语料量化未做 |
+| P5-07 | RAG 增强 | 向量 + pg_trgm 词法召回、RRF 融合、chunk 级引用；halfvec 按体积与精度数据决定 | 完成：混合检索与引用已落地；P5-07-2 用 24 切片 / 22 查询实测 hybrid Recall@5 100% vs vector 68.42%、exact 类 0%→100%、noise 全拒绝，判定不启用模型 reranker；P5-07-3 用 160 干扰切片 / 12 难例 + 真实 bge-m3 与 bge-reranker-v2-m3 复跑，top-1 +8.34pp（<10pp）、rerank p95 482.81ms（>300ms），仍判定保持不启用；halfvec 未做 |
 | P5-08 | 并行只读工具 | 只读工具并行且时延有收益；写操作仍串行并审批 | 已完成：连续只读批默认 3 并发，fixture p95 282→98ms；写/命令与 MCP 保持串行审批 |
 | P5-09 | 视觉体系 | token 收口、亮暗一致、加载/空/错误三态、消息排版、响应式 | 已完成：三态收口（工具运行态耗时、错误态导出诊断）、密度档位与表格/引用排版、960×640 与三档宽度回归 |
 | P5-10 | 交互与体验 | 断线续传、审批键盘化、长任务进度、快捷键与无障碍 | 已完成：断线续传（P5-10-1）、审批效率（P5-10-2：J/K、低风险批量、审批历史）、长任务进度（P5-10-3）、键盘与无障碍（P5-10-4：焦点面板、会话键盘切换、aria 与播报、手动减少动效、axe critical 0） |
@@ -220,9 +222,29 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 - 用户能在一个任务边界内查看变更、审批与验证结果，继续修复或撤回；未完成和未验证状态不得显示为已验证成功。
 - 工作台关键路径有前端 E2E；断网与刷新可恢复，纯键盘可完成审批，窄窗口和亮暗主题可用。
 
-### 5.1 后续多入口候选（不属于当前出口）
+### 5.1 后续多入口（Phase 6，已收口 2026-11-17）
 
-先稳定本地 API v1，再增加 CLI 与 VS Code / JetBrains 薄插件；它们只是同一智能体能力和任务数据的客户端入口。是否调整中间工作区或三栏布局留到 Phase 6 评估，不与现有 `WorkbenchDock` 重复建设。
+先稳定本地 API 子集，再增加 CLI 与 VS Code / JetBrains 薄插件；它们只是同一智能体能力和任务数据的客户端入口。Phase 6 已完成公开 API 子集与客户端凭证、CLI、VS Code 薄插件、审批入口审计、Run 断流解耦与交互收敛；P6-04 评估结论为**保留现有三栏布局，不新增中间工作区**，不与现有 `WorkbenchDock` 重复建设。批次、决策点、出口条件与证据见 [phase6/plan.md](phases/phase6/plan.md)。
+
+### 5.2 代码索引升级候选（P5-04 衍生，暂缓）
+
+P5-04 实施中暴露的实现短板。三项都不改"内存索引 + 会话内重建"的架构；持久缓存已按 C2 判定不建（cold 271ms），不在本候选内。
+
+**2026-11-16 决定：暂缓，不排期。** 依据是 P5-04 的 96 run A/B 已满足 Phase 5 出口（成功率 +37.5pp / token −83% / 时延 −83%，B1～B5 全过），而这三项解决的都是边缘场景：C# 完全漏（但主力语言 Java/TS/Python/Go/Rust 均已覆盖）、本仓库 464 文件打满 6000 字符预算（但 37 文件 fixture 的 repo map 仅 2,920 字符、未截断）、tree-sitter 需跟随三平台原生库、对桌面安装包体积影响明显。**不为了"技术上更完整"做，等真实用户反馈触发再开。**
+
+触发条件（满足任一即重新评估，不自动立项）：
+
+| 触发条件 | 观测方式 |
+|---|---|
+| 用户反馈大仓库（>1000 文件）repo map 截断严重、靠后目录定位失败 | 用户反馈 / 诊断报告中的 `truncated=true` 与文件数 |
+| 用户主力语言为 C# 或 Kotlin/Scala/Swift 等当前抽取缺失的语言 | 项目类型分布、定位用例失败样本 |
+| A/B 重跑时 recall 跌破 90% 门禁 | `IndexBenefitEvalTest` 的符号 recall 断言 |
+
+| 编号 | 升级项 | 现状 | 目标 | 前置 / 验证 |
+|---|---|---|---|---|
+| P5-04-a | 用解析器替换正则抽取 | `LightweightCodeIndexer.supports()` 声明了 kotlin/scala/groovy/c/cpp/cs/php/rb/swift，但 `index()` 无对应分支，这些文件抽不到符号（C# 在标注集 recall 为 0）；Java 接口中无修饰符的方法也漏 | 多语言 AST 抽取，符号准确率作为门禁 | 优先 JavaParser（纯 Java、无原生依赖）；tree-sitter 仅在确认必须多语言精确解析时再评估；用现有 12 个标注符号文件的断言做回归 |
+| P5-04-b | repo map 加相关性排序 | `RepoMapService` 用 `TreeMap` 字母序遍历，撞到字符预算即停，大仓库靠后目录永远进不了 map | 按符号引用次数/入口距离排序后截断（Aider PageRank 同思路） | 依赖 a 的解析结果，需要构建引用图；用 800 文件合成工作区对比截断分布 |
+| P5-04-c | 预算动态化 | `maxChars` 默认 6000，本仓库 464 文件已占 5977 字符并截断 | 按文件数/符号数缩放，或分层（顶层目录必现 + 其余按预算） | 在 800 与 5000 文件合成工作区上测截断率与 map 覆盖率 |
 
 ---
 
@@ -235,9 +257,10 @@ V15 已被邮箱唯一索引占用；Phase 4 的运行状态表已使用 **V16**
 | 版本 | 内容 | 说明 |
 |---|---|---|
 | V16 | `agent_run` / `agent_run_event` | 已落地；保留为契约说明，不再作为待实施迁移 |
-| V19 | `code_index` | P5-04 桌面端可选持久缓存，未实施前索引仅存内存；实施前检查实际未占用版本 |
-| V20 | `halfvec` 量化列与必要索引 | 仅 P5-07 证明体积或检索性能瓶颈后启用，不与混合检索捆绑 |
-| 下一条未占用版本 | 暂不需要（P5-14 已复用 `AgentRun.requestJson` 保存 turnId） | P5-13、P5-14 均复用 Run/Event、审批与 `PendingFileChange`，未新增 Task/ChangeSet 表；后续默认先复用现有结构 |
+| V19 | `tool_approval.decision_source` 可空列 + 历史查询索引 | 已落地（2026-11-14）；`code_index` 持久缓存候选原定 V19 但因 P5-04 判定不建，已取消 |
+| V20 | `api_client`（客户端令牌） | P6-01 已落地（2026-11-16）；`halfvec` 量化列候选顺延到后续未占用版本 |
+| V21 | `tool_approval.client_id` 可空列 | P6-05 已落地（2026-11-17）；记录审批入口，旧记录保持 `NULL` |
+| 下一条未占用版本 | V22（暂不需要） | P5-14 已复用 `AgentRun.requestJson` 保存 turnId；后续默认先复用现有结构，`halfvec` 候选仅在 P5-07 证明瓶颈后启用 |
 
 原则：
 
@@ -298,7 +321,7 @@ V15 已被邮箱唯一索引占用；Phase 4 的运行状态表已使用 **V16**
 | 项 | 当前差距 | 目标 |
 |---|---|---|
 | 命令执行 | Windows Job Object 已落地；macOS/Linux 沙箱暂缓 | 持续验收 Windows 约束；其他平台恢复时独立实现，云端不执行 |
-| 运行与审批状态 | Run/审批已持久化；双实例唤醒与互斥、桌面壳重启恢复仍待验收 | 剩余场景行为明确，状态不丢、审批不重复，云端可共享 run/stop |
+| 运行与审批状态 | Run/审批已持久化；P7-01 已收口桌面重启后的未完成 Run 与残留审批；双实例唤醒与互斥仍待验收 | 剩余场景行为明确，状态不丢、审批不重复，云端可共享 run/stop |
 | 本地密钥与 token | 数据目录文件与权限收紧 | 评估 OS 凭据库，保持无额外原生依赖时的安全替代 |
 | 审计 | 部分链路可追踪 | 按 run 导出、可追溯 |
 | 依赖安全 | 历史扫描已完成，持续门禁待发布流水线补齐 | CI 阻断 Critical |
@@ -370,21 +393,203 @@ V15 已被邮箱唯一索引占用；Phase 4 的运行状态表已使用 **V16**
 
 ```text
 智能体能力 A1：P5-05 LSP → P5-06 Verify（已完成）
-智能体能力 A2：P5-04 代码索引（repo map + 符号索引/增量缓存，已完成）→ P5-04 收益量化 → P5-07 RAG 混合检索/RRF/引用（已完成）→ P5-07 模型 reranker 与量化
+智能体能力 A2：P5-04 代码索引（repo map + 符号索引/增量缓存，已完成）→ P5-04 收益量化 → P5-07 RAG 混合检索/RRF/引用（已完成）→ P5-07 检索质量量化与 reranker 决策（已完成，判定不启用模型 reranker）→ P5-07-3 难例 + 真实模型 reranker 对照（已完成，仍判定保持不启用）
 智能体能力 A3：P5-08 并行只读工具（已完成）
 工作台体验 B1：P5-14 任务级交付 + P5-10-3 长任务进度 + P5-10-2 审批效率 + P5-10-4 键盘与无障碍 + P5-11-1 前端 E2E（已完成）
 工作台体验 B2：P5-09 剩余视觉项（已完成）
 工作台体验 B3：P5-11-2 体验指标（已完成）→ P5-11-3 长会话性能（已完成）
 Windows 发布收尾与 Phase 4 剩余风险：独立并行跟踪
+
+P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动态化）：待 A/B 结论落定后单独立项，不阻塞出口
 ```
 
 | 后续批次 | 内容 | 依赖 / 决策原则 |
 |---|---|---|
 | A1 | LSP 诊断与 Verify 验证回路（已完成） | 已复用 P5-01～03 与 P5-13 的真实循环、完成状态和无进展检测；保留 ReAct，未重写为多智能体 |
-| A2 | 代码索引、repo map、混合检索、引用与 rerank | 功能目标保留；halfvec 与模型 rerank 由评测数据决定 |
+| A2 | 代码索引、repo map、混合检索、引用与 rerank | 功能目标保留；halfvec 与模型 rerank 由评测数据决定；P5-07-2 已量化 hybrid 收益并按预写规则判定不启用模型 reranker；P5-07-3 已用真实 bge-m3 + bge-reranker-v2-m3 在难例集复跑（top-1 +8.34pp、rerank p95 482.81ms），仍未达预写阈值，保持不启用；仅当换模型或换语料后重跑达标再重启 |
 | A3 | 并行只读工具（已完成） | 已确认串行只读是瓶颈；并发上限由 Runtime 批规模与 fixture p95 定为默认 3，写入与命令仍串行审批 |
 | B1 | 任务级 ChangeSet、验证结果、继续修复、整体撤回、长任务进度和关键路径 E2E | 复用 P5-12 与现有 Run/PendingFileChange，不先重建领域模型；P5-11-1 的 E2E 在浏览器层用 Playwright route 仿真后端，未启动真实 Spring 进程 |
 | B2 | 视觉、审批与无障碍剩余项 | 只补剩余列，不重做已完成能力 |
 | B3 | 体验指标与长会话性能 | P5-11-2 已完成本地异常、Web Vitals、Run/恢复采样和当前用户后端聚合；P5-11-3 已用真实长会话剖析落地流式合帧、Markdown 增量渲染与超过 200 条的虚拟滚动（500 条首屏 108ms、DOM 216、60 秒流式 0 长任务）；后续视觉与无障碍剩余项归入 B2 |
 | 发布收尾 | Windows 签名、干净机器完整任务、诊断导出与合规确认 | 不阻塞 Phase 5；macOS/Linux 暂缓 |
-| Phase 6 候选 | 本地 API、CLI、IDE 薄插件与工作区布局再评估 | Phase 5 核心闭环稳定后另立验收，不 fork VS Code |
+| Phase 6（已收口） | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | 已完成（2026-11-17）；不 fork VS Code，P6-04 结论为保留现有布局 |
+
+---
+
+## 13. Phase 7：长会话与执行循环演进（P7）
+
+> 原则：先量化，再决定是否动执行模型。项目约束仍是「没有评测证据时，不为架构名词改做多智能体或复杂状态图」；ReAct 保留为基础循环。
+
+### 13.1 问题拆分
+
+| 长会话问题 | 与循环架构关系 | 对应工作 |
+|---|---|---|
+| 追踪统计慢（`aggregateStats` 全量解析 trace JSON） | 无关 | P7-02a（已判定不立项） |
+| 上下文膨胀、历史成本高、记忆丢失 | 部分相关 | P7-04（有条件） |
+| 长任务跑偏、无进展、计划漂移 | 直接相关 | P7-03（plan-first 档位，有条件） |
+| 重启后状态残局 | 无关 | P7-01（已完成） |
+| 桌面 SSE 自动化缺口 | 无关 | P7-05 链路已通；Electron 壳冒烟可后补 |
+| **agent 不会停下来问用户**（缺决策分支交互原语） | 直接相关 | **P7-06（立项）** |
+
+现状：并非纯 ReAct——已有 `update_plan` 工具、计划面板、`finalizePlan`、`PLAN_INCOMPLETE` 完成校验与 `AgentPolicy` 三档；有审批（工具风险拦截）但没有**决策询问**（执行中遇到分叉停下来让用户选方向）。**P7-06 补上 ask_user_question 之后，P7-03 plan-first 的触发门槛可以调高**——因为很多"执行中需要方向确认"的场景已被 ask_user_question 覆盖，plan-first 只在**任务起始**就需要"先完整规划给用户看"时才有价值。
+
+对比业界：DeepSeek Harness 的 `@deepseek-ai/dsh-tool-ask-user`（每周 72 万下载）把决策询问做成了模型可调用的一等 tool（`ask_user_question({ questions: [{ id, question, options, multi_select }] })`），Trae 则作为系统级能力提供。金月当前只有审批（风险门禁），缺决策询问（方向分支），这是"用户在环"的第二环缺口。
+
+### 13.2 已完成工作总结（2026-11-19）
+
+**P7-01 重启残局收口**（已完成）：重启后未完成 Run 与残留审批处理。
+
+**P7-02 统计成本切片**（已完成，判定不立项缓存）：
+- 基准：`ChatStatsBenchmarkTest`（默认不跑，`-Dperf=true` 显式执行），trace 形状对齐 `ChatStreamBridge` 的真实落库结构；结果写入 `eval/reports/stats-aggregation-*.json`（已忽略）。
+- 数据：400 条消息 / 3.11MB → p95 8～11ms；1000 条 / 7.79MB → p95 13～17ms；2000 条消息（1000 条助手消息）/ 15.57MB → p50 26ms、p95 27～31ms（两次运行区间）。
+- 口径：仅 trace 解析与聚合，不含 JDBC 往返与行解码。
+- 判定：规则 1（1000 条会话 p95 > 500ms）未命中，**不引入统计缓存，P7-02a 不立项**；长会话统计慢从已知边界中移除，后续会话继续变长时用同一基准复测。
+
+**P7-02 L1～L3 数据集离线验证 + 单元测试**（已完成）：
+- 三个数据集（`eval/long-session-datasets/l1~l3-*.json`）schema 校验全过：L1 单模块重构（20 轮）、L2 三模块 scope 变化 + 审批审查（40 轮）、L3 十二次 turn + 记忆探针（100 轮）。
+- `LongSessionDatasetTest`（12 个 JUnit 断言）：加载校验、推理档位容量、L1/L2/L3 专属门禁预注册检查、fixture 物化正确性、expectedArtifacts 展开覆盖、路径安全、turn prompt 去重、失败归因 hint 覆盖、重复路径拒绝、目录清理。
+- `LongSessionOfflineRunner`（离线 runner）：加载 → schema 校验 → fixture 物化 → 工件覆盖验证 → JSON 报告；实测 L1/L2/L3 三个数据集 0 blocker、artifact 覆盖 100%（13/13、25/25、60/60）。
+- `LongSessionDataset.java` 的 `expandFixture` / `expectedArtifacts` 从 private 改为 package-private，方便测试访问。
+- **仍未做**：真实 ReAct + 真实模型基线（用户明确：不读取 `.secrets` 密钥、不发起任何外部模型请求；后续若要真跑，必须先单独确认费用并获得授权）。
+
+**real-sse-smoke harness 缺陷修正**（已完成）：
+- `desktop/real-sse-smoke.cjs` 的 SSE 请求体从 `permission: 'READ_ONLY'` / `reasoning: 'FAST'` 改为 `permission: 'AUTO'` / `reasoning: 'STANDARD'`——READ_ONLY 档 system prompt 会强制「只读不能执行」，虽然冒烟不涉及文件，但 AUTO 档语义更中性；FAST 档只有 10 轮工具循环，STANDARD 给更多宽松度。
+
+**SSE `AccessDeniedException` 根因定性 + 修复 + 真机验证**（已完成）：
+- **根因**：两层叠加：
+  1. **ASYNC dispatch**：Tomcat 对 SseEmitter 的异步写入会以 ASYNC dispatch 重跑整个 Security filter chain。原始 REQUEST 线程上 `LocalTokenFilter` 已完成认证，但 ASYNC dispatch 时 `OncePerRequestFilter` 的 request attribute 防重机制让 LocalTokenFilter 跳过（SecurityContext 此时可能已空），`FilterSecurityInterceptor` 再次检查 `.authenticated()` 就 deny。
+  2. **/error dispatch**：SSE 期间 response already committed 时 Tomcat 会尝试 forward 到 `/error`，但 `.anyRequest().authenticated()` 覆盖了 `/error`，FORWARD/ERROR dispatch 同样被 deny，抛出 `Unable to handle the Spring Security Exception because the response is already committed`。
+- **修复**：`SecurityConfig.filterChain()` 在 `authorizeHttpRequests` 最前面加：
+  - `dispatcherTypeMatchers(ASYNC, FORWARD, ERROR).permitAll()` — 跳过所有非 REQUEST dispatch 的二次鉴权
+  - `requestMatchers("/error").permitAll()` — /error 是容器内部 forward 目标，不应该要求认证
+- **真机验证**（desktop profile + 内嵌 PG + 打包态 jar + 本地令牌）：
+  1. `GET /actuator/health` → 200 ✅
+  2. `GET /api/desktop/token` → 返回本地令牌 ✅
+  3. `POST /api/agent/chat/stream`（带 Bearer token + Node.js http 原生支持 async stream）→ **STATUS 200 + Content-Type: text/event-stream + 业务层 error 事件（未找到 API Key）** ✅
+  4. 后端日志零 `AuthorizationDeniedException`，SSE 链路完整畅通
+- **回归**：后端全量测试 ✅ exit 0、前端 vue-tsc ✅ exit 0。
+- **额外发现**：这次本机用 GUID 隔离目录后 initdb + PG 启动**成功了**（之前交接文档报告的 `File exists` 锁文件问题可能已经被修复或数据目录残留已清理）。
+
+### 13.3 P7-06 执行中用户询问（ask_user_question）——**已落地**
+
+**目的**：补上"agent 停下来问用户"这个交互原语缺口。当前金月的"用户在环"只有审批（工具风险拦截），没有决策询问（执行中遇到分叉停下来让用户选方向、缺信息时向用户要）。
+
+**对比业界**：
+| 实现 | 方式 | 用户体验 |
+|---|---|---|
+| DeepSeek Harness `@deepseek-ai/dsh-tool-ask-user` | 模型可调用的 `ask_user_question` tool，schema 包含 `{ questions: [{ id, question, options, multi_select }] }` | 弹出结构化选项卡（label + description）；tool call 挂起直到用户回答，不超时；子 agent 不可用（DELEGATED_CALLER） |
+| Trae | 系统级 `AskUserQuestion` 指令 + `browser_waiting_for_user_interaction` | 弹出选项卡 + 自由文本输入；agent 进入等待状态直到用户确认/取消 |
+| 金月现状 | 只有审批（WAITING_APPROVAL） | ❌ agent 遇到分叉只能自己选、缺信息只能报错结束 |
+
+**为什么必要**：这不是 P&E（Plan-and-Execute）那种"架构选型"，而是**缺失的交互原语**——就像 Trae 和 DHS 都有但金月没有的东西。它能解决 P&E 能解决的问题还加上 P&E 解决不了的（执行中分叉就地停下来问、需要外部信息时等用户提供）。
+
+**实现范围**（约 5~7 个文件，复用已有基础设施）：
+
+后端：
+- `AgentRunService.java`：`RunState` 枚举新增 `WAITING_USER_INPUT`（和已有的 `WAITING_APPROVAL` 并列，不改动审批语义）
+- `ReActAgentService.java`：循环里加控制流——检测到模型输出需要用户输入（通过新增的 `ask_user_question` tool 或 system 指令触发）→ 推 `event:user_question` → 挂起 Run → await 用户回答后恢复循环
+- `AgentChatController.java`：新增 `POST /api/agent/runs/{runId}/answer` 端点，携带用户回答恢复 Run
+- SSE 事件类型：新增 `event:user_question`（含 id、question、options、header、multi_select），已有的 `event:approval_required` 不改动
+
+前端：
+- 新增 `AskUserCard.vue` 组件（复用 `ApprovalCard.vue` 的选项卡 UI 结构：label + description、J/K 切换、自由文本输入）
+- `ChatView.vue`：监听 `event:user_question` 事件 → 弹出 AskUserCard → 用户选择后调 `/answer` 端点
+
+数据库：不需要新表——question 存 RunState + event 流里，和审批一样通过 `agent_run_event` 表查询。
+
+**决策**：ask_user_question 作为**模型可调用的 tool** 实现（和 DHS 同思路），而不是系统级指令——这样 tool schema 作为 tool catalog 一部分可见，KV cache 友好，且可以在 system prompt 里引导模型"遇到不确定方向时调用这个 tool"。
+
+**非目标**：
+- 不做"agent 随时可以问、问了就停"——需要预定义触发条件（scope 扩大、方案分叉、缺关键信息）
+- 不做子 agent 询问——只由 root agent 调用（和 DHS 同约束）
+- 不做超时自动续行——等待上限 15 分钟，超时返回错误让模型自己选稳妥方案继续；等待期间按 500ms 分片响应 Run 停止
+
+**落地结果**（完整实现与缺陷清单见 [COMPLETED_WORK.md](COMPLETED_WORK.md) 第 11 节，设计契约见 [phases/phase7/p7-06-ask-user-question.md](phases/phase7/p7-06-ask-user-question.md)）：
+- 后端：`AskUserQuestionTool`（挂起/恢复 + 分片轮询取消）、`AskUserQuestionSchemaTool`（模型可见的 schema）、`AgentRunService` 新增 `WAITING_USER_INPUT` 迁移与 `abandonUserQuestion`（超时/中断把 Run 拉回 RUNNING）、`POST /api/agent/runs/{runId}/answer` 端点、`ToolRegistry` 在无 Run 上下文时不暴露该 tool
+- 前端：`AskUserCard.vue` 选项卡（单选/多选/自由文本/防重复提交）、SSE `user_question` 事件、断线重放 `USER_QUESTION`/`USER_ANSWERED` 还原卡片、Run 结束与停止时清理挂起卡片
+- 提示词：`coding` / `agent` 两个 system prompt 增加【决策询问】触发规则（只在真实分叉时问、先做只读调研、一次一问 + Recommended、严格按选择执行）
+- 验证中修复的缺陷：只读并行批在用户回答前抢跑、询问超时后 Run 状态泄漏、`options.items.required` 误写成 schema 对象被 DeepSeek 400 拒绝、`RunDisconnectHttpAcceptanceTest` stub 旧签名导致全量套件挂起
+- 测试：后端全量 **388 tests / 0 失败 / 0 错误 / 16 跳过**；`AskUserQuestionReActIntegrationTest` 5 项覆盖真实 ReAct 循环；前端 Vitest 99 项通过
+- 真实模型冒烟：`AskUserQuestionLiveSmokeTest` 经用户授权以 `deepseek-flash` 复跑通过（16.2s，COMPLETED），schema 缺陷修复后的真实链路已闭环。
+- 仍未做：出口 4（L1/L2/L3 数据集前后对比）归入 P7-02 基线一起跑。
+
+**出口**：
+1. ReAct 循环能在执行中停下来向用户问选择题 + 自由文本
+2. 用户回答后 Run 恢复，答案进入模型上下文继续循环
+3. 断网/刷新后 WAITING_USER_INPUT 状态可恢复（和 WAITING_APPROVAL 共享重连机制）
+4. 同数据集（L1/L2/L3）P7-06 前后对比：完成率、轮次、token 不退化 ≥ 5%
+
+**与 P7-03 plan-first 的关系**：P7-06 落地后，P7-03 的触发门槛调高——很多"执行中需要方向确认"的场景已被 ask_user_question 覆盖，plan-first 只在**任务起始**就需要"先完整规划给用户看"时才有价值。
+
+**依赖**：无——不依赖 P7-02 真实模型基线，不依赖 P7-03/P7-04 的条件触发。可并行开发。
+
+### 13.4 P7-02 长会话量化基线（剩余）
+
+**目的**：用一组固定任务与真实模型跑出可复现数字，判定长会话问题的主要归属，避免先改架构后找理由。
+
+**复用现有基建**
+- `RuntimeEvalRunner`：fixture 复制、真实 ReAct 循环、Run/Event 状态、报告结构。
+- `EvalGate` / `EvalRunner.buildReport`：预算与阈值门禁、JSON 报告。
+- 真实模型执行方式沿用 P5-04 / P5-07 的 A/B 经验（固定模型与温度，重复取样取中位数）。
+
+**数据集**（`eval/long-session-datasets/`）：L1 单模块重构（≥ 20 轮）、L2 跨文件修复（≥ 40 轮）、L3 超长会话（≥ 100 轮累积上下文）——schema 和离线验证已完成。
+
+**指标**：完成率与完成原因、轮次、工具调用次数、工具失败/重试次数、无进展检测触发次数、prompt/completion tokens、上下文峰值 token、端到端耗时、首 chunk 时延、计划步骤完成率、`update_plan` 调用次数（近似重规划次数）。
+
+**预注册判定规则**（已写死，跑完即得出结论）：
+1. stats p95 > 500ms（1000 条会话）→ 做 P7-02a 缓存/物化，不动循环。**规则 1 未命中（已完成）**。
+2. 长任务失败 ≥ 50% 归因「计划漂移 / 无进展 / 步骤遗漏」→ 立项 P7-03。
+3. 失败主要由上下文截断、记忆缺失或历史重复导致 → 优先 P7-04。
+4. 三项均未命中 → 长会话不立项，回到发布收尾与体验打磨。
+
+**出口**：`eval/runtime-reports/long-session-<date>.json` 落盘，含原始数据、按规则得出的结论与不做的理由；同步 `STATUS.md` / `COMPLETED_WORK.md`。
+
+**阻塞**：用户已提供 DeepSeek API Key 并同意用 `deepseek-flash` 跑基线；账号实际可用模型为 `deepseek-flash / deepseek-v4-pro`（模型目录已动态化，见 COMPLETED_WORK 11.4）。每次真实付费调用仍需对具体动作获得明确授权；不读取 `.secrets`，key 只通过环境变量传入，不写入仓库。
+
+### 13.5 P7-03 plan-first 档位（条件触发，未立项）
+
+- **触发**：仅当 P7-02 规则 2 命中（长任务失败 ≥ 50% 归因计划漂移/无进展/步骤遗漏），**且 P7-06 ask_user_question 不足以覆盖问题**。
+- **形态**：`AgentPolicy` 新增 `PLAN_FIRST`，默认关闭、可开关 A/B；先独立规划产出计划，再进入 ReAct 执行；偏差、工具失败或 scope 变更时触发重规划。
+- **保留**：ReAct 兜底、现有审批/回溯/审查流语义不变。
+- **非目标**：不改为多智能体，不引入复杂状态图，不替换 ReAct。
+- **出口**：同一 L1～L3 数据集 A/B，完成率提升与 token/耗时退化需同时满足预注册阈值，才讨论是否设为默认。
+
+### 13.6 P7-04 上下文预算与记忆（条件触发）
+
+仅在规则 3 命中时立项：上下文分档预算、工具输出截断、摘要触发阈值与记忆检索命中率的量化；入口指标来自 P7-02 的上下文峰值与失败归因。
+
+### 13.7 P7-05 桌面 SSE 端到端自动化
+
+**已完成（2026-11-19）**：
+- 浏览器层：`desktop-sse.spec.ts` 4 条用例覆盖桌面令牌引导、完整 SSE 事件序列、审批后继续、断流按 runId 恢复及失败终态。
+- 真机链路：desktop profile + 内嵌 PG + 打包态 jar + 本地令牌，`POST /api/agent/chat/stream` 返回 **200 + Content-Type: text/event-stream**，后端日志零 `AuthorizationDeniedException`。
+
+**验收边界**：浏览器层测试运行在 Vite + Chromium 内核浏览器（本机使用 Edge 通道），后端 API 与 SSE 由 `page.route` 仿真，不是真实 Electron + Java + 内嵌 PostgreSQL 链路。真实桌面窗口与侧车冒烟继续单独验收，不能以本结果代替安装包或真实模型验收。
+
+### 13.8 排期（顺序 + 门禁）
+
+```text
+P7-01 重启残局收口 ──────────────── ✅ 已完成
+P7-02 统计成本切片 ──────────────── ✅ 已完成（规则 1 未命中）
+P7-02 L1～L3 离线验证 ───────────── ✅ 已完成（schema + fixture + 门禁全过）
+P7-05 SSE 真机链路 ──────────────── ✅ 已完成
+
+P7-06 ask_user_question ─────────── ✅ 已完成（含真实模型冒烟）
+  ├─ 后端 RunState + 控制流 + tool schema
+  ├─ SSE event:user_question + /answer 端点
+  └─ 前端 AskUserCard.vue + ChatView 集成
+  → 待办：出口 4（数据集前后对比）随 P7-02 基线一起跑
+
+P7-02 真实模型基线 ──────────────── ⏳ 已有 Key，模型 deepseek-flash
+  ├─ L1～L3 三档各跑 N 次
+  ├─ 判定规则 2/3 是否命中
+  └─ 输出 long-session-<date>.json
+
+      → 规则 2 命中 且 P7-06 不足 → P7-03 plan-first（条件）
+      → 规则 3 命中 → P7-04 上下文与记忆（条件）
+      → 均未命中 → Phase 7 收口
+```
+
+- 每个批次以「出口」为界，不以日历工期承诺；结论必须来自落盘报告，而不是单测通过。
+- **P7-06 不依赖 P7-02 结论**——它解决的是交互原语缺口，不是 ReAct 循环内部问题，可以和 P7-02 真实模型基线并行开发。
+- P7-03 / P7-04 未立项前不排入执行队列，避免架构先行；P7-03 触发门槛在 P7-06 落地后调高。

@@ -87,6 +87,34 @@ describe('ChatMessage P5-10-3', () => {
   });
 });
 
+describe('ChatMessage 本轮用量', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('在重新生成右侧显示本轮 token', () => {
+    const wrapper = mountMessage(
+      message({
+        content: '完成',
+        durationMs: 12_600,
+        usage: { promptTokens: 1200, completionTokens: 800, totalTokens: 2000 }
+      })
+    );
+
+    const usage = wrapper.find('.msg-usage');
+    expect(usage.text()).toBe('2.0k token');
+    expect(usage.attributes('title')).toBe('输入 1200 / 输出 800 token');
+  });
+
+  it('没有 usage 时不占位，耗时只留在执行摘要', () => {
+    const withDuration = mountMessage(message({ content: '完成', durationMs: 3000 }));
+    expect(withDuration.find('.msg-usage').exists()).toBe(false);
+
+    const bare = mountMessage(message({ content: '完成' }));
+    expect(bare.find('.msg-usage').exists()).toBe(false);
+  });
+});
+
 describe('ChatMessage P5-09 工具运行耗时', () => {
   beforeEach(() => {
     setActivePinia(createPinia());

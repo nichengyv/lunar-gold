@@ -273,6 +273,11 @@ public class ToolRegistry {
         for (BaseTool t : tools.values()) {
             if (t.isFallback()) continue;
             if (!isAllowed(t, permission)) continue;
+            // P7-06：ask_user_question 依赖 SSE 通道与 Run 挂起；非流式 / 无 Run 上下文时不暴露给模型
+            if ("ask_user_question".equals(t.getName())) {
+                WorkspaceContext ctx = WorkspaceContext.get();
+                if (ctx == null || ctx.runId() == null) continue;
+            }
             candidates.add(t);
         }
         if (candidates.isEmpty()) return List.of();

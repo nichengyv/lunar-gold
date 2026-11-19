@@ -39,7 +39,7 @@ public class PromptCatalog {
     /** 各主提示词场景必须包含的段落，缺一段就拒绝启动；工具附注不套用主提示词规则。 */
     private static final Map<String, List<String>> REQUIRED_MARKERS = Map.of(
             "agent", List.of("【核心原则】", "【文件修改规则】", "【任务计划】", "【通用对话要求】"),
-            "coding", List.of("【核心原则】", "【代码理解】", "【文件修改规则】", "【任务计划】", "【完成与验证】"));
+            "coding", List.of("【核心原则】", "【代码理解】", "【文件修改规则】", "【任务计划】", "【决策询问】", "【完成与验证】"));
 
     private static final String DEFAULT_INDEX = "prompts/index.json";
     private static final String VERSION_PROPERTY_PREFIX = "agent.prompt.scenario.";

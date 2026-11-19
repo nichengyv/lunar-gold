@@ -21,10 +21,11 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'select'): void }>();
 const chat = useChatStore();
 
-const remaining = ref(0);
 /** 详情默认折叠：卡片上只给摘要 */
 const expanded = ref(false);
-let timer: number | undefined;
+/** 更多操作菜单：默认收起，避免三个按钮并排堆叠 */
+const moreOpen = ref(false);
+const moreRef = ref<HTMLElement | null>(null);
 let autoDismissTimer: number | undefined;
 
 const isResolved = computed(() => props.approval.resolved !== undefined);
@@ -91,16 +92,14 @@ function scheduleAutoDismiss() {
   }, 3000);
 }
 
-function tick() {
-  remaining.value = Math.max(0, Math.ceil((props.approval.expiresAt - Date.now()) / 1000));
-  if (remaining.value <= 0 && !isResolved.value) {
-    chat.dismissApproval(props.approval.approvalId);
-  }
-  if (isResolved.value && timer) {
-    window.clearInterval(timer);
-    timer = undefined;
-    scheduleAutoDismiss();
-  }
+/** 点击卡片外部收起更多菜单；不阻止卡片自身的选中事件 */
+function onDocumentClick(e: MouseEvent) {
+  if (moreOpen.value && !moreRef.value?.contains(e.target as Node)) moreOpen.value = false;
+}
+
+function respondRemember() {
+  moreOpen.value = false;
+  respond('APPROVE', true);
 }
 
 watch(
@@ -111,17 +110,13 @@ watch(
 );
 
 onMounted(() => {
-  tick();
-  if (!isResolved.value) {
-    timer = window.setInterval(tick, 1000);
-  } else {
-    scheduleAutoDismiss();
-  }
+  if (isResolved.value) scheduleAutoDismiss();
+  document.addEventListener('click', onDocumentClick);
 });
 
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer);
   if (autoDismissTimer) window.clearTimeout(autoDismissTimer);
+  document.removeEventListener('click', onDocumentClick);
 });
 
 function respond(decision: 'APPROVE' | 'REJECT', remember = false) {
@@ -173,8 +168,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
         class="approval-icon"
       />
       <span class="approval-title">{{ isResolved ? resultLabel : '需要你确认' }}</span>
-      <span class="approval-chip">{{ riskLabel }}</span>
-      <span v-if="!isResolved" class="approval-timer">{{ remaining }}s</span>
       <button class="approval-close" title="关闭" aria-label="关闭审批卡片" @click="close">×</button>
     </div>
 
@@ -190,11 +183,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
       <!-- 文件类：摘要一行；内容默认折叠，点「查看改动」才展开 -->
       <template v-else-if="preview?.kind === 'write' || preview?.kind === 'edit' || preview?.kind === 'delete'">
         <div class="approval-file">
+          <span class="approval-action">{{ riskLabel }}</span>
+          <span class="meta-sep">·</span>
           <Icon :name="preview.kind === 'delete' ? 'trash' : 'file'" :size="12" class="file-icon" />
           <span v-if="pathParts.dir" class="file-dir" :title="preview.path">{{ pathParts.dir }}/</span>
           <span class="file-name">{{ pathParts.name || '（未提供路径）' }}</span>
           <span v-if="preview.newFile" class="badge new">新建</span>
-          <span v-else-if="preview.kind === 'delete'" class="badge del">删除</span>
           <span v-if="hasStats" class="badge add">+{{ preview.additions ?? 0 }}</span>
           <span v-if="hasStats" class="badge del">−{{ preview.deletions ?? 0 }}</span>
           <button v-if="diffLines.length" class="link-btn" @click="expanded = !expanded">
@@ -212,9 +206,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     </div>
 
     <div class="approval-actions">
-      <button v-if="!isResolved" class="approval-btn" @click="respond('REJECT')">拒绝<span class="approval-kbd">D</span></button>
-      <button v-if="!isResolved" class="approval-btn" @click="respond('APPROVE', true)">本会话总是允许</button>
-      <button v-if="!isResolved" class="approval-btn primary" @click="respond('APPROVE')">允许<span class="approval-kbd">A</span></button>
+      <template v-if="!isResolved">
+        <button class="approval-btn" @click="respond('REJECT')">拒绝<span class="approval-kbd">D</span></button>
+        <button class="approval-btn primary" @click="respond('APPROVE')">允许<span class="approval-kbd">A</span></button>
+        <div ref="moreRef" class="approval-more">
+          <button
+            class="approval-more-btn"
+            title="更多选项"
+            aria-label="更多审批选项"
+            aria-haspopup="menu"
+            :aria-expanded="moreOpen"
+            @click.stop="moreOpen = !moreOpen"
+          >
+            ⋯
+          </button>
+          <div v-if="moreOpen" class="approval-menu" role="menu">
+            <button class="approval-menu-item" role="menuitem" @click.stop="respondRemember">本会话总是允许</button>
+          </div>
+        </div>
+      </template>
       <button v-else class="approval-btn" :disabled="true">{{ resultLabel }}</button>
     </div>
   </div>
@@ -253,20 +263,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 .approval-icon { color: var(--warning); }
 .approval-card.resolved .approval-icon { color: var(--text-tertiary); }
 .approval-title { font-weight: 600; color: var(--text); }
-.approval-chip {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  background: var(--surface);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-.approval-timer {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
+.approval-action { color: var(--text-secondary); flex-shrink: 0; }
+.meta-sep { color: var(--text-tertiary); flex-shrink: 0; }
 .approval-close {
+  margin-left: auto;
   background: none;
   border: none;
   color: var(--text-tertiary);
@@ -274,7 +274,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
-  margin-left: 2px;
   opacity: 0;
   transition: opacity .15s, color .15s;
 }
@@ -418,4 +417,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   line-height: 14px;
   opacity: 0.55;
 }
+/* 更多选项：低频操作收进菜单，不占主操作位 */
+.approval-more { position: relative; display: flex; }
+.approval-more-btn {
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.approval-more-btn:hover { border-color: var(--border); color: var(--text); }
+.approval-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  min-width: 132px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .18);
+  z-index: 20;
+}
+.approval-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.approval-menu-item:hover { background: var(--surface-2); }
 </style>

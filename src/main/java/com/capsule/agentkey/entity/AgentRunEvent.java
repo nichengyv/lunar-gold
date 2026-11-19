@@ -69,6 +69,10 @@ public class AgentRunEvent {
         /** 终态前的错误事件 */
         ERROR,
         /** 用户主动取消 */
-        CANCELED
+        CANCELED,
+        /** P7-06：agent 暂停等待用户输入，payload 含 questionId/question/header/options/multi_select */
+        USER_QUESTION,
+        /** P7-06：用户回答了 agent 的询问，payload 含 questionId/selected/custom */
+        USER_ANSWERED
     }
 }

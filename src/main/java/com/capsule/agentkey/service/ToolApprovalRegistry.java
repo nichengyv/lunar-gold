@@ -36,8 +36,11 @@ public class ToolApprovalRegistry {
     /** 审批决策 */
     public enum Decision { APPROVE, REJECT }
 
-    /** P5-10-2：决策来源，持久化到 tool_approval.decision_source */
-    public enum DecisionSource { USER, BATCH, TIMEOUT, SESSION_STOP, SYSTEM }
+    /**
+     * P5-10-2：决策来源，持久化到 tool_approval.decision_source。
+     * P6-05：CLIENT 表示单条审批由客户端令牌（CLI / VS Code）发起；批量仍是 BATCH，入口由 client_id 区分。
+     */
+    public enum DecisionSource { USER, BATCH, CLIENT, TIMEOUT, SESSION_STOP, SYSTEM }
 
     /** P5-10-2：一次审批结果，来源与批次随结果一起回传给 ReAct 与前端 */
     public record Resolution(Decision decision, DecisionSource source, String batchId) {
@@ -59,7 +62,7 @@ public class ToolApprovalRegistry {
 
     /** 审批等待上限：先于 SSE 180 秒超时，保证能正常回写 tool 结果并继续对话 */
     public static final long TIMEOUT_MS = 120_000L;
-    /** 等待轮询间隔：用户点停止时不立刻感知断连，靠这个间隔尽快退出 */
+    /** 等待轮询间隔：停止标记置位后依赖这个间隔尽快退出，不必等用户点击 */
     private static final long POLL_MS = 500L;
 
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
@@ -77,19 +80,33 @@ public class ToolApprovalRegistry {
         this.approvalRepository = approvalRepository;
     }
 
-    /** 恢复未决审批；已过期记录直接落 REJECTED，避免重启后重新获得完整等待时间。 */
+    /**
+     * 启动收口残留审批。
+     *
+     * <p>新进程的 {@code pending} 为空，库里所有 PENDING 都是孤儿——没有线程在 {@code await}，
+     * 若装回内存会出现「批准成功但无人继续执行」的假动作。因此：
+     * <ul>
+     *   <li>已过期 → REJECTED / TIMEOUT，避免重启后重新获得完整等待时间；</li>
+     *   <li>未过期 → REJECTED / SYSTEM，明确是进程重启导致的中止。</li>
+     * </ul>
+     * 只有会话级「总是允许」的白名单继续恢复。
+     */
     @PostConstruct
     void restorePersistedApprovals() {
         if (approvalRepository == null) return;
         long now = System.currentTimeMillis();
+        int expired = 0;
+        int orphaned = 0;
         for (ToolApproval saved : approvalRepository.findByState("PENDING")) {
             if (saved.getExpiresAt() <= now) {
                 // P5-10-2：重启时已过期的未决审批按超时自动拒绝，来源落 TIMEOUT
-                markDecision(saved, "REJECTED", false, DecisionSource.TIMEOUT);
-                continue;
+                markDecision(saved, "REJECTED", false, DecisionSource.TIMEOUT, null);
+                expired++;
+            } else {
+                // 进程重启后没有等待线程，未过期审批也不能再批准，按系统中止收口
+                markDecision(saved, "REJECTED", false, DecisionSource.SYSTEM, null);
+                orphaned++;
             }
-            Pending record = toPending(saved);
-            pending.put(record.approvalId(), record);
         }
         for (ToolApproval saved : approvalRepository.findByStateAndRememberSessionTrue("APPROVED")) {
             if (saved.getSessionId() != null) {
@@ -97,7 +114,8 @@ public class ToolApprovalRegistry {
                         .add(saved.getToolName());
             }
         }
-        log.info("审批状态恢复完成：待审批 {} 条，记住会话 {} 个", pending.size(), sessionAllowed.size());
+        log.info("审批状态恢复完成：过期拒绝 {} 条，重启中止 {} 条，记住会话 {} 个",
+                expired, orphaned, sessionAllowed.size());
     }
 
     /** 危险工具的风险等级；返回 null 表示不需要审批 */
@@ -168,9 +186,11 @@ public class ToolApprovalRegistry {
     /**
      * 前端提交审批结果。
      *
+     * @param clientId 本次审批请求的客户端 id；非空表示来自 CLI / VS Code，来源记 CLIENT
      * @return false 表示记录不存在、已超时或被其他用户提交
      */
-    public boolean resolve(String approvalId, Long userId, String decision, boolean rememberSession) {
+    public boolean resolve(String approvalId, Long userId, String decision, boolean rememberSession,
+                           String clientId) {
         Pending record = pending.get(approvalId);
         if (record == null) {
             log.warn("审批记录不存在或已失效: id={}", approvalId);
@@ -194,13 +214,14 @@ public class ToolApprovalRegistry {
             log.warn("非法审批决策: {}", decision);
             return false;
         }
-        boolean completed = record.future().complete(Resolution.of(value, DecisionSource.USER));
+        DecisionSource source = clientId == null ? DecisionSource.USER : DecisionSource.CLIENT;
+        boolean completed = record.future().complete(Resolution.of(value, source));
         if (!completed) {
             log.info("审批记录已完成，忽略重复提交: id={}", approvalId);
             return false;
         }
         persistDecision(record, value == Decision.APPROVE ? "APPROVED" : "REJECTED",
-                rememberSession, DecisionSource.USER);
+                rememberSession, source, clientId);
         return true;
     }
 
@@ -229,7 +250,8 @@ public class ToolApprovalRegistry {
      * <p>安全边界在这里：所有 ID 必须属于当前用户、当前会话、仍在等待，且命中低风险白名单；
      * 任一不满足整批拒绝，绝不部分批准。预检之后并发失效的项只从 resolvedIds 中剔除。
      */
-    public BatchResult resolveBatch(Long userId, Long sessionId, List<String> approvalIds) {
+    public BatchResult resolveBatch(Long userId, Long sessionId, List<String> approvalIds,
+                                    String clientId) {
         if (approvalIds == null || approvalIds.isEmpty()) {
             return BatchResult.rejected("没有可批量允许的审批");
         }
@@ -263,7 +285,7 @@ public class ToolApprovalRegistry {
         for (Pending record : records) {
             // 预检后可能被单条操作或超时抢先完成，只统计真正由本批次完成的结果
             if (record.future().complete(new Resolution(Decision.APPROVE, DecisionSource.BATCH, batchId))) {
-                persistDecision(record, "APPROVED", false, DecisionSource.BATCH);
+                persistDecision(record, "APPROVED", false, DecisionSource.BATCH, clientId);
                 resolvedIds.add(record.approvalId());
             }
         }
@@ -280,19 +302,22 @@ public class ToolApprovalRegistry {
     }
 
     /**
-     * 阻塞等待审批结果。每 {@link #POLL_MS} 毫秒检查一次客户端是否已断开，
-     * 超时或断开都按拒绝处理，并在 finally 中清理记录，避免内存泄漏。
+     * 阻塞等待审批结果。每 {@link #POLL_MS} 毫秒检查一次显式停止标记，
+     * 超时或显式停止都按拒绝处理，并在 finally 中清理记录，避免内存泄漏。
+     *
+     * <p>P6-06：客户端断流不会进入这里；断流期间审批保持等待，
+     * 只有用户通过 /chat/stop 显式停止才会按 {@link DecisionSource#SESSION_STOP} 拒绝。
      */
-    public Resolution await(Pending record, AtomicBoolean cancelled) {
+    public Resolution await(Pending record, AtomicBoolean cancelRequested) {
         long deadline = record.expiresAt();
         Resolution result = null;
         try {
             while (System.currentTimeMillis() < deadline) {
-                if (cancelled != null && cancelled.get()) {
+                if (cancelRequested != null && cancelRequested.get()) {
                     // 停止与用户点击可能同时发生，以先完成的结果为准
                     Resolution winner = record.future().getNow(null);
                     if (winner != null) return winner;
-                    log.info("客户端已断开，审批自动拒绝: id={}", record.approvalId());
+                    log.info("显式停止，审批自动拒绝: id={}", record.approvalId());
                     result = Resolution.of(Decision.REJECT, DecisionSource.SESSION_STOP);
                     break;
                 }
@@ -318,7 +343,7 @@ public class ToolApprovalRegistry {
             pending.remove(record.approvalId());
             if (!record.future().isDone()) {
                 record.future().complete(result);
-                persistDecision(record, "REJECTED", false, result.source());
+                persistDecision(record, "REJECTED", false, result.source(), null);
             }
         }
         return result;
@@ -331,7 +356,7 @@ public class ToolApprovalRegistry {
         pending.forEach((id, record) -> {
             if (sessionId.equals(record.sessionId())) {
                 record.future().complete(Resolution.of(Decision.REJECT, DecisionSource.SESSION_STOP));
-                persistDecision(record, "REJECTED", false, DecisionSource.SESSION_STOP);
+                persistDecision(record, "REJECTED", false, DecisionSource.SESSION_STOP, null);
                 ids.add(id);
             }
         });
@@ -341,26 +366,21 @@ public class ToolApprovalRegistry {
         }
     }
 
-    private Pending toPending(ToolApproval saved) {
-        return new Pending(saved.getApprovalId(), saved.getUserId(), saved.getSessionId(),
-                saved.getToolName(), saved.getArguments(), saved.getRisk(), saved.getExpiresAt(),
-                new CompletableFuture<>());
-    }
-
     private void persistDecision(Pending record, String state, boolean rememberSession,
-                                 DecisionSource source) {
+                                 DecisionSource source, String clientId) {
         if (approvalRepository == null) return;
         approvalRepository.findByApprovalId(record.approvalId()).ifPresentOrElse(
-                saved -> markDecision(saved, state, rememberSession, source),
+                saved -> markDecision(saved, state, rememberSession, source, clientId),
                 () -> log.warn("审批记录未持久化，无法写入决策: id={}", record.approvalId()));
     }
 
     private void markDecision(ToolApproval saved, String state, boolean rememberSession,
-                              DecisionSource source) {
+                              DecisionSource source, String clientId) {
         saved.setState(state);
         saved.setRememberSession(rememberSession);
         saved.setDecisionTime(LocalDateTime.now());
         saved.setDecisionSource(source == null ? null : source.name());
+        saved.setClientId(clientId);
         approvalRepository.save(saved);
     }
 }

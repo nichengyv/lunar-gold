@@ -2,7 +2,6 @@ import http, { unwrap } from './http';
 import type { ApiResponse } from '../types/api';
 
 // ========== 设置中心相关接口 ==========
-// 这些接口是本批次新增的，后端还没实现——前端先按契约定义好，后端照着补
 
 export interface ChatDefaults {
   model: string;
@@ -27,9 +26,9 @@ export interface ModelInfo {
   available: boolean;
 }
 
-/** 可切换的模型列表（从后端配置文件解析，或前端硬编码） */
+/** 可切换的模型列表：后端优先用已存 Key 实时拉取 provider 实际可用模型，失败回退静态目录 */
 export function listModels(): Promise<ModelInfo[]> {
-  return http.get<never, ApiResponse<ModelInfo[]>>('/api/models').then(unwrap);
+  return http.get<never, ApiResponse<ModelInfo[]>>('/api/settings/models').then(unwrap);
 }
 
 export interface HealthInfo {

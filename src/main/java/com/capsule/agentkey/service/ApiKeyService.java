@@ -53,6 +53,48 @@ public class ApiKeyService {
         return repo.findByUserId(userId);
     }
 
+    /**
+     * 用用户已存的 Key 实时拉取该 provider 实际可用的模型 id 列表（GET /models，不消耗 token）。
+     *
+     * <p>背景：模型目录硬编码会和账号真实可用模型脱节（例如账号只开通 deepseek-flash /
+     * deepseek-v4-pro，UI 却列 deepseek-chat），所以模型列表以 provider 返回为准。</p>
+     *
+     * @throws BusinessException Key 未配置或 provider 不支持动态列表
+     * @throws Exception 网络/鉴权/解析失败，由调用方决定是否回退静态目录
+     */
+    public List<String> listRemoteModels(Long userId, String provider) throws Exception {
+        String normalized = provider == null ? "" : provider.trim().toUpperCase();
+        String modelsUrl = switch (normalized) {
+            case "DEEPSEEK" -> "https://api.deepseek.com/models";
+            case "OPENAI" -> "https://api.openai.com/v1/models";
+            case "ZHIPU" -> "https://open.bigmodel.cn/api/paas/v4/models";
+            case "MOONSHOT" -> "https://api.moonshot.cn/v1/models";
+            case "OLLAMA" -> "http://localhost:11434/v1/models";
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "该 provider 不支持动态模型列表: " + provider);
+        };
+        String plainKey = getDecryptedKey(userId, normalized);
+        okhttp3.Request req = new okhttp3.Request.Builder()
+                .url(modelsUrl)
+                .addHeader("Authorization", "Bearer " + plainKey.trim())
+                .get().build();
+        try (okhttp3.Response resp = newOkhttp().newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR,
+                        normalized + " 拉取模型列表失败（HTTP " + resp.code() + "）");
+            }
+            String body = resp.body() == null ? "" : resp.body().string();
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(body);
+            List<String> ids = new java.util.ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode node : root.path("data")) {
+                String id = node.path("id").asText("");
+                if (!id.isBlank()) ids.add(id);
+            }
+            return ids;
+        }
+    }
+
     public void deleteById(Long id, Long userId) {
         UserApiKey key = repo.findById(id).orElseThrow(() -> new BusinessException("Key不存在"));
         if (!key.getUserId().equals(userId)) {
