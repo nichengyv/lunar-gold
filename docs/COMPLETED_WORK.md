@@ -534,6 +534,57 @@ Phase 6 的命题是让同一智能体能力与同一份任务数据可由 Web�
 - `ApiKeyService.listRemoteModels()` 用已存 Key 实时拉取 provider 模型列表；`GET /api/settings/models` 的 DeepSeek 部分优先使用实时结果，失败/无 Key 回退静态目录；前端设置页与聊天页模型下拉、`/model` 命令共用该目录，并修正前端误调 `/api/models` 为 `/api/settings/models`。
 - 边界：聊天执行链仍只取 `DEEPSEEK` Key，多 provider 执行链解硬编码未做；推理档位（FAST/STANDARD/DEEP）确认真实生效于工具轮次与历史预算，但**不映射**为模型的 `reasoning_effort` 参数。
 
+### 11.5 P7-02 长会话真实模型 Runner（2026-11-19）
+
+> 细化规格与付费门禁见 [phases/phase7/p7-02-long-session-baseline.md](phases/phase7/p7-02-long-session-baseline.md)。
+
+- 新增 `LongSessionLiveRunner`：使用真实 `SpringAiAgentClient`、生产 `ReActAgentService`、真实文件/计划工具与 `AgentRunService` 状态迁移执行 L1/L2/L3；只 mock 仓库、项目所有权等边框，不复用脚本模型结果。
+- 每个 run 使用独立临时工作区并 finally 清理；多 turn 累积 USER/ASSISTANT 历史，L2 走真实审批与 scope 拒绝，L3 注入结构化检查点摘要并执行记忆探针。P7-06 可通过 `P7_02_ASK_USER=on` 做后续同数据集 A/B。
+- 报告落盘到已忽略的 `eval/runtime-reports/long-session-<timestamp>.json`：保留原始 run、按 level 的成功率/中位数/失败归因，以及规则 2/3 判定。模型调用在 `AgentClient` 实际入口计数，token 仅采用 provider usage，并记录 `usageCalls/modelCalls` 覆盖率；不保存 API Key。
+- 成功必须同时满足工件与数据集 coverage（execute turn、计划、恢复、审批、scope、摘要、记忆等）；缺 completion、coverage 不足或只有最终文本均不算成功。L1×1 只作冒烟，只有 L1/L2/L3 全部执行且 repeats≥3、provider 失败率达标时才允许形成架构结论。
+- 离线验证：`LongSessionLiveRunnerTest` 5 项覆盖错误归因、无进展/最大轮次/重复/审批/恢复优先级、报告门禁与规则 2；目标套件共 **19 tests，0 失败，0 错误，1 跳过**。显式清空 Key 后 `LongSessionLiveRunner` 正确跳过，未发起外部模型请求。
+- **L1×1 真实冒烟（用户单独授权后完成）**：`deepseek-flash`、P7-06 off，报告为 `eval/runtime-reports/long-session-20261119-202115-722.json`。37 次真实模型调用，usage 覆盖 37/37；186,031 prompt + 3,324 completion = 189,355 total tokens，单轮上下文峰值 7,215 prompt tokens；端到端 249,692ms，首 chunk 16,857ms。13/13 工件、13 次文件变更、1 次过期路径失败并恢复、6 次 `update_plan`、计划完成率 100%，无重复调用、无进展、最大轮次、coverage 或执行错误。
+- **冒烟判定与边界**：Run 为 SUCCEEDED，数据集 `success=true`，但 completion 为 `UNVERIFIED:VERIFY_NOT_CONFIGURED`——fixture 没有 Maven/Gradle 与验证命令，因此成功只表示工件、coverage 和评测用户审查通过，不能外推为编译/测试通过。`decision.eligible=false`、规则 2/3 均未触发；单一样本不能形成真实成功率或 P7-03/P7-04 立项结论。临时工作区已清理，报告不保存 API Key。
+#### L1/L2/L3×3 首轮正式基线（2026-11-19）
+
+- 报告 `eval/runtime-reports/long-session-20261119-213016-388.json`：9 个 run 全部完成，provider 失败率 0。成功率 **L1 2/3、L2 2/3、L3 0/3**；中位调用数 L1 37、L2 77、L3 102；中位 token 189,891 / 441,398 / 954,558；中位耗时 192s / 407s / 659s。
+- **结论无效，发现两处真实缺陷并已修复**：
+  1. `LongSessionDataset.render(Turn)` 调用了三参重载，只替换 `{index*}`，**从未替换 `{first}`/`{last}`**；L2/L3 的真实 prompt 带着字面 `Unit{first}`，模型反复追问区间。已改为二参重载，并新增 `turnPromptSubstitutesFirstAndLast` 回归测试。
+  2. `SpringAiAgentClient.streamChat` 在 `memorySummary` 非空时走 `ChatClient`，其内置工具执行循环绕过 `ToolRegistry.dispatch`，直接把 `BaseTool.call` 的兜底错误当工具结果返回模型；该错误**只出现在 3 个 L3 run**（唯一注入摘要的 level）。已删除 ChatClient 分支，摘要改用 `Prompt.augmentSystemMessage` 追加到 system 尾部，统一走 `chatModel.stream`。
+- 验证：`LongSessionDatasetTest` 13 项 + `LongSessionLiveRunnerTest` 5 项共 18 项通过；**后端全量 396 tests / 0 失败 / 0 错误 / 17 跳过，BUILD SUCCESS（2026-11-19 22:31）**。修复后的记忆摘要路径尚未经真实模型复验。
+- 首轮 `rule2PlanFirst=true`（3/5 计划类失败）不能作为 P7-03 立项依据；L3 记忆探针 3/3 失败方向一致，但混有上述缺陷。**修复后需重跑 L1/L2/L3×3，才可判定规则 2/3。**
+
+#### 第二轮基线与 tool_calls 协议缺陷（2026-11-20）
+
+- 报告 `eval/runtime-reports/long-session-20261120-124420-563.json`（L2+L3×3）：**L2 1/3、L3 0/3**。前两处缺陷的症状（占位符追问、ToolRegistry 兜底错误）均已消失。
+- 新发现并修复**产品级协议 bug**：一次响应并行发起多个写工具时，`ReActAgentService` 把诊断 user 消息插在第一个写工具的响应之后、同组其余 tool 响应之前，provider 以 400「insufficient tool messages」拒绝整段历史，3 个 L3 全部因此中断。
+- 零成本复现：新增 `ReActToolCallProtocolTest`，脚本模型一次返回两个写调用，第二次请求即出现 `expected=[call_0_0, call_0_1], answered=[call_0_0], nextRole=user`。
+- 修复：诊断等 user 消息先暂存到 `deferredUserMessages`，本组 tool 响应全部写完后统一追加。相关 17 项测试通过，**后端全量 398 tests / 0 失败 / 0 错误 / 17 跳过，BUILD SUCCESS（2026-11-20 13:07）**。
+- 另修复 Runner 环境问题：本机 `mvn`/`JAVA_HOME` 不在 PATH 时，使用 `~/.m2/wrapper/dists` 下的 Maven 与 `~/.jdks/temurin-24`。
+
+#### P7-04 记忆摘要升级（2026-11-20，已完成并验证）
+
+**改动**：[LongSessionLiveRunner.java](file:///d:/test-code/agent-gateway-v3/src/test/java/com/capsule/agentkey/eval/longsession/LongSessionLiveRunner.java#L438-L465) 的 `checkpointSummary` 从**进度摘要**（104 字符："已完成 N turns，工具调用 M 次"）升级为**记忆摘要**三层结构：
+1. 记忆锚点（来自数据集 `memory.anchor`）：让模型在长会话后仍能回答早期决策
+2. 已完成文件区间（累积 `Turn.first`/`Turn.last`）：让模型知道哪些文件已经处理过
+3. 进度计数 + 防重复约束（保留原有）
+
+**离线测试**：`LongSessionLiveRunnerTest` 新增 4 项 P7-04 回归（锚点必须出现、区间累积正确、空区间降级、字符数在 150-600 范围），全过；相关 25 项目标测试全绿。
+
+**真实模型验证（L3×3）**：报告 `long-session-20261120-152022-008.json`。
+
+| 指标 | 修复前（第三轮） | 修复后（本轮） | 变化 |
+|---|---|---|---|
+| memoryProbePassed | **0/3 (0%)** | **3/3 (100%)** | ✅ |
+| 成功率 | 0/3 | **2/3 (66.7%)** | ✅ |
+| errors | 空 | 空 | 稳定 |
+| maxSummaryChars | 104 | **245** | +136 字符 |
+| promptTokens 中位数 | 1,021,534 | **1,052,796** | **+3.06%**（远低于 15% 阈值） |
+
+**剩余问题**：第三个 run 失败于 `planCompletion=80, required=100; incompleteTurns=1`——计划面板把最后一步标记为 INCOMPLETE 而非 COMPLETED，和记忆无关，是 `update_plan` 工具的一个小边界问题，归入 P7-03 plan-first 延后时一起处理。
+
+**结论**：记忆摘要升级完全命中 P7-02 基线暴露的瓶颈——模型记不住早期决定。当前方案（锚点+区间+进度的结构化摘要，零额外模型调用成本）足以支撑 L3 级别长会话的记忆需求。完整决策见 [p7-02-decision.md](../phases/phase7/p7-02-decision.md)。
+
 ## 12. 完成档案使用规则
 
 1. 新任务完成后，将任务编号、实际改动、测试结果和验收边界移入本文。
