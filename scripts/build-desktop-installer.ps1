@@ -120,12 +120,19 @@ try {
         # 但进程退出码仍是 0；这里显式检查退出码，避免 CI 环境误判
         if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 失败' }
     }
-    $electronDir = Join-Path (Join-Path $repo 'desktop') 'node_modules\electron\dist'
-    if (-not (Test-Path -LiteralPath $electronDir)) {
-        Write-Step "Electron dist 缺失，重新执行 desktop npm ci（上次可能被 stderr 警告误判）"
-        & npm ci
-        if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 重试仍失败' }
+    # Electron 包特殊：npm ci 只装 JS wrapper，dist/ 二进制需要 postinstall 下载。
+    # CI runner 上经常因为网络或 postinstall 被跳过导致 dist 不完整。
+    $electronVersionFile = Join-Path (Join-Path $repo 'desktop') 'node_modules\electron\dist\version'
+    if (-not (Test-Path -LiteralPath $electronVersionFile)) {
+        Write-Step "Electron dist 二进制缺失，强制 electron install 补全"
+        & npx electron install 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Step "npx electron install 失败，退回到完整 npm ci"
+            & npm ci
+            if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 重试仍失败' }
+        }
     }
+    Assert-File $electronVersionFile "Electron dist 不完整：找不到 dist\version（CI 上常因 postinstall 跳过，已尝试强制 install）"
     $builder = Join-Path $repo 'desktop\node_modules\.bin\electron-builder.cmd'
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
 
