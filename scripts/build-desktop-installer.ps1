@@ -121,21 +121,31 @@ try {
         if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 失败' }
     }
     # Electron 包特殊：npm ci 只装 JS wrapper，dist/ 二进制需要 postinstall 下载。
-    # CI runner 上经常因为网络或 postinstall 被跳过导致 dist 不完整。
+    # CI runner 上 Electron 自带的 install.js 在 Windows PowerShell 下经常卡死（30min+ 无输出），
+    # 绕过它直接用 curl.exe 下载 zip + Expand-Archive 解压，更可靠且有清晰进度。
     $electronVersionFile = Join-Path (Join-Path $repo 'desktop') 'node_modules\electron\dist\version'
     if (-not (Test-Path -LiteralPath $electronVersionFile)) {
-        Write-Step "Electron dist 二进制缺失，强制 electron install 补全（最多 3 次重试）"
-        $ok = $false
+        # 从 desktop/package.json 读取 Electron 版本
+        $pkgJson = Get-Content (Join-Path $repo 'desktop\package.json') -Raw | ConvertFrom-Json
+        $electronVer = $pkgJson.devDependencies.electron -replace '[\^~]', ''
+        Write-Step "Electron dist 缺失，手动下载 v$electronVer (win32-x64)"
+        $distDir = Split-Path $electronVersionFile
+        New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+        $zip = Join-Path $env:TEMP "electron-v$electronVer-win32-x64.zip"
+        $url = "https://github.com/electron/electron/releases/download/v$electronVer/electron-v$electronVer-win32-x64.zip"
         for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Write-Host "Electron install attempt $attempt/3"
-            & npx electron install @('-f') 2>&1 | Out-Host
-            if (Test-Path -LiteralPath $electronVersionFile) { $ok = $true; break }
-            if ($attempt -lt 3) { Start-Sleep -Seconds 10 }
+            Write-Host "curl.exe 下载 attempt $attempt/3: $url"
+            & curl.exe @('-L', '--fail', '--retry', '3', '--retry-delay', '5', '--connect-timeout', '30', '-o', $zip, $url)
+            if ($LASTEXITCODE -eq 0 -and (Get-Item $zip).Length -gt 100MB) { break }
+            Write-Host "下载失败或太小，重试..."
+            if (Test-Path $zip) { Remove-Item $zip -Force }
         }
-        if (-not $ok) {
-            Write-Step "3 次 electron install 均未拉到 dist/，退回完整 npm ci 最后一次"
-            & npm ci
+        if (-not (Test-Path $zip) -or (Get-Item $zip).Length -lt 100MB) {
+            throw "Electron zip 下载失败：$url"
         }
+        Write-Host "解压到 $distDir"
+        Expand-Archive -LiteralPath $zip -DestinationPath $distDir -Force
+        Remove-Item $zip -Force
     }
     Assert-File $electronVersionFile "Electron dist 不完整：找不到 dist\version（CI 上常因 postinstall 跳过，已尝试强制 install）"
     $builder = Join-Path $repo 'desktop\node_modules\.bin\electron-builder.cmd'
