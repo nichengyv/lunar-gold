@@ -70,9 +70,7 @@ public class ReActAgentService {
     /** 只读批执行池：daemon 线程，按需初始化；关闭时中断未完成任务 */
     private volatile java.util.concurrent.ExecutorService readOnlyToolPool;
 
-    //B2：送入大模型的单条工具结果上限（字符）。网页抓取/文档片段可能极大，
-    //不截断的话一次工具调用就能撑爆上下文窗口、推高 token 费用
-    private static final int TOOL_CONTENT_LIMIT = 2000;
+    //B2 已移至 AgentPolicy.Reasoning.toolContentLimit()，按档位动态收紧（FAST=500, STANDARD=1000, DEEP=2000）
 
     //P4-07：单次运行 token 预算，0 表示不限制；超限直接中断本轮
     @org.springframework.beans.factory.annotation.Value("${agent.budget.max-tokens-per-run:0}")
@@ -108,9 +106,12 @@ public class ReActAgentService {
      *
      * <p>P4-07：超过 {@code toolSpillChars} 的结果先整份落文件，
      * 上下文里只留头部预览和文件路径，需要细节时模型可以自己 read_file。
+     *
+     * <p>P7-04b：limit 不再固定 2000，改为随推理档位动态收紧
+     * （FAST=500, STANDARD=1000, DEEP=2000），避免短任务也塞大段工具结果。
      */
-    private String truncateForContext(String s) {
-        if (s == null || s.length() <= TOOL_CONTENT_LIMIT) {
+    private String truncateForContext(String s, int limit) {
+        if (s == null || s.length() <= limit) {
             return s;
         }
         if (s.length() > toolSpillChars) {
@@ -121,7 +122,7 @@ public class ReActAgentService {
                         + "，需要细节请用 read_file 分段读取）…";
             }
         }
-        int half = TOOL_CONTENT_LIMIT / 2;
+        int half = limit / 2;
         return s.substring(0, half)
                 + "\n…（中间内容省略）…\n"
                 + s.substring(s.length() - half);
@@ -589,6 +590,11 @@ public class ReActAgentService {
                 boolean roundFileChanged = false;
                 //P5-08：当前连续只读批的执行结果（下标 → 结果）。写/命令调用不入批，遇到即中断批。
                 Map<Integer, ToolResult> readOnlyBatch = Map.of();
+                //诊断等 user 消息绝不能插在 assistant(tool_calls) 与本组 tool 响应之间：
+                //并行调用多个写工具时，第一个写操作产生的诊断若立即入列，会把剩余 tool 响应
+                //隔到 user 之后，provider 直接以 400「insufficient tool messages」拒绝整段历史。
+                //先暂存，本组 tool 响应全部写完后统一追加。
+                List<ObjectNode> deferredUserMessages = new ArrayList<>();
                 for (int callIndex = 0; callIndex < streamedToolCalls.size(); callIndex++) {//循环遍历，支持一次调用多个工具
                     ObjectNode toolCall = streamedToolCalls.get(callIndex);
                     String toolName = toolCall.path("function").path("name").asText();
@@ -684,7 +690,7 @@ public class ReActAgentService {
                     //执行失败：填入错误提示文本
                     //B2：无论成败都过一遍截断，防止超长内容进入上下文
                     String toolContent = result.isSuccess() ? result.getContent() : "错误: " + result.getError();
-                    toolMsg.put("content", truncateForContext(toolContent));
+                    toolMsg.put("content", truncateForContext(toolContent, policy.reasoning().toolContentLimit()));
 
                     messages.add(toolMsg);//把组装完毕的tool消息存入全局消息数组
 
@@ -733,7 +739,7 @@ public class ReActAgentService {
                             ObjectNode diagMsg = mapper.createObjectNode();
                             diagMsg.put("role", "user");
                             diagMsg.put("content", diagnostics.formatForPrompt());
-                            messages.add(diagMsg);
+                            deferredUserMessages.add(diagMsg);
                             if (diagnostics.hasDiagnostics()) {
                                 repeatedDiagnostics = fingerprint.equals(lastDiagnosticsFingerprint)
                                         ? repeatedDiagnostics + 1 : 1;
@@ -790,6 +796,9 @@ public class ReActAgentService {
                         return;
                     }
                 }
+
+                //本组 tool 响应已全部就位，诊断等 user 消息现在才能入列（排在 tool 响应之后）
+                messages.addAll(deferredUserMessages);
 
                 //P5-06：一轮写操作结束 → 执行一次项目验证。通过则告诉模型不要重复验证；
                 //失败则在预算内回灌输出，让模型修复；超过重试或重复指纹阈值立即停止。

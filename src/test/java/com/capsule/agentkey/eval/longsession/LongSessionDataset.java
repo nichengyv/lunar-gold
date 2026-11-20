@@ -230,7 +230,7 @@ final class LongSessionDataset {
     }
 
     static String render(Turn turn) {
-        String prompt = render(turn.prompt(), "", turn.first());
+        String prompt = render(turn.prompt(), turn);
         if (turn.scope() != null && !turn.scope().isBlank()) {
             prompt += "\n#scope: " + turn.scope();
         }

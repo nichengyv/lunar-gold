@@ -18,22 +18,25 @@ public record AgentPolicy(String model, Reasoning reasoning, Permission permissi
      * 一个「读目录 → 读配置 → 写多个文件 → 跑测试」的任务在标准档下轻易撞顶。
      */
     public enum Reasoning {
-        FAST("快速", 10, 6, 2, 3000),
-        STANDARD("标准", 30, 12, 4, 6000),
-        DEEP("深度", 60, 18, 8, 12000);
+        FAST("快速", 10, 6, 2, 3000, 500),
+        STANDARD("标准", 30, 12, 4, 6000, 1000),
+        DEEP("深度", 60, 18, 8, 12000, 2000);
 
         private final String label;
         private final int maxToolRounds;
         private final int historyCount;
         private final int ragHistoryCount;
         private final int historyCharBudget;
+        private final int toolContentLimit;
 
-        Reasoning(String label, int maxToolRounds, int historyCount, int ragHistoryCount, int historyCharBudget) {
+        Reasoning(String label, int maxToolRounds, int historyCount, int ragHistoryCount,
+                  int historyCharBudget, int toolContentLimit) {
             this.label = label;
             this.maxToolRounds = maxToolRounds;
             this.historyCount = historyCount;
             this.ragHistoryCount = ragHistoryCount;
             this.historyCharBudget = historyCharBudget;
+            this.toolContentLimit = toolContentLimit;
         }
 
         public String label() {
@@ -51,6 +54,11 @@ public record AgentPolicy(String model, Reasoning reasoning, Permission permissi
 
         public int historyCharBudget() {
             return historyCharBudget;
+        }
+
+        /** 单条工具结果进入上下文的字符上限；按档位收紧，避免短任务也塞 2000 字符 */
+        public int toolContentLimit() {
+            return toolContentLimit;
         }
 
         public static Reasoning from(String raw) {

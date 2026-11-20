@@ -187,6 +187,21 @@ class LongSessionDatasetTest {
     }
 
     @Test
+    void turnPromptSubstitutesFirstAndLast() throws IOException {
+        LongSessionDataset.Spec l2 = findByLevel("L2");
+
+        String first = LongSessionDataset.render(l2.turns().get(0));
+        assertTrue(first.contains("Rule1 至 Rule8"), () -> "首 turn 未替换区间占位符：" + first);
+        assertFalse(first.contains("{first}") || first.contains("{last}"),
+                () -> "首 turn 仍含未替换占位符：" + first);
+
+        String last = LongSessionDataset.render(l2.turns().get(2));
+        assertTrue(last.contains("Rule17 至 Rule24"), () -> "末 turn 未替换区间占位符：" + last);
+        assertFalse(last.contains("{first}") || last.contains("{last}"),
+                () -> "末 turn 仍含未替换占位符：" + last);
+    }
+
+    @Test
     void failureAttributionHintsCoverAllRequiredKeys() throws IOException {
         LongSessionDataset.Spec l1 = findByLevel("L1");
         LongSessionDataset.Spec l2 = findByLevel("L2");

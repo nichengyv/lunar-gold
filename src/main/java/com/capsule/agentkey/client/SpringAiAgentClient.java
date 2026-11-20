@@ -4,7 +4,6 @@ import com.capsule.agentkey.config.SpringAiChatModelConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.chat.messages.Message;
@@ -202,25 +201,20 @@ public class SpringAiAgentClient implements AgentClient {
                 @Override public void onComplete() { callback.onComplete(); }
                 @Override public void onError(Throwable t) { callback.onError(t); }
             };
-            Duration idleTimeout = Duration.ofSeconds(modelConfig.idleTimeoutSeconds());
-            if (memorySummary == null || memorySummary.isBlank()) {
-                chatModel.stream(prompt)
-                        // P4-06：两个分片之间的最大空闲时间；模型卡住时尽快失败而不是无限等待
-                        .timeout(idleTimeout)
-                        .doOnNext(response -> handleResponse(response, wrapped, toolCallAcc))
-                        .doOnError(streamError::set)
-                        .blockLast();
-            } else {
-                ChatClient chatClient = ChatClient.builder(chatModel).build();
-                chatClient.prompt(prompt)
-                        .advisors(SessionMemoryAdvisor.of(memorySummary))
-                        .stream()
-                        .chatResponse()
-                        .timeout(idleTimeout)
-                        .doOnNext(response -> handleResponse(response, wrapped, toolCallAcc))
-                        .doOnError(streamError::set)
-                        .blockLast();
+            // 摘要仍追加到 system 文本尾部（与会话记忆 Advisor 的语义一致），但直接走 ChatModel：
+            // ChatClient 自带工具执行循环，会绕过 ToolRegistry.dispatch 直接调用 BaseTool.call，
+            // 把「工具执行必须经由 ToolRegistry.dispatch」这个兜底错误当成工具结果喂回模型。
+            if (memorySummary != null && !memorySummary.isBlank()) {
+                prompt = prompt.augmentSystemMessage(
+                        system -> new SystemMessage(system.getText() + SessionMemoryAdvisor.section(memorySummary)));
             }
+            Duration idleTimeout = Duration.ofSeconds(modelConfig.idleTimeoutSeconds());
+            chatModel.stream(prompt)
+                    // P4-06：两个分片之间的最大空闲时间；模型卡住时尽快失败而不是无限等待
+                    .timeout(idleTimeout)
+                    .doOnNext(response -> handleResponse(response, wrapped, toolCallAcc))
+                    .doOnError(streamError::set)
+                    .blockLast();
 
             if (streamError.get() != null) {
                 return new StreamResult(streamError.get(), sentChunk.get());
