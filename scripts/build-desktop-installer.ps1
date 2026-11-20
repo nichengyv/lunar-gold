@@ -85,6 +85,9 @@ try {
 
 if (-not (Test-Path -LiteralPath $pgRuntime -PathType Leaf)) {
     Write-Step '缺少 PostgreSQL + pgvector 运行时，开始构建'
+    Write-Step '预拉 Maven 依赖（zonky embedded-postgres Windows 二进制是 test scope，需全 scope 拉取）'
+    & $MavenCmd -B -q --no-transfer-progress dependency:resolve
+    Assert-NativeSuccess 'Maven 依赖拉取失败'
     & (Join-Path $PSScriptRoot 'build-pg-runtime.ps1')
     Assert-NativeSuccess 'PG 运行时构建失败'
 }
