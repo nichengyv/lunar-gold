@@ -124,12 +124,17 @@ try {
     # CI runner 上经常因为网络或 postinstall 被跳过导致 dist 不完整。
     $electronVersionFile = Join-Path (Join-Path $repo 'desktop') 'node_modules\electron\dist\version'
     if (-not (Test-Path -LiteralPath $electronVersionFile)) {
-        Write-Step "Electron dist 二进制缺失，强制 electron install 补全"
-        & npx electron install 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            Write-Step "npx electron install 失败，退回到完整 npm ci"
+        Write-Step "Electron dist 二进制缺失，强制 electron install 补全（最多 3 次重试）"
+        $ok = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "Electron install attempt $attempt/3"
+            & npx electron install @('-f') 2>&1 | Out-Host
+            if (Test-Path -LiteralPath $electronVersionFile) { $ok = $true; break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 10 }
+        }
+        if (-not $ok) {
+            Write-Step "3 次 electron install 均未拉到 dist/，退回完整 npm ci 最后一次"
             & npm ci
-            if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 重试仍失败' }
         }
     }
     Assert-File $electronVersionFile "Electron dist 不完整：找不到 dist\version（CI 上常因 postinstall 跳过，已尝试强制 install）"

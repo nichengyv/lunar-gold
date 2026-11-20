@@ -32,6 +32,7 @@ permissions:
 jobs:
   windows-x64:
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
       SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -51,6 +52,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      # Electron 二进制（~150MB）从 GitHub releases 下载，CI runner 上常限速。
+      # 缓存后同版本 Electron 秒命中，后续 run 不再重复下载。
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-win-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: |
+            electron-win-
 
       # 构建到 unpacked 为止。runner 自带 Maven（PATH 可寻），
       # JAVA_HOME 由 setup-java 设置，无需显式传参。
