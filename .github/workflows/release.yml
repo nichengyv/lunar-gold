@@ -17,12 +17,12 @@
 name: Release
 
 on:
-  # 标签触发暂时关闭：CI 打包链路尚未在 P3-07 中验证，当前发布使用本地已验证产物。
-  # 若开启，推送 v* 标签会另起一个 CI 草稿 Release，与手工发布的同名标签冲突。
-  # 待 P3-07 打通并冒烟通过后恢复 push.tags。
-  # push:
-  #   tags:
-  #     - 'v*'
+  # P3-07 打通并冒烟通过（2026-11-20）：本地 314MB NSIS 安装包 + CI 全绿
+  # 推送 v* 标签自动起草稿 Release；无 SIGNPATH secrets 时签名步骤自动跳过，
+  # 流程仍可完整产出未签名草稿 Release（安装包 + SHA256 + latest.yml + 合规文件）。
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
