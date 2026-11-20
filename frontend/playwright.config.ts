@@ -2,7 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 // P5-11-1：E2E 只验证前端关键路径，后端通过 page.route 仿真（见 e2e/fixtures/api.ts）。
 // 默认启动 Vite dev server；设置 E2E_BASE_URL 可接已启动的实例。
-const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5174';
+// 用 localhost 而非 127.0.0.1：Vite 6 默认绑定 IPv6 loopback [::1]，
+// Windows 上 127.0.0.1（IPv4）无法直连；localhost 会优先命中 [::1]
+const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5174';
 
 export default defineConfig({
   testDir: './e2e',
