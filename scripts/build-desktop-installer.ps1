@@ -114,7 +114,18 @@ Assert-File $jreJava '裁剪 JRE 缺少 java.exe'
 Write-Step '生成 unpacked 应用'
 Push-Location (Join-Path $repo 'desktop')
 try {
-    if (-not $SkipInstall) { & npm ci; Assert-NativeSuccess '桌面壳 npm ci 失败' }
+    if (-not $SkipInstall) {
+        & npm ci
+        # npm 在某些平台会把 stderr 警告（如 deprecated）当成 NativeCommandError 抛给 PowerShell，
+        # 但进程退出码仍是 0；这里显式检查退出码，避免 CI 环境误判
+        if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 失败' }
+    }
+    $electronDir = Join-Path (Join-Path $repo 'desktop') 'node_modules\electron\dist'
+    if (-not (Test-Path -LiteralPath $electronDir)) {
+        Write-Step "Electron dist 缺失，重新执行 desktop npm ci（上次可能被 stderr 警告误判）"
+        & npm ci
+        if ($LASTEXITCODE -ne 0) { Assert-NativeSuccess '桌面壳 npm ci 重试仍失败' }
+    }
     $builder = Join-Path $repo 'desktop\node_modules\.bin\electron-builder.cmd'
     Assert-File $builder '桌面壳依赖不完整，请去掉 -SkipInstall 后重试'
 
