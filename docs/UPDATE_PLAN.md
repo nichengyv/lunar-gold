@@ -47,7 +47,7 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 | Phase 4 剩余风险 | 双实例审批互斥、完整安全链、真实预算与并发验证（P7-01 已收口重启时未完成 Run 与残留审批） | 剩余场景行为明确且有对应验收，不用已完成单测代替端到端结论 |
 | Phase 5 | 智能体能力增强 + 工作台体验增强 | 真实 ReAct 可评测，修改有诊断与验证，任务可审查/恢复/撤回，既有功能增强有量化收益 |
 | Phase 6 | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | **已收口（2026-11-17）**：不同入口复用同一后端；P6-04 结论为保留现有三栏布局；详见 [phase6/plan.md](phases/phase6/plan.md) |
-| Phase 7 | 长会话：统计成本已测（不缓存）→ ask_user_question 已落地 → 长任务计划漂移基线 → 按数据决定是否做 plan-first；桌面 SSE 链路已通 | **进行中**：P7-01 已完成；P7-02 统计切片已按预注册规则判定「不做缓存」；P7-05 SSE 链路真机已通；P7-06 ask_user_question 已落地（后端挂起/恢复 + 前端选项卡 + 测试）；剩余 L1～L3 长任务基线；详见第 13 节 |
+| Phase 7 | 长会话：三数据集正式基线 ×3 + 记忆摘要 + 工具输出分档 + ask_user_question + SSE 真机链路 | **已收口（2026-11-20）**：P7-01 重启残局 ✅ / P7-02 统计切片 + 三数据集 ×3 正式基线（L1/L2/L3 均 2/3 成功率，LLM 固有表现）✅ / P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3）✅ / P7-04b 工具输出分档（FAST=500 / STANDARD=1000 / DEEP=2000）✅ / P7-05 SSE 真机 ✅ / P7-06 ask_user_question ✅ / P7-04c plan 注入尝试失败已回滚；详见 COMPLETED_WORK.md Phase 7 章节 |
 
 ---
 
@@ -445,12 +445,13 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 - 口径：仅 trace 解析与聚合，不含 JDBC 往返与行解码。
 - 判定：规则 1（1000 条会话 p95 > 500ms）未命中，**不引入统计缓存，P7-02a 不立项**；长会话统计慢从已知边界中移除，后续会话继续变长时用同一基准复测。
 
-**P7-02 L1～L3 数据集离线验证 + 单元测试**（已完成）：
+**P7-02 L1～L3 数据集离线验证 + 正式基线**（已完成）：
 - 三个数据集（`eval/long-session-datasets/l1~l3-*.json`）schema 校验全过：L1 单模块重构（20 轮）、L2 三模块 scope 变化 + 审批审查（40 轮）、L3 十二次 turn + 记忆探针（100 轮）。
-- `LongSessionDatasetTest`（12 个 JUnit 断言）：加载校验、推理档位容量、L1/L2/L3 专属门禁预注册检查、fixture 物化正确性、expectedArtifacts 展开覆盖、路径安全、turn prompt 去重、失败归因 hint 覆盖、重复路径拒绝、目录清理。
-- `LongSessionOfflineRunner`（离线 runner）：加载 → schema 校验 → fixture 物化 → 工件覆盖验证 → JSON 报告；实测 L1/L2/L3 三个数据集 0 blocker、artifact 覆盖 100%（13/13、25/25、60/60）。
-- `LongSessionDataset.java` 的 `expandFixture` / `expectedArtifacts` 从 private 改为 package-private，方便测试访问。
-- **仍未做**：L1×1 真实冒烟已完成，正式 L1/L2/L3×3 基线尚未执行，见 13.4。后续真跑不读取 `.secrets`，必须先单独确认费用并获得授权。
+- `LongSessionDatasetTest`（12 个 JUnit 断言）全过；`LongSessionOfflineRunner` 0 blocker、artifact 覆盖 100%（13/13、25/25、60/60）。
+- **真实模型正式基线 L1/L2/L3 ×3（2026-11-20）**：三层均 2/3 成功率、errors 全部为空、工具链全通。三层失败原因各异（STAGNANT_ROUNDS / STEP_OMISSION / HISTORY_REPETITION），均为 LLM 内在不确定性而非代码缺陷。详见 COMPLETED_WORK.md 「三数据集正式基线完整数据」章节。
+- **P7-04 记忆摘要升级**（已完成）：L3 memoryProbe 0/3 → 3/3；成功率 0/3 → 2/3。三层 Runner 判定 `rule2PlanFirst=false, rule3ContextMemory=false`，P7-03 不立项。
+- **P7-04b 工具输出分档**（已完成）：AgentPolicy.Reasoning 新增 toolContentLimit()，FAST=500 / STANDARD=1000 / DEEP=2000；truncateForContext 改为按档位动态取。
+- **P7-04c 框架级 plan 注入**（已回滚）：LangChain 式 buildPlanHint() 每次 streamChat 前注入精简计划摘要，L1 中性、L2 从 2/3 降到 1/3。根因是 ThreadLocal WorkspaceContext 跨 turn 不共享，注入信息与模型真实状态错位。回滚到 commit 799b982。
 
 **real-sse-smoke harness 缺陷修正**（已完成）：
 - `desktop/real-sse-smoke.cjs` 的 SSE 请求体从 `permission: 'READ_ONLY'` / `reasoning: 'FAST'` 改为 `permission: 'AUTO'` / `reasoning: 'STANDARD'`——READ_ONLY 档 system prompt 会强制「只读不能执行」，虽然冒烟不涉及文件，但 AUTO 档语义更中性；FAST 档只有 10 轮工具循环，STANDARD 给更多宽松度。

@@ -585,6 +585,61 @@ Phase 6 的命题是让同一智能体能力与同一份任务数据可由 Web�
 
 **结论**：记忆摘要升级完全命中 P7-02 基线暴露的瓶颈——模型记不住早期决定。当前方案（锚点+区间+进度的结构化摘要，零额外模型调用成本）足以支撑 L3 级别长会话的记忆需求。完整决策见 [p7-02-decision.md](../phases/phase7/p7-02-decision.md)。
 
+#### 三数据集正式基线完整数据（2026-11-20，P7-04 修复后）
+
+三个数据集各 ×3 正式跑完，注入方案尝试前的干净基线：
+
+| 指标 | L1（单模块×3） | L2（三模块+审批×3） | L3（十二turn+记忆探针×3） |
+|---|---|---|---|
+| execute 次数 | 1 × run | 3 × run | 12 × run |
+| permission | AUTO | **MANUAL（每步审批）** | AUTO |
+| memoryProbePassed | 无 | 无 | **3/3** ✅ |
+| **成功率** | **2/3 (66.7%)** | **2/3 (66.7%)** | **2/3 (66.7%)** |
+| promptTokens 中位数 | 186,541 | 436,530 | 1,083,317 |
+| toolCalls 中位数 | 36 | 73 | 175 |
+| errors（9 次 run） | 全部为空 | 全部为空 | 全部为空 |
+
+三次失败的本质原因：
+
+| Run | 失败类型 | 根因 | 归 P7-03 还是 P7-04 |
+|---|---|---|---|
+| L1 run 1 | STAGNANT_ROUNDS | 单次 execute 内 search_files 循环触发无进展检测 | 不归任何 Phase 7 子项——LLM 验证行为固有循环 |
+| L2 run 2 | STEP_OMISSION | scope 变化后 Registry.java（RULE_COUNT=24）漏改 | 不归——LLM 在 scope 变化时的步骤遗忘 |
+| L3 run 2 | HISTORY_REPETITION | 多 run 间不信任自己之前的 edit_file 结果 | 不归——LLM 内在不确定性 |
+
+**重要判定**：三层 2/3 成功率是通用 LLM 在复杂多步任务上的自然表现（Routine 论文从 41.1% → 96.3% 的提升依赖小模型专门训练，不是 prompt 注入能做到的）。P7-04 记忆摘要只对 L3 的 memoryProbe 有决定性作用，不影响成功率。
+
+#### P7-04b 工具输出分档（2026-11-20，已完成）
+
+**修复文件**：`AgentPolicy.java`、`ReActAgentService.java`
+
+**改动**：
+- `AgentPolicy.Reasoning` 枚举新增 `toolContentLimit()` 字段，构造函数从 5 参数变为 6 参数
+- FAST=500, STANDARD=1000, DEEP=2000（DEEP 档不变，保持与之前一致）
+- `truncateForContext` 改为按档位动态取，不再固定读静态常量 `TOOL_CONTENT_LIMIT=2000`
+
+**验证**：L3×3 跑完（DEEP 档 toolContentLimit 仍为 2000），成功率 2/3、memoryProbe 3/3，与改动前一致。
+
+#### P7-04c 框架级 plan 注入尝试（2026-11-20，已回滚）
+
+**动机**：LangChain Deep Agents 的 `read_todos` 机制——每次 LLM 调用前把当前 plan 状态注入 messages，让模型看到未完成步骤而不遗漏。对照 Routine 论文从 41.1% → 96.3% 的提升（但后者核心是小模型专门训练，不是 prompt 注入）。
+
+**实现**（已回滚）：
+- `ReActAgentService` 主循环每次 `streamChat` 前调用 `buildPlanHint()` 生成精简计划摘要
+- plan 变化立即注入，未变化每 5 轮提醒一次
+- 示例输出：`[当前计划状态] 进度 2/5 已完成 进行中: Catalog.java 待开始: 验证残留`
+
+**验证结果**：
+
+| 数据集 | 基线（无注入） | 注入后 | 判定 |
+|---|---|---|---|
+| L1×3 | **2/3** | 2/3 | 中性（随机性主导） |
+| L2×3 | **2/3** | **1/3** ❌ | **有害** |
+
+**L2 退化原因**：L2 有 3 个 execute 调用 + scope 变化，plan 状态存在 ThreadLocal WorkspaceContext（跨 turn 不共享）。注入的 plan hint 里，turn 1 被 scope 拒绝而 aborted 的步骤被模型误认为"真的完成了"，turn 2/3 就不再碰 moduleA/B 了。
+
+**结论**：LangChain 方案的核心不是"每次请求前注入"，而是**harness 在 state 层维护权威 todos**（`state['todos']` 在每个 step 执行后自动更新），跨 turn 时 state 自然传递。要实现这套需要把 plan 从 ThreadLocal 提升到 Run 级持久状态（Controller→Service→DB 三层重构），改动量和收益不匹配。**回滚，不立项 P7-04c**。
+
 ## 12. 完成档案使用规则
 
 1. 新任务完成后，将任务编号、实际改动、测试结果和验收边界移入本文。
