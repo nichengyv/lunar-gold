@@ -107,7 +107,7 @@ jobs:
             --prepackaged "$env:RUNNER_TEMP\desktop-pack\win-unpacked" `
             --publish never `
             --config.directories.output="$env:GITHUB_WORKSPACE\release\installer"
-          if ($LASTEXITCODE -ne 0) { throw "electron-builder NSIS 构建失败" }
+          if ($LASTEXITCODE -ne 0) { throw "electron-builder NSIS build failed" }
 
       - name: Stage and verify compliance files
         shell: powershell
@@ -123,19 +123,19 @@ jobs:
           foreach ($name in $names) {
             $sourceFile = Join-Path $source $name
             $unpackedFile = Join-Path $unpacked $name
-            if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) { throw "合规 staging 缺少 $name" }
-            if (-not (Test-Path -LiteralPath $unpackedFile -PathType Leaf)) { throw "unpacked 缺少合规文件 $name" }
+            if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) { throw "compliance staging missing: $name" }
+            if (-not (Test-Path -LiteralPath $unpackedFile -PathType Leaf)) { throw "unpacked missing compliance file: $name" }
             if ((Get-FileHash -LiteralPath $sourceFile).Hash -ne (Get-FileHash -LiteralPath $unpackedFile).Hash) {
-              throw "unpacked 合规文件哈希不一致：$name"
+              throw "unpacked compliance hash mismatch: $name"
             }
             Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $release $name) -Force
           }
           foreach ($name in @('SBOM.json', 'SBOM.frontend.json', 'SBOM.desktop.json', 'SBOM.runtime.json')) {
             $bom = Get-Content -LiteralPath (Join-Path $release $name) -Raw | ConvertFrom-Json
-            if ($bom.bomFormat -ne 'CycloneDX' -or @($bom.components).Count -eq 0) { throw "Release SBOM 校验失败：$name" }
+            if ($bom.bomFormat -ne 'CycloneDX' -or @($bom.components).Count -eq 0) { throw "Release SBOM validation failed: $name" }
           }
           if ((Get-Item -LiteralPath (Join-Path $release 'THIRD-PARTY-LICENSES.txt')).Length -eq 0) {
-            throw '第三方许可合集为空'
+            throw 'THIRD-PARTY-LICENSES.txt is empty'
           }
 
       - name: Verify signatures (only when signing is enabled)
@@ -148,8 +148,8 @@ jobs:
           )
           foreach ($t in $targets) {
             $sig = Get-AuthenticodeSignature -LiteralPath $t
-            if ($sig.Status -ne 'Valid') { throw "签名校验失败：$t -> $($sig.Status)" }
-            Write-Host "签名有效：$t（$($sig.SignerCertificate.Subject)）"
+            if ($sig.Status -ne 'Valid') { throw "signature verification failed: $t -> $($sig.Status)" }
+            Write-Host "signature valid: $t ($($sig.SignerCertificate.Subject))"
           }
 
       - name: Generate SHA-256 checksums
@@ -209,7 +209,7 @@ jobs:
         run: |
           $dir = "$env:GITHUB_WORKSPACE\release\installer"
           $exe = Get-ChildItem $dir -Filter 'LunarGold-Setup-*.exe' | Select-Object -First 1
-          if (-not $exe) { throw '找不到签名后的安装包' }
+          if (-not $exe) { throw 'cannot find signed installer exe' }
           $version = $exe.BaseName -replace '^LunarGold-Setup-', ''
           $sha = [Convert]::ToBase64String(
             [System.Security.Cryptography.SHA512]::Create().ComputeHash([System.IO.File]::ReadAllBytes($exe.FullName))
@@ -228,10 +228,9 @@ jobs:
         shell: powershell
         run: |
           $v = (Get-Content "$env:GITHUB_WORKSPACE\desktop\package.json" -Raw | ConvertFrom-Json).version
-          if (-not $v) { throw '无法从 desktop/package.json 读取版本号' }
-          # 必须无 BOM 追加，否则 GITHUB_ENV 会把 BOM 混进变量名
+          if (-not $v) { throw 'cannot read version from desktop/package.json' }
           [System.IO.File]::AppendAllText($env:GITHUB_ENV, "VERSION=$v`n", (New-Object System.Text.UTF8Encoding($false)))
-          Write-Host "发布版本：$v"
+          Write-Host "release version: $v"
 
       - name: Create draft release and upload binaries
         uses: softprops/action-gh-release@v2
