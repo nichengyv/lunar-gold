@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Run component and real ReAct runtime evaluations against their committed baselines.
 

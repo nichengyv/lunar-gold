@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<#
+﻿<#
 .SYNOPSIS
     生成桌面发布所需的 SBOM、第三方许可文本和合规文件。
 .DESCRIPTION

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Run the offline RAG retrieval evaluation and its gate.
 
