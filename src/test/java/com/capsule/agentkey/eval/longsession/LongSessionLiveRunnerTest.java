@@ -31,6 +31,28 @@ class LongSessionLiveRunnerTest {
     }
 
     @Test
+    void 多turn中间计划未完成不计失败但末turn必须收口() {
+        List<String> reasons = new ArrayList<>(List.of(
+                "UNVERIFIED:VERIFY_NOT_CONFIGURED",
+                "INCOMPLETE:PLAN_INCOMPLETE",
+                "UNVERIFIED:VERIFY_NOT_CONFIGURED"));
+        assertEquals(0, LongSessionLiveRunner.incompleteFailures(reasons, 1, true),
+                "中间 turn 的 PLAN_INCOMPLETE 属于跨 turn 计划，不计失败");
+
+        reasons.add("INCOMPLETE:PLAN_INCOMPLETE");
+        assertEquals(1, LongSessionLiveRunner.incompleteFailures(reasons, 2, true),
+                "末 turn 计划未收口仍计失败");
+    }
+
+    @Test
+    void 非计划类INCOMPLETE任何turn都计失败且单turn口径不变() {
+        List<String> reasons = List.of("INCOMPLETE:WRITE_TOOL_FAILED", "UNVERIFIED:VERIFY_NOT_CONFIGURED");
+        assertEquals(1, LongSessionLiveRunner.incompleteFailures(reasons, 1, true));
+        assertEquals(2, LongSessionLiveRunner.incompleteFailures(reasons, 2, false),
+                "单 turn 数据集维持原口径");
+    }
+
+    @Test
     void 无进展和最大轮次优先于工件缺失() throws IOException {
         LongSessionDataset.Spec spec = spec("L1");
         ObjectNode noProgress = baseMetrics();

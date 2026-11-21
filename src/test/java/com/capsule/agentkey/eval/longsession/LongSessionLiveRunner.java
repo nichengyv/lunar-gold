@@ -445,7 +445,9 @@ public class LongSessionLiveRunner {
             metrics.memoryProbePassed = finalAnswer.contains(spec.memory().anchor());
             checkCoverage(metrics, metrics.memoryProbePassed, "memoryProbe", metrics.memoryProbePassed ? 1 : 0, 1);
         }
-        checkCoverage(metrics, metrics.incompleteTurns == 0, "incompleteTurns", metrics.incompleteTurns, 0);
+        int incompleteFailures = incompleteFailures(metrics.completionReasons, metrics.incompleteTurns,
+                spec.turns().size() > 1);
+        checkCoverage(metrics, incompleteFailures == 0, "incompleteTurns", incompleteFailures, 0);
         checkCoverage(metrics, metrics.errors.isEmpty(), "executionErrors", metrics.errors.size(), 0);
 
         ObjectNode data = metrics.toJson(spec, repeat);
@@ -453,6 +455,22 @@ public class LongSessionLiveRunner {
         data.put("success", success);
         data.put("failureAttribution", success ? "NONE" : attribution(spec, data));
         return new RunOutcome(data, success, data.path("failureAttribution").asText());
+    }
+
+    /**
+     * 多 turn 数据集的完成口径（2026-11-21 调整，见 UPDATE_PLAN R7b-live）：
+     * 计划允许跨 turn，中间 turn 仅以 PLAN_INCOMPLETE 结束不算失败；其余 INCOMPLETE
+     * （写失败 / 审批拒绝 / 预算耗尽等）任何 turn 都计失败，且最后一个 turn 必须收口。
+     * 单 turn 数据集维持原口径：任何 INCOMPLETE 都计失败。
+     */
+    static int incompleteFailures(List<String> completionReasons, int incompleteTurns, boolean multiTurn) {
+        if (!multiTurn) return incompleteTurns;
+        long hard = completionReasons.stream()
+                .filter(r -> r.startsWith("INCOMPLETE") && !r.contains("PLAN_INCOMPLETE"))
+                .count();
+        boolean finalIncomplete = !completionReasons.isEmpty()
+                && completionReasons.get(completionReasons.size() - 1).startsWith("INCOMPLETE");
+        return (int) hard + (finalIncomplete ? 1 : 0);
     }
 
     private static void checkCoverage(Metrics metrics, boolean condition, String name, long actual, long minimum) {
