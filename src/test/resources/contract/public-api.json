@@ -33,6 +33,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/sessions/{sessionId}/resumable-run",
+      "scope": "run:read",
+      "group": "任务闭环"
+    },
+    {
+      "method": "GET",
       "path": "/api/clients/self",
       "scope": "client:admin",
       "group": "客户端自管理"
@@ -76,6 +82,12 @@
     {
       "method": "POST",
       "path": "/api/agent/chat/stream",
+      "scope": "chat:write",
+      "group": "任务闭环"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/runs/{runId}/resume",
       "scope": "chat:write",
       "group": "任务闭环"
     },

@@ -53,6 +53,9 @@ public class PublicApiCatalog implements SmartInitializingSingleton {
             new PublicEndpoint("POST", "/api/agent/approvals/{approvalId}", ApiScope.APPROVAL_WRITE.value(), GROUP_TASK),
             new PublicEndpoint("POST", "/api/agent/approvals/batch", ApiScope.APPROVAL_WRITE.value(), GROUP_TASK),
             new PublicEndpoint("GET", "/api/agent/sessions/{sessionId}/approvals", ApiScope.RUN_READ.value(), GROUP_TASK),
+            // R7b：进程重启后的显式续跑入口与可续跑探测
+            new PublicEndpoint("POST", "/api/agent/runs/{runId}/resume", ApiScope.CHAT_WRITE.value(), GROUP_TASK),
+            new PublicEndpoint("GET", "/api/agent/sessions/{sessionId}/resumable-run", ApiScope.RUN_READ.value(), GROUP_TASK),
             // 只读上下文
             new PublicEndpoint("GET", "/api/projects", ApiScope.PROJECT_READ.value(), GROUP_CONTEXT),
             new PublicEndpoint("GET", "/api/agent/sessions", ApiScope.PROJECT_READ.value(), GROUP_CONTEXT),
