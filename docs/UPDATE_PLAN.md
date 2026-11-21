@@ -1066,6 +1066,10 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **L3 初判 STEP_OMISSION 是评测口径问题，不是错误恢复失败**：第 4 turn `INCOMPLETE:PLAN_INCOMPLETE`（计划 5/6 步），其余 turn 均 `UNVERIFIED:VERIFY_NOT_CONFIGURED`；模型在后续 turn 自行完成全部 60 文件。根因：`RunTermination.candidateCompletion` 对任何 pending/in_progress 计划步判 INCOMPLETE，而多 turn 数据集的计划本就跨 turn；runner 又以 `incompleteTurns==0` 作为覆盖门禁，把正常的中间态误判为步骤遗漏。
 - **口径调整（单独提交，先于后续数据）**：新增 `LongSessionLiveRunner.incompleteFailures`——多 turn 数据集中间 turn 仅 PLAN_INCOMPLETE 不计失败；其余 INCOMPLETE（写失败 / 审批拒绝 / 预算耗尽等）任何 turn 仍计失败；末 turn 必须收口；单 turn 数据集口径不变。理由：多 turn 计划允许跨 turn，原口径与数据集设计矛盾。这不是放宽成功标准：工件、coverage、memoryProbe、末 turn 收口要求全部保留。新增 `LongSessionLiveRunnerTest` 2 例。
 - **缩样决策（用户确认）**：不再跑 L3 全量 10 case 与 condense A/B；L3/L4 先以本次冒烟 + 口径修正记录，全量真实模型运行只在用户再次明确批准时执行。
+- **口径修正后复验（同日第二次运行，同一 case）**：`success=true`、`failureAttribution=NONE`、`missingArtifacts=[]`、`coverageFailures=[]`、`incompleteTurns=0`、`planCompletionRate=1.0`、`memoryProbePassed=true`、12 turn 全部 SUCCEEDED、60/60 工件落地；162 次模型调用、177 次工具调用、总 tokens 923,686、墙钟 726s、`contextPeakPromptTokens=7,949`。说明先前 `STEP_OMISSION` 确为评测口径误判，产品侧无对应缺陷。
+- **L3 错误恢复的直接证据（本次复验）**：`toolFailures=1`、`recoveredTools=1`，即真实发生一次工具调用失败并在后续轮次自行恢复，未中断任务、未触发停滞。
+- **L3 仍存在的真实短板（归入 R7c L5）**：12 个 turn 的 `completionReasons` 全部为 `UNVERIFIED:VERIFY_NOT_CONFIGURED`——评测工作区未配置验证命令，模型只能依据「变更后文件诊断未发现编译错误」自称完成，多次在回答里明确声明「未做整体编译或测试，不能声称验证通过」。这正是「完成强校验」要解决的问题：完成状态目前仍依赖模型自报，缺工具级验证闭环。
+- **结论口径**：L3/L4 以 n=1 冒烟给出方向性结论（L4 达标、L3 机制可用），**不构成层完成率**；层完成率需 n≥10 全量，仍待批准。
 
 
 
