@@ -146,6 +146,21 @@ agent:
   # 上限由 Runtime 用例的实际批规模（2～3）与 fixture 基准的 p95 收益确定，不按经验随意放大。
   parallel:
     readonly-max-concurrency: ${AGENT_PARALLEL_READONLY_MAX_CONCURRENCY:3}
+  # 【R5 / P7-07 + P7-09】上下文接缝：计划软注入与三层压缩。
+  # 默认关闭：尚未完成 L2/L3 真实模型 A/B，先保持既有行为；开启后先用 `AGENT_CONTEXT_*` 灰度验证。
+  context:
+    plan-injection:
+      # 每轮从 agent_run.plan_json 重读最新计划，作为 user 消息软注入（不做控制流）
+      enabled: ${AGENT_CONTEXT_PLAN_INJECTION_ENABLED:false}
+    condense:
+      # 三层压缩总开关：语义折叠 → 摘要 → 滑窗；关闭时消息原样发送
+      enabled: ${AGENT_CONTEXT_CONDENSE_ENABLED:false}
+      # 滑窗硬上限（字符，约 30k tokens）；超出后从最早消息 FIFO 淘汰，保留首条 system
+      window-chars: ${AGENT_CONTEXT_CONDENSE_WINDOW_CHARS:120000}
+      # 摘要触发阈值占 window-chars 的比例；默认 70%
+      summarize-ratio: ${AGENT_CONTEXT_CONDENSE_SUMMARIZE_RATIO:0.7}
+      # 末尾保留的消息条数；工具调用组会向前扩展，避免切开 tool_calls 与 tool 响应
+      keep-recent-messages: ${AGENT_CONTEXT_CONDENSE_KEEP_RECENT_MESSAGES:6}
   # 【P5-05】变更文件诊断：默认进程内 javac；provider=lsp 时走外部 language server，
   # 未配置 lsp.command 或启动失败会自动降级，不阻塞工具调用
   diagnostics:

@@ -1,5 +1,6 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.agent.context.ContextAssembler;
 import com.capsule.agentkey.agent.run.FileChangeService;
 import com.capsule.agentkey.agent.run.LoopGuard;
 import com.capsule.agentkey.agent.stream.StreamPublisher;
@@ -58,7 +59,8 @@ public class AgentOrchestrator {
                              Long sessionId,
                              AtomicBoolean cancelRequested,
                              StreamCallback callback,
-                             ToolExecutor.ApprovalUi approvalUi) {
+                             ToolExecutor.ApprovalUi approvalUi,
+                             ContextAssembler contextAssembler) {
     }
 
     private final AgentClient springAiClient;
@@ -109,6 +111,8 @@ public class AgentOrchestrator {
         AtomicBoolean cancelRequested = invocation.cancelRequested();
         StreamCallback callback = invocation.callback();
         ToolExecutor.ApprovalUi approvalUi = invocation.approvalUi();
+        // R5：计划软注入与三层压缩只作用于本轮发给模型的副本，权威消息列表保持原样
+        ContextAssembler contextAssembler = invocation.contextAssembler();
 
         int round = 0;
         // P5-10-3：本轮开始时间，用于时间预算检查和前端耗时展示的对账
@@ -165,7 +169,8 @@ public class AgentOrchestrator {
             }
 
             StreamPublisher.Turn turn = streamPublisher.stream(
-                    springAiClient, invocation.apiKey(), policy.model(), messages, tools, advisorSummary,
+                    springAiClient, invocation.apiKey(), policy.model(),
+                    assembleContext(contextAssembler, messages), tools, advisorSummary,
                     callback::onChunk, callback::onUsage,
                     promptTokensTotal, completionTokensTotal, limits.maxTokensPerRun());
             String streamedText = turn.text();
@@ -472,7 +477,8 @@ public class AgentOrchestrator {
         messages.add(finalInstruction);
         //第三个参数传空工具列表：收尾这一次调用模型不能再发起 tool_calls，只能输出文本答案
         //R4：统一走 StreamPublisher，chunk/usage/预算判定与主循环一致
-        streamPublisher.stream(springAiClient, invocation.apiKey(), policy.model(), messages, List.of(),
+        streamPublisher.stream(springAiClient, invocation.apiKey(), policy.model(),
+                assembleContext(contextAssembler, messages), List.of(),
                 advisorSummary, callback::onChunk, callback::onUsage,
                 promptTokensTotal, completionTokensTotal, limits.maxTokensPerRun());
         // 批次 B 修复：finalizePlan 必须在 onComplete 之前推 plan 事件，
@@ -505,6 +511,11 @@ public class AgentOrchestrator {
         }
         callback.onVerify(result);
         return result;
+    }
+
+    /** R5：未启用上下文接缝时原样返回权威消息列表，保证默认行为零改动 */
+    private List<ObjectNode> assembleContext(ContextAssembler assembler, List<ObjectNode> messages) {
+        return assembler == null ? messages : assembler.assemble(messages);
     }
 
     /** P5-06：把验证结果作为 user 消息注入下一轮模型上下文 */

@@ -165,6 +165,49 @@ class ScriptedAgentLoopTest {
         assertEquals("PLAN_INCOMPLETE", capture.completion.reason());
     }
 
+    @Test
+    void 开启软注入后每轮从持久化快照重读计划() {
+        ScriptedAgentClient client = new ScriptedAgentClient(List.of(
+                ScriptedAgentClient.ScriptedTurn.ofTools(List.of(
+                        new ScriptedAgentClient.ToolCallSpec("update_plan",
+                                "{\"steps\":[{\"title\":\"读取项目\",\"status\":\"in_progress\"}]}"))),
+                ScriptedAgentClient.ScriptedTurn.ofText("完成")));
+        Capture capture = new Capture();
+        ReActAgentService agent = newAgent(client, capture, List.of(new UpdatePlanTool()));
+
+        AgentRunService runService = mock(AgentRunService.class);
+        when(runService.loadPlan(88L)).thenReturn(
+                List.of(new PlanStep("读取项目", "in_progress")),
+                List.of(new PlanStep("读取项目", "completed"),
+                        new PlanStep("修改接口", "in_progress")));
+        ReflectionTestUtils.setField(agent, "agentRunService", runService);
+        ReflectionTestUtils.setField(agent, "runEventStore", mock(RunEventStore.class));
+        // R5：默认关闭；本用例显式打开，验证“每轮重读 + 软注入”确实生效
+        ReflectionTestUtils.setField(agent, "planInjectionEnabled", true);
+
+        try {
+            agent.execute("test-key",
+                    new AgentPolicy("scripted", AgentPolicy.Reasoning.FAST, AgentPolicy.Permission.AUTO),
+                    "执行脚本", List.of(), USER_ID, PROJECT_ID, 88L, SESSION_ID,
+                    "turn-inject", false, "", "", "", "", new AtomicBoolean(false), capture);
+        } finally {
+            agent.shutdownReadOnlyToolPool();
+        }
+
+        List<List<com.fasterxml.jackson.databind.node.ObjectNode>> snapshots = client.messageSnapshots();
+        assertTrue(snapshots.size() >= 2, "至少两轮模型调用");
+        long firstPlanCount = snapshots.get(0).stream()
+                .filter(m -> m.path("content").asText().contains("Current plan")).count();
+        assertEquals(1, firstPlanCount, "每轮只注入一条计划，不能与初始快照重复");
+        assertTrue(snapshots.get(0).stream()
+                .anyMatch(m -> m.path("content").asText().contains("[in_progress]")));
+        assertTrue(snapshots.get(1).stream()
+                        .anyMatch(m -> m.path("content").asText().contains("[completed]")
+                                && m.path("content").asText().contains("修改接口")),
+                "第二轮必须读到 update_plan 之后的新快照");
+        verify(runService, org.mockito.Mockito.atLeast(2)).loadPlan(88L);
+    }
+
     // ------------------------------------------------------------------
     // 脚手架
     // ------------------------------------------------------------------

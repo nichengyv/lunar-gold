@@ -108,6 +108,29 @@ public class ReActAgentService {
     @org.springframework.beans.factory.annotation.Value("${agent.loop.no-progress.max-stagnant-rounds:4}")
     private int maxStagnantRounds = 4;
 
+    /**
+     * R5 / P7-07：每轮从持久化快照重读计划并软注入。
+     * 默认关闭：未完成 L2 A/B 前保持既有行为，显式开启后再评估。
+     */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.plan-injection.enabled:false}")
+    private boolean planInjectionEnabled = false;
+
+    /** R5 / P7-09：三层上下文压缩总开关；默认关闭，按 A/B 结论再决定是否默认启用 */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.condense.enabled:false}")
+    private boolean condenseEnabled = false;
+
+    /** 滑窗硬上限（字符）；约等于 30k tokens */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.condense.window-chars:120000}")
+    private int condenseWindowChars = 120_000;
+
+    /** 摘要触发阈值占滑窗上限的比例，默认 70% */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.condense.summarize-ratio:0.7}")
+    private double condenseSummarizeRatio = 0.7;
+
+    /** 摘要/滑窗都保留的末尾消息条数（工具调用组会向前扩展） */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.condense.keep-recent-messages:6}")
+    private int condenseKeepRecentMessages = 6;
+
     private static final int SPILL_PREVIEW_CHARS = 1500;
 
     /**
@@ -476,7 +499,8 @@ public class ReActAgentService {
                     history, userPrompt, ragContext, fileContext,
                     imageContext, sessionReferenceContext,
                     projectInstruction, repoMap, workspacePath, policy,
-                    runContext.plan());
+                    // R5：开启每轮软注入后，初始快照交给 ContextAssembler 统一渲染，避免重复
+                    planInjectionEnabled ? List.of() : runContext.plan());
             if (!ragContext.isEmpty()) {
                 log.info("知识库上下文已注入 system 消息（{} 字符），大模型可见", ragContext.length());
             }
@@ -501,7 +525,8 @@ public class ReActAgentService {
             orchestrator().run(new AgentOrchestrator.Invocation(
                     apiKey, policy, messages, tools, advisorSummary, workspacePath,
                     userId, projectId, sessionId, cancelRequested, callback,
-                    approvalUi(callback, userId, projectId)));
+                    approvalUi(callback, userId, projectId),
+                    buildContextAssembler(apiKey, policy.model(), runId)));
 
         } catch (Exception e) {
             log.error("ReAct 执行异常", e);
@@ -549,6 +574,62 @@ public class ReActAgentService {
     /** P5-10-3：时间预算是否已耗尽；maxSeconds <= 0 表示不限制。 */
     static boolean isTimeBudgetExceeded(long elapsedMs, long maxSeconds) {
         return AgentOrchestrator.isTimeBudgetExceeded(elapsedMs, maxSeconds);
+    }
+
+    /**
+     * R5：构建本轮上下文装配器。
+     *
+     * <p>两个开关都关闭时返回 null，主循环原样使用权威消息列表，默认行为零改动。
+     * 计划注入每轮通过 {@link #latestPlan(Long)} 从持久化快照重读；
+     * 压缩的摘要调用走非流式同步接口，失败由 {@code ContextCondenser} 内部降级为滑窗。
+     */
+    private com.capsule.agentkey.agent.context.ContextAssembler buildContextAssembler(
+            String apiKey, String model, Long runId) {
+        if (!planInjectionEnabled && !condenseEnabled) {
+            return null;
+        }
+        com.capsule.agentkey.agent.context.ContextCondenser condenser = null;
+        if (condenseEnabled) {
+            int summarizeAt = Math.max(1, (int) Math.round(condenseWindowChars * condenseSummarizeRatio));
+            condenser = new com.capsule.agentkey.agent.context.ContextCondenser(
+                    new com.capsule.agentkey.agent.context.ContextCondenser.Settings(
+                            condenseWindowChars, summarizeAt, condenseKeepRecentMessages),
+                    transcript -> summarizeWithModel(apiKey, model, transcript));
+        }
+        return new com.capsule.agentkey.agent.context.ContextAssembler(
+                planInjectionEnabled, () -> latestPlan(runId), condenser);
+    }
+
+    /**
+     * P7-07 的单一事实源：优先读 {@code agent_run.plan_json}，读不到或为空时回退到内存 RunContext。
+     * 每轮都会调用，不能缓存。
+     */
+    private List<PlanStep> latestPlan(Long runId) {
+        if (runId != null && agentRunService != null) {
+            try {
+                List<PlanStep> persisted = agentRunService.loadPlan(runId);
+                if (persisted != null && !persisted.isEmpty()) {
+                    return persisted;
+                }
+            } catch (Exception e) {
+                log.warn("读取最新计划快照失败，回退到 RunContext：{}", e.getMessage());
+            }
+        }
+        WorkspaceContext context = WorkspaceContext.get();
+        return context == null ? List.of() : context.plan();
+    }
+
+    /** P7-09 第三层：把较早历史交给非流式模型生成摘要；异常由调用方捕获并降级 */
+    private String summarizeWithModel(String apiKey, String model, String transcript) {
+        ObjectNode system = mapper.createObjectNode();
+        system.put("role", "system");
+        system.put("content", "你是对话摘要器。把用户提供的较早对话压缩成一段简洁摘要，"
+                + "保留任务目标、关键决策、约束、已修改文件与未完成事项；"
+                + "不要编造未出现的信息，不要输出寒暄，只输出摘要正文。");
+        ObjectNode user = mapper.createObjectNode();
+        user.put("role", "user");
+        user.put("content", transcript);
+        return springAiClient.callSync(apiKey, model, List.of(system, user));
     }
 
     private List<ObjectNode> buildMessages(Long userId, Long projectId, Long sessionId,

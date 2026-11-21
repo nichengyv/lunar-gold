@@ -853,7 +853,7 @@ views/        ChatView（只负责布局与挂载）
 | **R3 工具接缝** ✅ 2026-11-21 | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
 | **R4a 循环与流接缝** ✅ 2026-11-21 | `LoopGuard` 统一五组无进展计数与分级 nudge（P7-08）；`StreamPublisher` 统一流式调用与预算 | 全量测试绿；重复调用先 nudge、超过自救窗口才停止（有测试） | 保留旧 streamChat 调用 |
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
-| **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
+| **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
 | **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
 
@@ -968,5 +968,17 @@ views/        ChatView（只负责布局与挂载）
 - 行为等价：轮次上限、时间 / token 预算、回调顺序、tool 消息插入位置、停止原因字符串与 SSE 载荷均未改变；异常仍由 Service 统一收口计划后 `onError`。
 - 全量测试通过：**450 tests / 0 failures / 0 errors / 17 skipped**。
 
-**下一刀（R5）**：上下文接缝——`ContextAssembler` + `ContextCondenser`，落地 P7-07 软回注与 P7-09 三层压缩。
+#### R5 上下文接缝（2026-11-21）
+
+- 新增 `agent/context/PlanSnapshotProvider`：计划快照读取契约；实现优先读 `agent_run.plan_json`，为空或读取失败时回退内存 `RunContext`，每轮调用一次，消除 P7-04c 的 ThreadLocal 陈旧源。
+- 新增 `agent/context/ContextAssembler`：把最新计划渲染为 `Current plan:` 软提示，插在 system 之后；只修改本轮发送副本，不拦截工具、不做 plan-first。开关 `agent.context.plan-injection.enabled`，默认关闭。
+- 新增 `agent/context/ContextCondenser`：三层压缩——同一文件旧读取折叠为占位、达到 70% 阈值时把中段历史摘要成一条 user 消息、仍超预算时 FIFO 滑窗；摘要按 run 缓存避免重复压缩；滑窗保留首条 system，并连带清理孤儿 tool 响应。开关 `agent.context.condense.enabled`，默认关闭。
+- `AgentOrchestrator`：主循环与轮次耗尽后的收尾调用都改用装配后的消息副本；`ReActAgentService` 负责按开关构建装配器，注入最新计划读取入口与同步摘要调用，两开关都关闭时传 null，保持原路径。
+- 行为保持：默认关闭时消息列表、工具顺序、终态载荷与既有测试零改动；压缩不删除 `agent_run_event`、数据库聊天历史或前端事件，只是发给模型的副本变短。
+- 新增测试：`ContextAssemblerTest`（5 例：关闭不读取、每轮重读、读取失败降级、空计划、无 system 时插入位置）；`ContextCondenserTest`（8 例：只留最近读取、过短/单次不折叠、摘要生成与复用、摘要异常降级、滑窗保留 system、孤儿 tool 清理、参数钳制）；`ScriptedAgentLoopTest` 新增 1 例，断言两轮分别看到 update_plan 前后的持久化快照。
+- 全量测试通过：**464 tests / 0 failures / 0 errors / 17 skipped**。
+- **未执行项（如实记录）**：L2/L3 真实模型 A/B 未运行（当前环境无可用模型 API），因此两个开关默认关闭；token 峰值下降、成功率不降等出口指标待有 API 后按预注册口径补测。灰度方式：`AGENT_CONTEXT_PLAN_INJECTION_ENABLED=true` / `AGENT_CONTEXT_CONDENSE_ENABLED=true`。
+
+**下一刀（R6）**：前端拆分——`SSEService` + store 拆分 + 断线恢复补全。
+
 
