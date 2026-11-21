@@ -161,6 +161,35 @@ class LongSessionDatasetTest {
     }
 
     @Test
+    void thirtyTurnGoalKeepingDatasetCoversL1Gate() throws IOException {
+        LongSessionDataset.Spec spec = findBase("l3-30turn-goal-keeping");
+
+        // 门禁 L1 要求连续 >=30 turn；数据集级别仍是 L3，因为 L1 schema 固定为单次 execute
+        assertEquals(30, spec.turns().size());
+        assertEquals(10, spec.replicas(), "目标保持门禁需要至少 10 个独立运行");
+        assertTrue(spec.minModelCalls() >= 300);
+        assertEquals(150, LongSessionDataset.expectedArtifacts(spec).size(),
+                "150 个独立工件防止用空调用凑 30 turn");
+        assertEquals(30, spec.requiredCoverage().minExecuteTurns());
+        assertTrue(spec.requiredCoverage().minUpdatePlanCalls() >= 6);
+
+        // 区间必须无缝覆盖 1..150，不能漏文件或靠重复文件凑轮次
+        for (int turn = 0; turn < 30; turn++) {
+            assertEquals(turn * 5 + 1, spec.turns().get(turn).first());
+            assertEquals(turn * 5 + 5, spec.turns().get(turn).last());
+        }
+
+        var memory = spec.memory();
+        assertEquals(30, memory.probeTurn());
+        assertEquals(24, memory.summaryAfterTurn());
+        assertTrue(LongSessionDataset.render(spec.turns().get(0)).contains(memory.anchor()));
+        for (int turn = 1; turn < 30; turn++) {
+            assertFalse(LongSessionDataset.render(spec.turns().get(turn)).contains(memory.anchor()),
+                    "锚点只能出现在首轮，后续 turn 泄露会让记忆探针失效");
+        }
+    }
+
+    @Test
     void fixtureMaterializationCreatesAllFiles() throws IOException {
         List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
 

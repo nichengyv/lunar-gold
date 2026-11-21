@@ -148,7 +148,9 @@ class LongSessionLiveRunnerTest {
 
     @Test
     void L3摘要必须包含记忆锚点() throws IOException {
-        LongSessionDataset.Spec l3 = spec("L3");
+        LongSessionDataset.Spec l3 = LongSessionDataset.loadAll().stream()
+                .filter(s -> "l3-cumulative-history-memory".equals(LongSessionDataset.baseId(s.id())))
+                .findFirst().orElseThrow();
         LongSessionLiveRunner.Metrics metrics = new LongSessionLiveRunner.Metrics();
         metrics.toolCalls = 156;
         metrics.fileChanges = 45;

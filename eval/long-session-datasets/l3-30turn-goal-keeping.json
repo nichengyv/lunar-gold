@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "id": "l3-30turn-goal-keeping",
+  "level": "L3",
+  "description": "门禁 L1 目标保持：三十次 execute、150 个独立修复；跨历史裁剪与检查点摘要后，最终仍须交付全部工件并复述首轮记忆锚点。",
+  "replicas": 10,
+  "minModelCalls": 300,
+  "reasoning": "DEEP",
+  "permission": "AUTO",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# 30 turn 目标保持任务\nGoal01 至 Goal150 的 value() 均应返回各自文件编号，当前均错误返回 -1。\n文件名编号至少两位（Goal01、Goal99、Goal100）。每个 turn 只处理指定区间，不得提前或重复处理其他区间。\n每个文件必须先 read_file 再 edit_file；每次模型响应最多一个工具调用；不得用无变化重写、重复读取或无关调用凑轮次。\n最终目标是 150 个文件全部正确修复，而不是只提交计划、总结或部分修复。\n"
+      }
+    ],
+    "series": [
+      {
+        "start": 1,
+        "count": 150,
+        "module": "",
+        "pathTemplate": "src/goal/Goal{index2}.java",
+        "contentTemplate": "public final class Goal{index2} {\n    public int value() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      }
+    ]
+  },
+  "success": {
+    "fileContains": {}
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "memory": "MEMORY_MISSING",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 6,
+    "minToolFailures": 0,
+    "minRecoveredTools": 0,
+    "minApprovals": 0,
+    "minScopeChanges": 0,
+    "minScopeRejections": 0,
+    "minReviewAccepted": 0,
+    "minExecuteTurns": 30,
+    "minSummaryInjectedCalls": 1,
+    "requireMemoryProbe": true
+  },
+  "memory": {
+    "anchor": "GOAL-30T-ANCHOR-604819",
+    "summaryAfterTurn": 24,
+    "probeTurn": 30
+  },
+  "turns": [
+    {
+      "prompt": "开始 30 turn 长任务。首轮记忆锚点是 GOAL-30T-ANCHOR-604819，只需记住，现在不要复述。最终目标是修复 Goal01 至 Goal150。先 update_plan，再按 TASK.md 处理 Goal{first} 至 Goal{last}。",
+      "scope": "",
+      "first": 1,
+      "last": 5
+    },
+    {
+      "prompt": "继续最初任务，只处理 Goal{first} 至 Goal{last}；先读后改，不要重复上一区间。",
+      "scope": "",
+      "first": 6,
+      "last": 10
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，每个文件都必须有真实读取和有效编辑，保持总目标不变。",
+      "scope": "",
+      "first": 11,
+      "last": 15
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，不要复述锚点，不要用状态汇报代替文件修复。",
+      "scope": "",
+      "first": 16,
+      "last": 20
+    },
+    {
+      "prompt": "先按真实进度 update_plan，再处理 Goal{first} 至 Goal{last}；计划不能超前于工件。",
+      "scope": "",
+      "first": 21,
+      "last": 25
+    },
+    {
+      "prompt": "只处理 Goal{first} 至 Goal{last}，保持每个响应最多一个工具调用，不重做已完成文件。",
+      "scope": "",
+      "first": 26,
+      "last": 30
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，读取当前内容后精确替换错误返回值。",
+      "scope": "",
+      "first": 31,
+      "last": 35
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，即使历史变长也不得缩减总交付范围或更改文件编号规则。",
+      "scope": "",
+      "first": 36,
+      "last": 40
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，不要处理区间外文件，也不要提前宣布整体完成。",
+      "scope": "",
+      "first": 41,
+      "last": 45
+    },
+    {
+      "prompt": "更新一次真实计划进度，然后处理 Goal{first} 至 Goal{last}；仍然遵循先读后改。",
+      "scope": "",
+      "first": 46,
+      "last": 50
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，只修正各自 value()，不得引入与任务无关的重构。",
+      "scope": "",
+      "first": 51,
+      "last": 55
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，不要重复读取同一文件制造进度；每次编辑必须改变返回值。",
+      "scope": "",
+      "first": 56,
+      "last": 60
+    },
+    {
+      "prompt": "只处理 Goal{first} 至 Goal{last}，保持最初 150 文件目标，不需要现在复述记忆锚点。",
+      "scope": "",
+      "first": 61,
+      "last": 65
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，逐文件读取和编辑，不能把整组完成建立在猜测上。",
+      "scope": "",
+      "first": 66,
+      "last": 70
+    },
+    {
+      "prompt": "按实际工件 update_plan，再处理 Goal{first} 至 Goal{last}；不要因已过半而省略后续步骤。",
+      "scope": "",
+      "first": 71,
+      "last": 75
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，继续保持单工具响应和区间边界，不重做旧区间。",
+      "scope": "",
+      "first": 76,
+      "last": 80
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，只修正错误返回值，不得把任务改成编写总结或测试计划。",
+      "scope": "",
+      "first": 81,
+      "last": 85
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，历史被裁剪时仍以 TASK.md 和实际文件状态为准。",
+      "scope": "",
+      "first": 86,
+      "last": 90
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，每个文件先读后改，不要复述早期锚点。",
+      "scope": "",
+      "first": 91,
+      "last": 95
+    },
+    {
+      "prompt": "更新真实计划并处理 Goal{first} 至 Goal{last}；未完成区间必须保留在计划中。",
+      "scope": "",
+      "first": 96,
+      "last": 100
+    },
+    {
+      "prompt": "文件编号进入三位数后仍按同一规则处理 Goal{first} 至 Goal{last}，不得改变命名方式。",
+      "scope": "",
+      "first": 101,
+      "last": 105
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，只处理当前五个文件，避免任何无关读取或写入。",
+      "scope": "",
+      "first": 106,
+      "last": 110
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，不要因编号变化而跳过文件或重复旧文件。",
+      "scope": "",
+      "first": 111,
+      "last": 115
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，保持最初交付目标；下一次计划更新必须反映真实工件。",
+      "scope": "",
+      "first": 116,
+      "last": 120
+    },
+    {
+      "prompt": "先 update_plan，再处理 Goal{first} 至 Goal{last}；本 turn 后将形成检查点摘要。",
+      "scope": "",
+      "first": 121,
+      "last": 125
+    },
+    {
+      "prompt": "基于当前会话和检查点摘要继续，只处理 Goal{first} 至 Goal{last}，不要重做摘要中的旧工作。",
+      "scope": "",
+      "first": 126,
+      "last": 130
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，摘要不能替代实际读取；仍需先读后改。",
+      "scope": "",
+      "first": 131,
+      "last": 135
+    },
+    {
+      "prompt": "继续 Goal{first} 至 Goal{last}，不要提前复述锚点，不要把剩余文件省略为概括性承诺。",
+      "scope": "",
+      "first": 136,
+      "last": 140
+    },
+    {
+      "prompt": "处理 Goal{first} 至 Goal{last}，保持文件命名、返回值规则和单工具响应不变。",
+      "scope": "",
+      "first": 141,
+      "last": 145
+    },
+    {
+      "prompt": "完成最后区间 Goal{first} 至 Goal{last} 并收口计划。最终回答必须单独写出本会话首轮提供的记忆锚点原值；不要猜测，不要写成文件编号，也不要复述本提示中的其他文字。",
+      "scope": "",
+      "first": 146,
+      "last": 150
+    }
+  ]
+}
