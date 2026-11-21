@@ -823,11 +823,11 @@ mcp/               MCP 适配器
 **前端**
 
 ```text
-api/          sse.ts（协议） + agent.ts（REST）
-services/     SSEService（重连 / 事件归一化）
-stores/       messages / stream / recovery / questions / approvals / fileChanges
-composables/  useChatStream / useRecovery / useVirtualList
-views/        ChatView（只负责布局与挂载）
+api/          sse.ts（SSE 协议解析 + 建连/鉴权） + agent.ts（REST）
+services/     streamService（事件归一化）/ streamSession（中断句柄 + 恢复代际）/ runRecovery（事件折叠）
+stores/       chat（会话与消息 facade）/ stream / approvals / question / fileChanges
+composables/  useChatStream / useRecovery / useVirtualList（规划中，尚未拆出）
+views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 ```
 
 ### 14.4 状态归属矩阵
@@ -854,7 +854,7 @@ views/        ChatView（只负责布局与挂载）
 | **R4a 循环与流接缝** ✅ 2026-11-21 | `LoopGuard` 统一五组无进展计数与分级 nudge（P7-08）；`StreamPublisher` 统一流式调用与预算 | 全量测试绿；重复调用先 nudge、超过自救窗口才停止（有测试） | 保留旧 streamChat 调用 |
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
-| **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
+| **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
 | **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
@@ -986,6 +986,33 @@ views/        ChatView（只负责布局与挂载）
   - 压缩是否实际触发未能从 Maven 日志确认（中文日志在控制台被转码）。正式结论需要 ≥3 次重复与 L3 数据。
   - 复现：`P7_02_LEVELS=L2 P7_02_REPEATS=1 P7_02_PLAN_INJECTION=on P7_02_CONDENSE=on P7_02_CONDENSE_WINDOW_CHARS=30000`。
 
-**下一刀（R6）**：前端拆分——`SSEService` + store 拆分 + 断线恢复补全。
+#### R6a 断线恢复补全（2026-11-21）
+
+- 新增 `services/runRecovery.ts`：把断线重连的事件折叠抽成纯函数 `replayRunEvents`，覆盖 MODEL_CHUNK / TOOL_CALL / TOOL_RESULT / PLAN_UPDATED / APPROVAL_REQUESTED / APPROVAL_RESOLVED / COMPLETION / DIAGNOSTICS / VERIFY / USER_QUESTION / USER_ANSWERED；`chat.applyRunEvents` 改为调用它。
+- `recoverRun` 重放后还原 `livePlan`、`pendingApprovals`、询问卡片与 `recoveredTruncated`；已结束或已处理的审批不再把过期卡片带回界面。
+- 新增 `services/runRecovery.test.ts`（8 例）；chat store 增加「断线恢复还原计划与文件变更」用例。
+
+#### R6b-1 SSEService（2026-11-21）
+
+- `api/sse.ts` 只保留协议层：`parseSSE` 与 `openChatStream`（建连 + 401 抛 `SseAuthError` + 非 2xx 错误文案）。
+- 新增 `services/streamService.ts`：`StreamHooks` 契约与 `streamChat` 事件归一化；登录过期仍清理本地凭证并跳转登录页，行为与旧实现一致。
+- 新增 `services/streamSession.ts`：接管原 chat store 模块级 `currentAbort` / `recoveryToken`，提供 `begin/release/abort/isActive` 与 `newRecoveryToken/isRecoveryCurrent/cancelRecovery`；旧流晚到的 `release` 不会覆盖新流。
+- 新增测试：`streamSession.test.ts`（4 例）、`streamService.test.ts`（2 例，从 `sse.test.ts` 迁出）；`sse.test.ts` 只保留协议解析。
+- 前端测试：**112 tests / 0 failures**；`vue-tsc + vite build` 通过。
+
+#### R6b-2 Pinia store 拆分（2026-11-21）
+
+- 新增四个域 store，`useChatStore` 保留同名 getter/action 作为兼容 facade，ChatView / WorkbenchDock 零改动（仅 `chat.streamStatus = 'idle'` 一处改为 `chat.clearStreamNotice()`）：
+  - `stores/stream.ts`：`livePlan` / `liveBudget` / `liveStageMarks` / `runStartedAt` / `streamStatus` / `activeRunId` / `recoveredTruncated`，动作 `beginRun` / `markStage` / `finish` / `resetSessionState`。
+  - `stores/approvals.ts`：待审批卡片、`approvalRevision` / `approvalFocusToken` 与会话审批历史；历史请求带 `historySessionId` 校验，切会话后丢弃迟到响应。
+  - `stores/question.ts`：单一 `pendingUserQuestion`，动作 `ask` / `answer` / `clearForRun` / `clear`。
+  - `stores/fileChanges.ts`：项目级 pending 列表、任务级 ChangeSet 与保留/撤回动作；ChangeSet 用请求令牌丢弃迟到响应。
+- `chat.ts` 删除上述 19 个 state 字段与对应请求实现，读写改为委托域 store；`sendMessage` / `recoverRun` / 停止生成 / 新会话 / 切会话的时序保持不变。
+- 测试适配：审批用例改为直接写入 `useApprovalStore().pendingApprovals`（facade getter 只读）；其余断言仍走 `chat.xxx`。
+- 前端测试：**112 tests / 0 failures**；`vue-tsc + vite build` 通过。
+- **未迁移项（如实记录）**：`messages` / `sessions` / 发送编排仍在 `chat.ts`。`sendMessage` 同时驱动流、计划、审批、询问、文件变更与侧栏运行态，单独拆 messages store 需要先拆发送编排（composables/useChatStream），否则只是把 `this` 换成跨 store 调用，收益有限、回归风险高；留到 R6c 或 R7 前处理。
+
+
+
 
 

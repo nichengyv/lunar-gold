@@ -845,7 +845,7 @@ watch(
     }
     if (status === 'recovered') {
       streamNoticeTimer = window.setTimeout(() => {
-        chat.streamStatus = 'idle';
+        chat.clearStreamNotice();
         streamNoticeTimer = undefined;
       }, 4000);
     }

@@ -5,10 +5,13 @@ import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
 import { streamChat } from '../services/streamService';
 import { streamSession } from '../services/streamSession';
-import * as fileChangesApi from '../api/fileChanges';
 import { replayRunEvents } from '../services/runRecovery';
 import { createFrameThrottle } from '../utils/frameThrottle';
 import { useProjectStore } from './project';
+import { useApprovalStore } from './approvals';
+import { useFileChangeStore } from './fileChanges';
+import { useQuestionStore } from './question';
+import { useStreamStore } from './stream';
 import {
   beginExperienceRecovery,
   discardExperienceRecovery,
@@ -256,25 +259,11 @@ export const useChatStore = defineStore('chat', {
     sessionsByProject: {} as Record<number, SessionInfo[]>,
     currentSessionId: null as number | null,
     messages: [] as UiMessage[],
-    /** 运行中的实时计划快照：SSE plan 事件直接写这里，避免依赖具体消息对象是否还在数组里 */
-    livePlan: null as PlanSnapshot | null,
-    /** P5-10-3：本轮预算进度；断线恢复后可能只有 token 三项 */
-    liveBudget: null as RunUsage | null,
-    /** P5-10-3：本轮各阶段首次到达时间 */
-    liveStageMarks: {} as Partial<Record<TaskStageKey, number>>,
-    /** P5-10-3：本轮开始时间，用于本地耗时推进 */
-    runStartedAt: 0,
     isProcessing: false,
     /** P5-09：会话历史加载中，用于骨架屏 */
     messagesLoading: false,
     /** P5-09：会话历史加载失败原因，非空时展示统一错误态 */
     loadError: '',
-    /** P5-10：当前轮次的运行 id；断线或刷新后凭它重放已落库事件 */
-    activeRunId: null as number | null,
-    /** P5-10：流式连接状态，驱动输入框上方的状态条 */
-    streamStatus: 'idle' as 'idle' | 'streaming' | 'reconnecting' | 'recovered' | 'interrupted',
-    /** P5-10：恢复出来的正文是否因为超出检查点上限而被截断 */
-    recoveredTruncated: false,
     // 消息全文搜索命中后要定位到的后端消息 id；消息加载完成后由 ChatView 滚动过去并清空
     focusMessageId: null as number | null,
     // 右侧工作台打开的文件 tab（相对路径，去重）；activeFilePath 是当前显示的那个
@@ -304,24 +293,6 @@ export const useChatStore = defineStore('chat', {
     defaultModel: 'deepseek-chat' as string,
     defaultReasoning: 'STANDARD' as ReasoningLevel,
     defaultPermission: 'MANUAL' as PermissionLevel,
-    // 文件变更审查流：项目级 pending 变更列表
-    pendingChanges: [] as PendingFileChange[],
-    pendingChangesLoading: false as boolean,
-    // P5-14：任务级交付视图（按 Session 聚合多个 Run 的变更/审批/验证）
-    changeSet: null as ChangeSetView | null,
-    changeSetLoading: false as boolean,
-    changeSetRunFilter: null as number | null,
-    // 第六十八批 A2：等待用户确认的危险工具调用（按会话隔离）
-    pendingApprovals: [] as PendingApproval[],
-    /** P7-06：agent 执行中等待用户回答的决策询问（同一时刻只可能有一个） */
-    pendingUserQuestion: null as (UserQuestion & { runId: number }) | null,
-    /** P5-12-4：轨迹里点「待审批」步骤时递增，聊天区据此高亮并定位审批区 */
-    approvalFocusToken: 0,
-    /** P5-10-2：审批状态变化计数，追踪页据此刷新会话审批历史 */
-    approvalRevision: 0,
-    /** P5-10-2：当前会话已处理审批历史 */
-    approvalHistory: [] as ApprovalHistoryItem[],
-    approvalHistoryLoading: false as boolean,
     /** P5-12-2：仍在运行 / 等待审批的轮次，按会话 id 索引，侧栏与空态共用 */
     runningRunMap: {} as Record<number, string>
   }),
@@ -333,6 +304,62 @@ export const useChatStore = defineStore('chat', {
     /** 任意一个文件 tab 有未保存改动 */
     editorDirty(): boolean {
       return this.openFiles.some((p) => this.fileDirty[p]);
+    },
+
+    // ——— R6：域 store 的兼容访问器；视图继续用 chat.xxx，写入走下方 action ———
+    livePlan(): PlanSnapshot | null {
+      return useStreamStore().livePlan;
+    },
+    liveBudget(): RunUsage | null {
+      return useStreamStore().liveBudget;
+    },
+    liveStageMarks(): Partial<Record<TaskStageKey, number>> {
+      return useStreamStore().liveStageMarks;
+    },
+    runStartedAt(): number {
+      return useStreamStore().runStartedAt;
+    },
+    streamStatus(): 'idle' | 'streaming' | 'reconnecting' | 'recovered' | 'interrupted' {
+      return useStreamStore().streamStatus;
+    },
+    activeRunId(): number | null {
+      return useStreamStore().activeRunId;
+    },
+    recoveredTruncated(): boolean {
+      return useStreamStore().recoveredTruncated;
+    },
+    pendingApprovals(): PendingApproval[] {
+      return useApprovalStore().pendingApprovals;
+    },
+    approvalFocusToken(): number {
+      return useApprovalStore().approvalFocusToken;
+    },
+    approvalRevision(): number {
+      return useApprovalStore().approvalRevision;
+    },
+    approvalHistory(): ApprovalHistoryItem[] {
+      return useApprovalStore().approvalHistory;
+    },
+    approvalHistoryLoading(): boolean {
+      return useApprovalStore().approvalHistoryLoading;
+    },
+    pendingUserQuestion(): (UserQuestion & { runId: number }) | null {
+      return useQuestionStore().pendingUserQuestion;
+    },
+    pendingChanges(): PendingFileChange[] {
+      return useFileChangeStore().pendingChanges;
+    },
+    pendingChangesLoading(): boolean {
+      return useFileChangeStore().pendingChangesLoading;
+    },
+    changeSet(): ChangeSetView | null {
+      return useFileChangeStore().changeSet;
+    },
+    changeSetLoading(): boolean {
+      return useFileChangeStore().changeSetLoading;
+    },
+    changeSetRunFilter(): number | null {
+      return useFileChangeStore().changeSetRunFilter;
     }
   },
 
@@ -511,9 +538,7 @@ export const useChatStore = defineStore('chat', {
       this.sessionAttachments = {};
       // 切换项目时重新拉审查流（新项目的 PendingFileChange）
       const projectStore = useProjectStore();
-      this.pendingChanges = [];
-      this.changeSet = null;
-      this.changeSetRunFilter = null;
+      useFileChangeStore().reset();
       if (projectStore.currentProjectId != null) {
         await this.fetchPendingChanges(projectStore.currentProjectId);
       }
@@ -521,16 +546,16 @@ export const useChatStore = defineStore('chat', {
     startNewSession() {
       // 新会话：作废上一会话可能还在跑的断点恢复
       streamSession.cancelRecovery();
-      this.streamStatus = 'idle';
-      this.activeRunId = null;
+      useStreamStore().resetSessionState();
+      useQuestionStore().clear();
       this.currentSessionId = null;
       this.messages = [];
       this.pendingChips = [];
       // P7-06：决策询问属于上一会话的 Run，切会话/新会话时清掉，避免答到别的会话
-      this.pendingUserQuestion = null;
-      this.approvalHistory = [];
-      this.changeSet = null;
-      this.changeSetRunFilter = null;
+      useApprovalStore().clearHistory();
+      const files = useFileChangeStore();
+      files.changeSet = null;
+      files.changeSetRunFilter = null;
       // 新会话：参数继承全局默认值（设置页可改）
       this.model = this.defaultModel;
       this.reasoning = this.defaultReasoning;
@@ -567,11 +592,10 @@ export const useChatStore = defineStore('chat', {
       if (this.isProcessing || sessionId === this.currentSessionId) return;
       // 切走时作废旧会话还在跑的恢复轮询，避免内容写到新会话
       streamSession.cancelRecovery();
-      this.streamStatus = 'idle';
-      this.activeRunId = null;
+      useStreamStore().resetSessionState();
       this.currentSessionId = sessionId;
       // P5-10-2：历史按会话隔离，切会话先清掉旧数据，等追踪页按需重拉
-      this.approvalHistory = [];
+      useApprovalStore().clearHistory();
       // 恢复该会话已存的运行参数；老会话没存过则回落到默认档
       const info = this.findSession(sessionId) || this.sessions.find((s) => s.id === sessionId);
       if (info) {
@@ -595,7 +619,7 @@ export const useChatStore = defineStore('chat', {
       this.loadError = '';
       try {
         const history = await agentApi.getSessionMessages(sessionId);
-        this.livePlan = null;
+        useStreamStore().setPlan(null);
         this.messages = history.map((m) => {
           // 助手消息的思考/工具/来源/改动从 trace 还原，切回会话仍能展开查看
           const trace = parseTrace(m.trace);
@@ -658,8 +682,11 @@ export const useChatStore = defineStore('chat', {
      */
     async recoverRun(runId: number, target: UiMessage, maxAttempts = 5) {
       const token = streamSession.newRecoveryToken();
+      const stream = useStreamStore();
+      const approvals = useApprovalStore();
+      const question = useQuestionStore();
       beginExperienceRecovery(runId, this.currentSessionId, token);
-      this.streamStatus = 'reconnecting';
+      stream.setStatus('reconnecting');
       let failedAttempts = 0;
       let pollAttempts = 0;
       let firstPoll = true;
@@ -685,10 +712,10 @@ export const useChatStore = defineStore('chat', {
           }
           failedAttempts = 0;
           const applied = applyRunEvents(result.events, target);
-          this.recoveredTruncated = applied.truncated;
+          stream.setRecoveredTruncated(applied.truncated);
           // R6：计划与审批也要在断线恢复后回到同一状态
           if (applied.plan) {
-            this.livePlan = applied.plan;
+            stream.setPlan(applied.plan);
           }
           const active =
             result.state === 'QUEUED' ||
@@ -699,30 +726,32 @@ export const useChatStore = defineStore('chat', {
           if (approvalId) {
             if (!active || applied.approval?.resolved) {
               // 已结束或已处理：不把过期的审批卡片带回界面
-              this.pendingApprovals = this.pendingApprovals.filter((a) => a.approvalId !== approvalId);
-            } else if (!this.pendingApprovals.some((a) => a.approvalId === approvalId)) {
-              this.pendingApprovals.push({
-                approvalId,
-                tool: applied.approval!.tool,
-                risk: applied.approval!.risk,
-                expiresAt: 0,
-                sessionId: this.currentSessionId
-              });
+              approvals.dismissApproval(approvalId);
+            } else if (!approvals.pendingApprovals.some((a) => a.approvalId === approvalId)) {
+              approvals.request(
+                {
+                  approvalId,
+                  tool: applied.approval!.tool,
+                  risk: applied.approval!.risk,
+                  expiresAt: 0
+                },
+                this.currentSessionId
+              );
             }
           }
           // P7-06：还原/清除等待中的决策询问卡片（刷新、断线重连都要能回到同一状态）
           if (applied.userQuestion) {
-            this.pendingUserQuestion = { ...applied.userQuestion, runId };
-          } else if (this.pendingUserQuestion?.runId === runId) {
-            this.pendingUserQuestion = null;
+            question.ask({ ...applied.userQuestion, runId });
+          } else {
+            question.clearForRun(runId);
           }
           // P5-10-3：usage 不落库，恢复后至少用 run 的 token 汇总兜底；轮次保持未知
-          if (!this.liveBudget && (result.totalTokens ?? 0) > 0) {
-            this.liveBudget = {
+          if (!stream.liveBudget && (result.totalTokens ?? 0) > 0) {
+            stream.setBudget({
               promptTokens: result.promptTokens ?? 0,
               completionTokens: result.completionTokens ?? 0,
               totalTokens: result.totalTokens as number
-            };
+            });
           }
           if (
             result.state === 'QUEUED' ||
@@ -732,30 +761,30 @@ export const useChatStore = defineStore('chat', {
           ) {
             target.streaming = true;
             target.failed = false;
-            this.streamStatus = 'reconnecting';
+            stream.setStatus('reconnecting');
             continue;
           }
           target.streaming = false;
           // 已收到终态并完成事件重放即代表传输恢复成功；模型/工具终态另由现有 UI 表达。
           finishExperienceRecovery(token, 'recovered', pollAttempts);
           if (result.state === 'SUCCEEDED') {
-            this.streamStatus = 'recovered';
+            stream.setStatus('recovered');
             // 以落库的完整回答为准：检查点对超长回答会截断
             if (this.currentSessionId != null) {
               await this.loadSessionMessages(this.currentSessionId, true);
               // 历史 trace 可能还没有计划字段，重载后把刚恢复的快照补回去
               if (applied.plan) {
-                this.livePlan = applied.plan;
+                stream.setPlan(applied.plan);
               }
             }
           } else if (result.state === 'CANCELLED') {
-            this.streamStatus = 'interrupted';
+            stream.setStatus('interrupted');
             target.stopped = true;
             if (!target.content) {
               target.content = '（已停止生成）';
             }
           } else {
-            this.streamStatus = 'interrupted';
+            stream.setStatus('interrupted');
             target.failed = true;
             target.errorText = result.errorMessage || '这一轮没有完成';
           }
@@ -768,11 +797,11 @@ export const useChatStore = defineStore('chat', {
               target.failed = true;
               target.errorText = '网络连接中断了，恢复失败，请重新发送';
             }
-            this.streamStatus = 'interrupted';
+            stream.setStatus('interrupted');
             finishExperienceRecovery(token, 'failed', pollAttempts);
             return;
           }
-          this.streamStatus = 'reconnecting';
+          stream.setStatus('reconnecting');
         }
       }
       discardExperienceRecovery(token);
@@ -791,7 +820,7 @@ export const useChatStore = defineStore('chat', {
           .filter((r) => r.sessionId === sessionId)
           .sort((a, b) => b.runId - a.runId)[0];
         if (!run) return false;
-        this.activeRunId = run.runId;
+        useStreamStore().setRunId(run.runId);
         target.failed = false;
         target.errorText = undefined;
         target.streaming = true;
@@ -870,42 +899,31 @@ export const useChatStore = defineStore('chat', {
       await this.loadAllSessions();
     },
 
+    /** 断线恢复提示几秒后自动收起：只把「已恢复」落回空闲，不打断运行中的流 */
+    clearStreamNotice() {
+      const stream = useStreamStore();
+      if (stream.streamStatus === 'recovered') stream.setStatus('idle');
+    },
+
     /** 停止生成：先通知后端中止（长命令执行时没有 SSE 写出，只断开连接后端感知不到），再中断本地流 */
     stopGenerating() {
       const sessionId = this.currentSessionId;
       // P5-10：同时停掉断点恢复轮询，用户已经明确不要这一轮了
       streamSession.cancelRecovery();
-      this.streamStatus = 'idle';
-      this.activeRunId = null;
+      useStreamStore().finish();
       if (sessionId != null) {
         agentApi.stopGeneration(sessionId).catch(() => undefined);
       }
       streamSession.abort();
       // 停止生成时后端会拒绝该会话所有审批，前端同步清空卡片
-      if (sessionId != null) {
-        this.pendingApprovals = this.pendingApprovals.filter((a) => a.sessionId !== sessionId);
-        this.approvalRevision += 1;
-      }
+      useApprovalStore().clearSession(sessionId);
       // P7-06：Run 已停止，后端 ask_user_question 会在 500ms 内收到取消标记退出等待
-      this.pendingUserQuestion = null;
+      useQuestionStore().clear();
     },
 
-    /** 第六十八批 A2：提交工具审批结果；不再在这里删卡片——等后端 approval_resolved 事件后切 resolved 态，或用户手动关叉 */
-    async respondApproval(approvalId: string, decision: 'APPROVE' | 'REJECT', rememberSession = false) {
-      try {
-        await agentApi.respondApproval(approvalId, decision, rememberSession ? 'SESSION' : 'NONE');
-      } catch (e) {
-        // P5-10-2：提交失败时保留待审批，不能在本地伪造已处理
-        ElMessage.error('审批提交失败: ' + (e as Error).message);
-        return;
-      }
-      // 乐观更新：后端大概率会发 approval_resolved，但 SSE 事件有延迟；先标个 resolved 占位，避免用户看到"已点了但还没状态"
-      const idx = this.pendingApprovals.findIndex((a) => a.approvalId === approvalId);
-      if (idx >= 0 && !this.pendingApprovals[idx].resolved) {
-        // 来源先按 USER 占位，服务端事件到达后以真实 source 为准
-        this.pendingApprovals[idx] = { ...this.pendingApprovals[idx], resolved: decision, resolvedSource: 'USER' };
-      }
-      this.approvalRevision += 1;
+    /** 第六十八批 A2：提交工具审批结果；等后端 approval_resolved 事件后切 resolved 态，或用户手动关叉 */
+    respondApproval(approvalId: string, decision: 'APPROVE' | 'REJECT', rememberSession = false) {
+      return useApprovalStore().respondApproval(approvalId, decision, rememberSession);
     },
 
     // -----------------------------------------------------------------
@@ -914,65 +932,33 @@ export const useChatStore = defineStore('chat', {
 
     /** SSE user_question 事件到达：agent 暂停等用户回答决策询问 */
     handleUserQuestion(question: UserQuestion) {
-      if (!question.runId) {
-        // 没有 runId 的旧后端消息忽略
-        console.warn('handleUserQuestion: 缺少 runId', question);
-        return;
-      }
-      this.pendingUserQuestion = { ...question, runId: question.runId };
+      useQuestionStore().ask(question);
     },
 
     /** 提交用户回答；成功后清除 pending question */
-    async answerUserQuestion(runId: number, questionId: string, selected: string[] = [], custom?: string) {
-      await agentApi.answerUserQuestion(runId, questionId, selected, custom);
-      // 清除本地 pending——后端恢复 Run 后会继续 SSE 流，不需要额外事件
-      this.pendingUserQuestion = null;
+    answerUserQuestion(runId: number, questionId: string, selected: string[] = [], custom?: string) {
+      return useQuestionStore().answer(runId, questionId, selected, custom);
     },
 
     /** P5-10-2：批量允许低风险写入；只按服务端返回的 resolvedIds 标记，不夸大成功 */
-    async approveBatch(approvalIds: string[]) {
-      const sessionId = this.currentSessionId;
-      if (sessionId == null || !approvalIds.length) return;
-      try {
-        const { batchId, resolvedIds } = await agentApi.approveBatch(sessionId, approvalIds);
-        const done = new Set(resolvedIds);
-        this.pendingApprovals = this.pendingApprovals.map((a) =>
-          done.has(a.approvalId) && !a.resolved
-            ? { ...a, resolved: 'APPROVE' as const, resolvedSource: 'BATCH' as const, batchId }
-            : a
-        );
-        this.approvalRevision += 1;
-      } catch (e) {
-        ElMessage.error('批量允许失败: ' + (e as Error).message);
-      }
+    approveBatch(approvalIds: string[]) {
+      return useApprovalStore().approveBatch(this.currentSessionId, approvalIds);
     },
 
     /** P5-10-2：加载会话内已处理审批历史；返回时校验会话没被切走，避免串数据 */
-    async loadApprovalHistory(sessionId?: number | null) {
+    loadApprovalHistory(sessionId?: number | null) {
       const sid = sessionId === undefined ? this.currentSessionId : sessionId;
-      if (sid == null) {
-        this.approvalHistory = [];
-        return;
-      }
-      this.approvalHistoryLoading = true;
-      try {
-        const items = await agentApi.getSessionApprovals(sid);
-        if (this.currentSessionId === sid) this.approvalHistory = items;
-      } catch {
-        if (this.currentSessionId === sid) this.approvalHistory = [];
-      } finally {
-        this.approvalHistoryLoading = false;
-      }
+      return useApprovalStore().loadApprovalHistory(sid);
     },
 
     /** 审批超时 / 过期：仅移除卡片，后端到时间会自动拒绝 */
     dismissApproval(approvalId: string) {
-      this.pendingApprovals = this.pendingApprovals.filter((a) => a.approvalId !== approvalId);
+      useApprovalStore().dismissApproval(approvalId);
     },
 
     /** P5-12-4：从轨迹面板点待审批步骤，定位到审批区 */
     requestApprovalFocus() {
-      this.approvalFocusToken += 1;
+      useApprovalStore().requestFocus();
     },
 
     async renameSession(sessionId: number, title: string) {
@@ -1016,13 +1002,14 @@ export const useChatStore = defineStore('chat', {
 
     /** P5-10-3：记录阶段首次到达；只前进不后退，重复到达不刷新时间 */
     markLiveStage(key: TaskStageKey) {
-      if (!this.isProcessing || this.liveStageMarks[key]) return;
+      const stream = useStreamStore();
+      if (!this.isProcessing || stream.liveStageMarks[key]) return;
       const latest = TASK_STAGES.reduce(
-        (max, stage, i) => (this.liveStageMarks[stage.key] ? Math.max(max, i) : max),
+        (max, stage, i) => (stream.liveStageMarks[stage.key] ? Math.max(max, i) : max),
         -1
       );
       if (TASK_STAGES.findIndex((stage) => stage.key === key) < latest) return;
-      this.liveStageMarks[key] = Date.now();
+      stream.markStage(key);
     },
 
     /** P5-10-3：停止后继续——把上一条未完成的回答接上，不要求用户重述任务 */
@@ -1128,18 +1115,13 @@ export const useChatStore = defineStore('chat', {
         thinkingThrottle.flush();
       };
       this.isProcessing = true;
-      this.livePlan = null;
-      this.liveBudget = null;
-      this.liveStageMarks = {};
-      this.runStartedAt = startedAt;
+      const stream = useStreamStore();
+      stream.beginRun(startedAt);
       this.markLiveStage('understand');
 
       const controller = streamSession.begin();
       // 新一轮开始：清掉上一轮的恢复状态
       streamSession.cancelRecovery();
-      this.activeRunId = null;
-      this.recoveredTruncated = false;
-      this.streamStatus = 'streaming';
 
       try {
         await streamChat(
@@ -1175,7 +1157,7 @@ export const useChatStore = defineStore('chat', {
             },
             // P5-10：记下运行 id，连接断了可以凭它续上这一轮
             onRunId: (runId) => {
-              this.activeRunId = runId;
+              stream.setRunId(runId);
               markExperienceRun(runId, this.currentSessionId);
             },
             onThinking: (thought) => {
@@ -1188,28 +1170,18 @@ export const useChatStore = defineStore('chat', {
             onPlan: (plan) => {
               aiMsg.plan = plan;
               // 同时记到 store 级别：即使消息数组被刷新替换，计划面板仍能实时显示
-              this.livePlan = plan;
+              stream.setPlan(plan);
             },
             // 危险工具执行前挂起：把审批项挂到当前会话，切换会话时互不干扰
             onApprovalRequired: (req) => {
-              this.pendingApprovals = this.pendingApprovals.filter((a) => a.approvalId !== req.approvalId);
-              this.pendingApprovals.push({ ...req, sessionId: this.currentSessionId });
+              useApprovalStore().request(req, this.currentSessionId);
               // P5-12-2：侧栏状态点同步成「待审批」，和审批卡片一致
               this.markSessionRunState(this.currentSessionId, 'WAITING_APPROVAL');
             },
             // 审批被处理（用户点击 / 超时 / 停止会话）：标记为 resolved，卡片切到"已处理"态并给叉号
             onApprovalResolved: (approvalId, decision, source, batchId) => {
-              const idx = this.pendingApprovals.findIndex((a) => a.approvalId === approvalId);
-              if (idx >= 0) {
-                this.pendingApprovals[idx] = {
-                  ...this.pendingApprovals[idx],
-                  resolved: decision,
-                  resolvedSource: source,
-                  batchId
-                };
-              }
-              // P5-10-2：通知追踪页刷新审批历史
-              this.approvalRevision += 1;
+              // P5-10-2：通知追踪页刷新审批历史（resolve 内部已自增 approvalRevision）
+              useApprovalStore().resolve(approvalId, decision, source, batchId);
               // P5-12-2：处理完就回到运行中，终态由本轮收尾统一落
               this.markSessionRunState(this.currentSessionId, 'RUNNING');
             },
@@ -1227,7 +1199,7 @@ export const useChatStore = defineStore('chat', {
             },
             onToolCall: (tool, args) => {
               aiMsg.tools.push({ name: tool, args, status: 'running', startedAt: Date.now() } as ToolInvocation);
-              const stage = stageForTool(tool, !!this.liveStageMarks.modify);
+              const stage = stageForTool(tool, !!stream.liveStageMarks.modify);
               if (stage) this.markLiveStage(stage);
             },
             onToolResult: (tool, data) => {
@@ -1257,7 +1229,7 @@ export const useChatStore = defineStore('chat', {
             },
             // P5-10-3：每轮实时预算进度；旧后端不会发 usage 时保持 null 降级展示
             onUsage: (usage) => {
-              this.liveBudget = usage;
+              stream.setBudget(usage);
               // 气泡上展示本轮用量：usage 是 Run 累计值，取最新一次即可
               aiMsg.usage = {
                 promptTokens: usage.promptTokens,
@@ -1270,20 +1242,18 @@ export const useChatStore = defineStore('chat', {
               flushStreamedText();
               this.markLiveStage('summarize');
               aiMsg.streaming = false;
-              this.streamStatus = 'idle';
-              this.activeRunId = null;
+              stream.finish();
               // P7-06：Run 已结束，等待中的询问不可能再被回答（超时/取消后后端会拉回 RUNNING）
-              this.pendingUserQuestion = null;
+              useQuestionStore().clear();
               // 思考内容保留：完成后折叠成「思考过程」入口，切回会话也仍能看到
             },
             onError: (message) => {
               flushStreamedText();
               aiMsg.streaming = false;
               aiMsg.failed = true;
-              this.streamStatus = 'idle';
-              this.activeRunId = null;
+              stream.finish();
               // P7-06：Run 已失败，残留的询问卡片不再可用
-              this.pendingUserQuestion = null;
+              useQuestionStore().clear();
               // 只记失败原因，不覆盖已经流出来的半截回答
               aiMsg.errorText = message || '这一轮没有完成';
             }
@@ -1294,13 +1264,13 @@ export const useChatStore = defineStore('chat', {
         flushStreamedText();
         // P5-10：流先结束了却没收到 done（后端收尾前连接被掐断）——按 runId 把这一轮补完
         if (aiMsg.streaming && !controller.signal.aborted) {
-          if (this.activeRunId != null) {
-            await this.recoverRun(this.activeRunId, aiMsg);
+          if (stream.activeRunId != null) {
+            await this.recoverRun(stream.activeRunId, aiMsg);
           } else {
             aiMsg.streaming = false;
             aiMsg.failed = true;
             aiMsg.errorText = '连接提前结束了，请稍后再试';
-            this.streamStatus = 'idle';
+            stream.finish();
           }
         }
       } catch (e) {
@@ -1309,14 +1279,14 @@ export const useChatStore = defineStore('chat', {
         if (controller.signal.aborted) {
           // 用户主动停止：保留已生成的部分，不标成失败
           aiMsg.stopped = true;
-          this.streamStatus = 'idle';
+          stream.finish();
           if (!aiMsg.content) aiMsg.content = '（已停止生成）';
-        } else if (this.activeRunId != null) {
+        } else if (stream.activeRunId != null) {
           // P5-10：连接断了但后端还在跑——按 runId 续上已生成内容和后续输出
-          await this.recoverRun(this.activeRunId, aiMsg);
+          await this.recoverRun(stream.activeRunId, aiMsg);
         } else {
           aiMsg.failed = true;
-          this.streamStatus = 'idle';
+          stream.finish();
           const raw = (e as Error).message || '';
           // 浏览器网络层错误只会说 "Failed to fetch"，对普通用户没有意义
           aiMsg.errorText = /failed to fetch|networkerror|load failed/i.test(raw)
@@ -1339,40 +1309,17 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    // ——— 文件变更审查流 ———
+    // ——— 文件变更审查流（R6：状态与请求委托 fileChanges store） ———
 
-    async fetchPendingChanges(projectId: number) {
-      this.pendingChangesLoading = true;
-      try {
-        this.pendingChanges = await fileChangesApi.fetchPendingChanges(projectId);
-      } catch {
-        this.pendingChanges = [];
-      } finally {
-        this.pendingChangesLoading = false;
-      }
+    fetchPendingChanges(projectId: number) {
+      return useFileChangeStore().fetchPendingChanges(projectId);
     },
 
     // ——— P5-14 任务级交付 ———
 
     /** 拉取当前会话的 ChangeSet；刷新后由后端事件重建同一视图 */
-    async fetchChangeSet() {
-      const sessionId = this.currentSessionId;
-      if (sessionId == null) {
-        this.changeSet = null;
-        return;
-      }
-      this.changeSetLoading = true;
-      try {
-        const view = await fileChangesApi.fetchChangeSet(
-          sessionId,
-          this.changeSetRunFilter ?? undefined
-        );
-        if (this.currentSessionId === sessionId) this.changeSet = view;
-      } catch {
-        if (this.currentSessionId === sessionId) this.changeSet = null;
-      } finally {
-        this.changeSetLoading = false;
-      }
+    fetchChangeSet() {
+      return useFileChangeStore().fetchChangeSet(this.currentSessionId);
     },
 
     /** 同时刷新项目级待审列表与任务交付视图 */
@@ -1385,45 +1332,30 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 按单个 Run 过滤交付视图；传 null 恢复全部 */
-    async setChangeSetRunFilter(runId: number | null) {
-      this.changeSetRunFilter = runId;
-      await this.fetchChangeSet();
+    setChangeSetRunFilter(runId: number | null) {
+      return useFileChangeStore().setChangeSetRunFilter(this.currentSessionId, runId);
     },
 
     /** 任务级整体撤回：逆序回滚，外部修改返回冲突 */
     async revertTask(): Promise<boolean> {
-      const sessionId = this.currentSessionId;
-      if (sessionId == null) {
+      if (this.currentSessionId == null) {
         ElMessage.warning('当前没有可撤回的任务');
         return false;
       }
-      try {
-        const resp = await fileChangesApi.revertSession(sessionId);
-        this.reportRevert(resp, '已撤回');
-        await this.refreshChanges();
-        return resp.count > 0;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '整体撤回失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().revertTask(this.currentSessionId);
+      await this.refreshChanges();
+      return ok;
     },
 
     /** 按 Run 撤回：只回滚该 Run 对应的 PENDING 变更 */
     async revertRunChanges(runId: number): Promise<boolean> {
-      const sessionId = this.currentSessionId;
-      if (sessionId == null) {
+      if (this.currentSessionId == null) {
         ElMessage.warning('当前没有可撤回的任务');
         return false;
       }
-      try {
-        const resp = await fileChangesApi.revertRun(sessionId, runId);
-        this.reportRevert(resp, `已撤回 #${runId}`);
-        await this.refreshChanges();
-        return resp.count > 0;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '按 Run 撤回失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().revertRunChanges(this.currentSessionId, runId);
+      await this.refreshChanges();
+      return ok;
     },
 
     /** 继续修复：沿用当前会话，自动携带失败上下文与未完成计划 */
@@ -1441,70 +1373,25 @@ export const useChatStore = defineStore('chat', {
       resp: { count: number; failed: number; skippedAccepted: number; conflicts: { reason: string }[] },
       prefix: string
     ) {
-      const parts: string[] = [];
-      if (resp.count > 0) parts.push(`${prefix} ${resp.count} 个文件变更`);
-      if (resp.skippedAccepted > 0) parts.push(`${resp.skippedAccepted} 个已接受变更保留审计`);
-      if (resp.failed > 0) parts.push(`${resp.failed} 个失败`);
-      const conflictCount = resp.conflicts?.length ?? 0;
-      if (conflictCount > 0) parts.push(`${conflictCount} 个冲突未覆盖：${resp.conflicts[0].reason}`);
-      if (resp.count > 0) {
-        ElMessage.success(parts.join('，'));
-      } else if (conflictCount > 0) {
-        ElMessage.warning(parts.join('，'));
-      } else {
-        ElMessage.info(parts.join('，') || '没有可撤回的变更');
-      }
+      useFileChangeStore().reportRevert(resp, prefix);
     },
 
     async revertChange(id: number): Promise<boolean> {
-      try {
-        const resp = await fileChangesApi.revertChange(id);
-        if (resp.ok) {
-          this.pendingChanges = this.pendingChanges.filter((c) => c.id !== id);
-          ElMessage.success('已撤销该文件变更');
-          void this.fetchChangeSet();
-          return true;
-        }
-        ElMessage.error(resp.conflicts?.[0]?.reason || '撤销失败');
-        return false;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '撤销请求失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().revertChange(id);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     },
 
     async acceptChange(id: number): Promise<boolean> {
-      try {
-        const resp = await fileChangesApi.acceptChange(id);
-        if (resp.ok) {
-          this.pendingChanges = this.pendingChanges.filter((c) => c.id !== id);
-          ElMessage.success('已保留该文件变更');
-          void this.fetchChangeSet();
-          return true;
-        }
-        ElMessage.error('保留失败');
-        return false;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '保留请求失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().acceptChange(id);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     },
 
     async acceptAll(projectId: number): Promise<boolean> {
-      try {
-        const resp = await fileChangesApi.acceptAll(projectId);
-        if (resp.ok) {
-          const n = this.pendingChanges.length;
-          this.pendingChanges = [];
-          ElMessage.success(`已全部保留 ${n} 个文件变更`);
-          void this.fetchChangeSet();
-          return true;
-        }
-        return false;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '批量保留失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().acceptAll(projectId);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     },
 
     /**
@@ -1512,44 +1399,19 @@ export const useChatStore = defineStore('chat', {
      * 不走项目级 accept-all，避免把其他会话的 PENDING 一起接受；失败合并成一条提示。
      */
     async acceptChanges(ids: number[]): Promise<boolean> {
-      if (!ids.length) return false;
-      const results = await Promise.allSettled(ids.map((id) => fileChangesApi.acceptChange(id)));
-      const accepted = new Set<number>();
-      results.forEach((result, idx) => {
-        if (result.status === 'fulfilled' && result.value?.ok) accepted.add(ids[idx]);
-      });
-      if (accepted.size === 0) {
-        ElMessage.error('保留失败，请稍后重试');
-        return false;
-      }
-      this.pendingChanges = this.pendingChanges.filter((c) => !accepted.has(c.id));
-      const failed = ids.length - accepted.size;
-      ElMessage.success(
-        `已保留 ${accepted.size} 个文件变更${failed ? `（${failed} 个失败）` : ''}`
-      );
-      void this.fetchChangeSet();
-      return true;
+      const ok = await useFileChangeStore().acceptChanges(ids);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     },
 
     async revertAll(projectId: number): Promise<boolean> {
-      try {
-        const resp = await fileChangesApi.revertAll(projectId);
-        if (resp.ok) {
-          this.pendingChanges = [];
-          ElMessage.success(`已撤销 ${resp.count} 个文件变更${resp.failed ? `（${resp.failed} 个失败）` : ''}`);
-          void this.fetchChangeSet();
-          return true;
-        }
-        return false;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '批量撤销失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().revertAll(projectId);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     },
 
     /** 第六十八批 A3：撤回最近一轮的改动（按 sessionId + turnId 精确定位） */
     async revertTurn(): Promise<boolean> {
-      const sessionId = this.currentSessionId;
       let turnId: string | undefined;
       for (let i = this.messages.length - 1; i >= 0; i--) {
         const m = this.messages[i];
@@ -1558,27 +1420,9 @@ export const useChatStore = defineStore('chat', {
           break;
         }
       }
-      if (sessionId == null || !turnId) {
-        ElMessage.warning('暂无可撤回的本轮改动');
-        return false;
-      }
-      try {
-        const resp = await fileChangesApi.revertTurn(sessionId, turnId);
-        if (resp.ok) {
-          this.pendingChanges = this.pendingChanges.filter(
-            (c) => c.sessionId !== sessionId || c.turnId !== turnId
-          );
-          ElMessage.success(
-            `已撤回本轮 ${resp.count} 个文件变更${resp.failed ? `（${resp.failed} 个失败）` : ''}`
-          );
-          void this.fetchChangeSet();
-          return true;
-        }
-        return false;
-      } catch (e: any) {
-        ElMessage.error(e?.message || '按轮次撤回失败');
-        return false;
-      }
+      const ok = await useFileChangeStore().revertTurn(this.currentSessionId, turnId);
+      if (ok) void this.fetchChangeSet();
+      return ok;
     }
   }
 });

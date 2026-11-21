@@ -13,6 +13,7 @@ import {
   stageForTool,
   useChatStore
 } from './chat';
+import { useApprovalStore } from './approvals';
 
 vi.mock('element-plus', () => ({
   ElMessage: { warning: vi.fn(), error: vi.fn(), success: vi.fn() }
@@ -366,7 +367,7 @@ describe('chat store', () => {
   it('P5-10-2：批量允许只标记服务端返回的 resolvedIds', async () => {
     const store = useChatStore();
     store.currentSessionId = 3;
-    store.pendingApprovals = [
+    useApprovalStore().pendingApprovals = [
       { approvalId: 'ap-1', sessionId: 3, tool: 'write_file', risk: 'WRITE', expiresAt: 0 },
       { approvalId: 'ap-2', sessionId: 3, tool: 'run_command', risk: 'EXECUTE', expiresAt: 0 }
     ] as PendingApproval[];
@@ -385,7 +386,7 @@ describe('chat store', () => {
 
   it('P5-10-2：审批提交失败保留待审批，不伪造已处理', async () => {
     const store = useChatStore();
-    store.pendingApprovals = [
+    useApprovalStore().pendingApprovals = [
       { approvalId: 'ap-3', sessionId: 3, tool: 'write_file', risk: 'WRITE', expiresAt: 0 }
     ] as PendingApproval[];
     vi.mocked(agentApi.respondApproval).mockRejectedValueOnce(new Error('network'));
@@ -398,7 +399,7 @@ describe('chat store', () => {
 
   it('P5-10-2：审批提交成功先按本人来源乐观更新', async () => {
     const store = useChatStore();
-    store.pendingApprovals = [
+    useApprovalStore().pendingApprovals = [
       { approvalId: 'ap-4', sessionId: 3, tool: 'write_file', risk: 'WRITE', expiresAt: 0 }
     ] as PendingApproval[];
     vi.mocked(agentApi.respondApproval).mockResolvedValueOnce(undefined);
