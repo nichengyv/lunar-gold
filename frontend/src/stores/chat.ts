@@ -5,6 +5,7 @@ import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
 import { streamChat } from '../api/sse';
 import * as fileChangesApi from '../api/fileChanges';
+import { replayRunEvents } from '../services/runRecovery';
 import { createFrameThrottle } from '../utils/frameThrottle';
 import { useProjectStore } from './project';
 import {
@@ -18,7 +19,6 @@ import type { ChangeSetView, FileChange, MessageTrace, PendingApproval, PendingF
 import type {
   ApprovalHistoryItem,
   CompletionInfo,
-  DiagnosticsInfo,
   FailureInfo,
   PermissionLevel,
   PlanSnapshot,
@@ -27,8 +27,7 @@ import type {
   TaskStageItem,
   TaskStageKey,
   TaskStageStatus,
-  UserQuestion,
-  VerifyInfo
+  UserQuestion
 } from '../types/chat';
 
 /** 输入框上方显示的附件标签 */
@@ -63,67 +62,18 @@ function delay(ms: number) {
 
 /**
  * P5-10：把后端落库的运行事件折叠成可展示的内容。
- * 正文取最后一个 MODEL_CHUNK 检查点（累计文本），工具按调用顺序重建并回填结果。
+ * R6：折叠逻辑抽到 `services/runRecovery`，补齐 plan / 文件变更 / 审批 / 询问四类恢复。
  */
-function applyRunEvents(
-  events: agentApi.RunEventItem[],
-  target: UiMessage
-): {
-  truncated: boolean;
-  /** P7-06：事件重放后仍未回答的决策询问（刷新 / 断线恢复时用来还原卡片） */
-  userQuestion?: Omit<UserQuestion, 'runId'>;
-} {
-  let text = '';
-  let declaredLength = 0;
-  const tools: ToolInvocation[] = [];
-  let userQuestion: Omit<UserQuestion, 'runId'> | undefined;
-  for (const ev of events) {
-    let payload: Record<string, any> | null = null;
-    try {
-      payload = ev.payload ? (JSON.parse(ev.payload) as Record<string, any>) : null;
-    } catch {
-      continue;
-    }
-    if (!payload) continue;
-    if (ev.type === 'MODEL_CHUNK') {
-      if (typeof payload.text === 'string' && payload.text.length >= text.length) {
-        text = payload.text;
-        declaredLength = Number(payload.length) || payload.text.length;
-      }
-    } else if (ev.type === 'TOOL_CALL') {
-      tools.push({ name: payload.tool, args: payload.args ?? '{}', status: 'running' });
-    } else if (ev.type === 'TOOL_RESULT') {
-      const match = [...tools].reverse().find((t) => t.name === payload?.tool && t.status === 'running');
-      if (match) {
-        match.status = payload.success ? 'success' : 'error';
-        match.result = payload.content;
-        match.error = payload.error;
-      }
-    } else if (ev.type === 'COMPLETION') {
-      target.completion = payload as CompletionInfo;
-    } else if (ev.type === 'DIAGNOSTICS') {
-      target.diagnostics = payload as DiagnosticsInfo;
-    } else if (ev.type === 'VERIFY') {
-      target.verify = payload as VerifyInfo;
-    } else if (ev.type === 'USER_QUESTION') {
-      if (payload.questionId) {
-        userQuestion = {
-          questionId: String(payload.questionId),
-          question: String(payload.question ?? ''),
-          header: payload.header,
-          options: payload.options,
-          multiSelect: !!payload.multiSelect
-        };
-      }
-    } else if (ev.type === 'USER_ANSWERED') {
-      if (userQuestion && userQuestion.questionId === payload.questionId) {
-        userQuestion = undefined;
-      }
-    }
-  }
-  if (text) target.content = text;
-  if (tools.length) target.tools = tools;
-  return { truncated: declaredLength > text.length, userQuestion };
+function applyRunEvents(events: agentApi.RunEventItem[], target: UiMessage) {
+  const recovered = replayRunEvents(events);
+  if (recovered.text) target.content = recovered.text;
+  if (recovered.tools.length) target.tools = recovered.tools;
+  if (recovered.plan) target.plan = recovered.plan;
+  if (recovered.changes.length) target.changes = recovered.changes;
+  if (recovered.completion) target.completion = recovered.completion;
+  if (recovered.diagnostics) target.diagnostics = recovered.diagnostics;
+  if (recovered.verify) target.verify = recovered.verify;
+  return recovered;
 }
 
 // 当前流式请求的中断句柄：用户点「停止」时直接 abort，
@@ -736,6 +686,30 @@ export const useChatStore = defineStore('chat', {
           failedAttempts = 0;
           const applied = applyRunEvents(result.events, target);
           this.recoveredTruncated = applied.truncated;
+          // R6：计划与审批也要在断线恢复后回到同一状态
+          if (applied.plan) {
+            this.livePlan = applied.plan;
+          }
+          const active =
+            result.state === 'QUEUED' ||
+            result.state === 'RUNNING' ||
+            result.state === 'WAITING_APPROVAL' ||
+            result.state === 'WAITING_USER_INPUT';
+          const approvalId = applied.approval?.approvalId;
+          if (approvalId) {
+            if (!active || applied.approval?.resolved) {
+              // 已结束或已处理：不把过期的审批卡片带回界面
+              this.pendingApprovals = this.pendingApprovals.filter((a) => a.approvalId !== approvalId);
+            } else if (!this.pendingApprovals.some((a) => a.approvalId === approvalId)) {
+              this.pendingApprovals.push({
+                approvalId,
+                tool: applied.approval!.tool,
+                risk: applied.approval!.risk,
+                expiresAt: 0,
+                sessionId: this.currentSessionId
+              });
+            }
+          }
           // P7-06：还原/清除等待中的决策询问卡片（刷新、断线重连都要能回到同一状态）
           if (applied.userQuestion) {
             this.pendingUserQuestion = { ...applied.userQuestion, runId };
@@ -769,6 +743,10 @@ export const useChatStore = defineStore('chat', {
             // 以落库的完整回答为准：检查点对超长回答会截断
             if (this.currentSessionId != null) {
               await this.loadSessionMessages(this.currentSessionId, true);
+              // 历史 trace 可能还没有计划字段，重载后把刚恢复的快照补回去
+              if (applied.plan) {
+                this.livePlan = applied.plan;
+              }
             }
           } else if (result.state === 'CANCELLED') {
             this.streamStatus = 'interrupted';

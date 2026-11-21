@@ -277,6 +277,40 @@ describe('chat store', () => {
     ]);
   });
 
+  it('断线恢复还原计划与文件变更', async () => {
+    localStorage.clear();
+    vi.mocked(agentApi.getRunEvents).mockResolvedValue({
+      runId: 43,
+      state: 'SUCCEEDED',
+      events: [
+        {
+          seq: 1,
+          type: 'PLAN_UPDATED',
+          payload: JSON.stringify({ steps: [{ title: '改接口', status: 'in_progress' }] })
+        },
+        { seq: 2, type: 'TOOL_CALL', payload: JSON.stringify({ tool: 'write_file', args: '{"path":"a.ts"}' }) },
+        { seq: 3, type: 'TOOL_RESULT', payload: JSON.stringify({ tool: 'write_file', success: true }) }
+      ]
+    });
+    const store = useChatStore();
+    store.currentSessionId = 3;
+    const target = reactive<UiMessage>({
+      id: 1,
+      role: 'assistant',
+      content: '',
+      tools: [],
+      streaming: true
+    });
+
+    await store.recoverRun(43, target);
+
+    expect(target.plan?.steps).toEqual([{ title: '改接口', status: 'in_progress' }]);
+    expect(store.livePlan?.steps).toEqual([{ title: '改接口', status: 'in_progress' }]);
+    expect(target.changes).toEqual([
+      { path: 'a.ts', action: 'modify', source: 'write_file', additions: 0, deletions: 0, diff: '' }
+    ]);
+  });
+
   it('网络重试耗尽记录恢复失败和实际轮询次数', async () => {
     localStorage.clear();
     vi.mocked(agentApi.getRunEvents).mockRejectedValue(new Error('offline'));
