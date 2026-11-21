@@ -856,7 +856,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分（含 messages）+ 发送编排 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
-| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃）；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测与构建全绿，真实进程崩溃续跑 E2E 尚未执行 | 按项开关 |
+| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃，真实 kill→重启→resume E2E 通过）；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测、构建与真实崩溃续跑 E2E 均通过 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
 
@@ -1043,8 +1043,10 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **续跑语义**：`POST /api/agent/runs/{runId}/resume` 只接受 `FAILED / PROCESS_RESTARTED` 且带断点的 Run；`ReActAgentService.resume` 直接用快照消息作为初始上下文，不重新检索 RAG、不重建历史；工具清单、工作区、scope 与权限按当前项目/会话重新解析；审批、决策询问、SSE 事件与 `recoverRun` 复用普通发送链路。正常失败（执行异常、预算超限、工具错误）仍保持终态，不可续跑。
 - **前端**：会话重新加载时若最近一条 Run 可续跑，失败气泡给出「继续执行」；`GET /api/agent/sessions/{sessionId}/resumable-run` 提供入口，`runEvents` 响应新增 `resumable`。发送与续跑共用 `sendMessageService.runStream`，避免两套事件映射漂移。
 - **可见限制**：工具副作用按 at-least-once 处理——若崩溃发生在工具批中途，续跑会从上一份断点重放该轮模型决策，可能重复执行同一工具；验证重试轮不单独落断点，崩溃后回退到上一个工具批断点。两者都只会导致重做，不会跳过未完成工作。
-- **验证**：新增 `RunEventStoreTest` 4 例（写入/读回/缺失损坏/超限）、`AgentRunServiceTest` 3 例（可续跑判定、续跑清错、普通失败拒绝）、`ScriptedAgentLoopTest` 2 例（轮末断点内容、续跑不重建历史）；前端新增「继续执行」按钮用例。后端全量 **484 tests / 0 failures / 17 skipped**；前端 **112 tests / 0 failures**；`vue-tsc + vite build` 通过。
-- **未验证项**：未执行真实进程 kill → 重启 → 点击续跑的端到端验收；未用真实模型验证续跑后的任务完成率；未补 Playwright 真机用例。
+- **验证**：新增 `RunEventStoreTest` 4 例（写入/读回/缺失损坏/超限）、`AgentRunServiceTest` 3 例（可续跑判定、续跑清错、普通失败拒绝）、`ScriptedAgentLoopTest` 2 例（轮末断点内容、续跑不重建历史）；前端新增「继续执行」按钮用例。后端全量 **485 tests / 0 failures / 17 skipped**；前端 **112 tests / 0 failures**；`vue-tsc + vite build` 通过。
+- **真实崩溃续跑 E2E**（2026-11-21 通过）：`scripts/resume-e2e.ps1` + `scripts/fake-openai-server.mjs`，用 desktop 真后端 + 内嵌 PG + 假 OpenAI 流式服务，流程为：模型返回 `write_file` → 落 `CHECKPOINT`（round=1）→ **`taskkill /T /F` 真实杀掉后端进程树** → 同一数据目录重启（断言 `FAILED / PROCESS_RESTARTED / resumable=true`）→ `POST /runs/{id}/resume` → `SUCCEEDED`。断言 `note.txt` 内容严格一致、续跑模型请求里 `role=tool` 恰 1 条、原始用户 prompt 与 `write_file` 参数命中、SSE 含最终回答。运行命令：`powershell -ExecutionPolicy Bypass -File scripts\resume-e2e.ps1`。
+- **E2E 暴露并修复的回归**：R7b2 新增的两个 `@PublicApi` 端点未登记到 `PublicApiCatalog.DECLARED`，应用启动自检直接失败（既有单测不启动 Spring，故漏网）。已补齐清单与契约快照，并新增反射扫描 controller 的漂移测试 `PublicApiContractTest.代码里每个PublicApi注解都必须登记到清单`，防止再次出现。
+- **未验证项**：未用真实模型验证续跑后的任务完成率；未补 Playwright 真机用例；`write_file` 的 tool 结果本身只有「已写入文件」，写入内容断言落在同快照的 tool_calls 参数上。
 
 
 
