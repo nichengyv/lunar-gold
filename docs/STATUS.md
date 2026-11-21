@@ -1,154 +1,61 @@
 # Lunar Gold（金月）· 项目状态速查
 
-> 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `handover-20261121.md`。
-> 当前基线：Phase 5、Phase 6、Phase 7 均已收口（Phase 7 于 2026-11-20 收口）。P7-01 重启残局、P7-02 统计切片与 L1～L3×3 真实模型正式基线（三层均 2/3 成功率、工具链 0 error）、P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3、成功率 0/3→2/3）、P7-04b 工具输出分档、P7-05 SSE 真机链路、P7-06 ask_user_question 均已完成；P7-03 plan-first 评估后不立项，P7-04c plan 注入尝试失败已回滚。R0/R1/R2/R3/R4a/R4b/R5/R6 重构完成后全量 477 tests 通过（17 skipped）；前端 112 tests 通过、`vue-tsc + vite build` 通过。R6 已把断线恢复抽成 `services/runRecovery.ts`，SSE 生命周期拆到 `services/streamService.ts` + `services/streamSession.ts`，把 stream/approvals/question/fileChanges 与 messages 拆成独立 Pinia store，并把发送与流式收尾编排抽到 `services/sendMessageService.ts`（`useChatStore` 保留同名 facade）。R7a 已把长会话评测扩到每层 n≥10（L1/L2 各 20、L3 10），新增三组真实工程形态任务集与 `LongSessionStatsGate`（Wilson 95% 下限 / 记忆探针 / provider 失败率 / 基线退化），真实模型 n≥10 基线待有 Key 时补测。R7b 已落地 Run 级断点续跑：每轮工具批后写 `agent_run.checkpoint_json` 快照并追加 `CHECKPOINT` 事件，重启残局仍标 FAILED/PROCESS_RESTARTED，但保留断点供用户显式「继续执行」（新增 `POST /api/agent/runs/{id}/resume` 与前端入口）；当前后端全量 **490 tests / 0 failures / 17 skipped**、前端 **112 tests** 通过。真实进程 kill→重启→续跑 E2E 已通过（`scripts/resume-e2e.ps1`，含真实 `taskkill`、重启后 FAILED 断言与 `resume→SUCCEEDED`）。真实模型续跑完成率 runner 与预注册门禁已落地（`P7_02_RESUME=on`）；Key 已用 n=1 冒烟验证（直接执行与断点续跑均 success，续跑 `resumeInjected=true`），全量 L1 20 对与 L2/L3 仍待跑，尚未产出完成率数字，见 `UPDATE_PLAN.md` R7b-live。下一步为 R7 剩余长任务能力与 P3-08 干净机器验收，详见 `UPDATE_PLAN.md` 第 14 节。历史批次与双端改造完成证据见 `COMPLETED_WORK.md`。
-
-> **架构现状（2026-11-21 全量审计）**：核心结构已到临界点，不再适合逐点补丁。审计发现并已由 R1～R3 修复：跨 turn 无权威状态源（P7-04c 回滚根因）、`agent_run_event.seq` 先查后写、只读批与 `ask_user_question` 绕过审批/scope、`WorkspaceContext` 13 个混杂字段。当前剩余：`ReActAgentService` 从 1498 行降到 726 行，只保留入口、消息装配与协作者装配，主循环由 `AgentOrchestrator`（535 行）执行，终态判定与 `ask_user_question` 分别由 `RunTermination` / `AskUserQuestionHandler` 承担；前端 `chat.ts` 的流/审批/询问/文件变更/消息状态已迁到域 store，发送编排抽到 `services/sendMessageService.ts`，`chat.ts` 只保留会话 CRUD、恢复轮询与兼容 facade；评测已由 n=3 扩到每层 n≥10 并落地统计门禁（R7a），真实模型新基线待补（R7）。完整证据、目标架构与 R0～R7 重构路线见 [`ARCHITECTURE_AUDIT_20261121.md`](ARCHITECTURE_AUDIT_20261121.md)。
->
-> **重构进度**：R0 安全网、R1 状态地基、R2 Context 瘦身、R3 工具接缝、R4a 循环与流接缝、R4b 编排壳已完成（2026-11-21）。`agent/run` 下新增 `RunContext` / `RunEventStore` / `PlanStep` / `FileChangeService` / `LoopGuard`；事件 seq 改为“先锁 Run 行再分配 + 唯一约束兜底”；计划快照落 `agent_run.plan_json` 并产生 `PLAN_UPDATED` 事件；`WorkspaceContext` 缩为 RunContext 的线程视图（仅保留文件变更缓冲）；`agent/tool` 下新增 `ApprovalGate`（审批与 scope 唯一判定）与 `ToolExecutor`（串行/只读批统一入口）；`agent/stream/StreamPublisher` 统一流式调用与 token 预算；`LoopGuard` 落地 P7-08 渐进恢复（重复调用先 nudge，超过一轮自救窗口才停止）；`AgentOrchestrator` 接管主循环，`RunTermination` 负责终态判定与计划收口，`AskUserQuestionHandler` 负责挂起/恢复询问，Service 只保留 public 入口与装配。R5 新增 `agent/context` 下的 `ContextAssembler` / `ContextCondenser` / `PlanSnapshotProvider`：每轮从 `plan_json` 重读并软注入计划（P7-07），旧读取折叠 → 摘要 → 滑窗三层压缩（P7-09）；两个开关默认关闭；2026-11-21 完成 L2×1 真实模型对照（planCompletionRate 0.286→1.000，两组终态均仍为 HISTORY_REPETITION，L3 与多次重复待补）。R6a 已把断线恢复抽到 `services/runRecovery.ts`，覆盖 plan/file_change/approval/question。R6b 已完成：`api/sse.ts` 只留协议解析与建连，`services/streamService.ts` 负责事件归一化，`services/streamSession.ts` 管理中断句柄与恢复代际；新增 `stores/stream.ts` / `approvals.ts` / `question.ts` / `fileChanges.ts`，`useChatStore` 以同名 getter/action 兼容视图；R6c 再把 `messages` 拆到 `stores/messages.ts`，发送与流式事件映射抽到 `services/sendMessageService.ts`，阶段纯函数移到 `utils/taskStages.ts`（chat 原样 re-export）。R7a 完成评测扩容：每层 n≥10、三组真实工程形态任务集、`LongSessionStatsGate` 预注册统计阈值。R7b 完成断点续跑地基：`agent/run/RunCheckpoint` + `AgentRunService.resumeInterrupted` + `AgentOrchestrator` 轮末快照，前端复用发送链路新增「继续执行」。下一步 R7 剩余长任务能力。详见 `UPDATE_PLAN.md` 第 14 节。
-
----
+> 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
+> 更新日期：2026-11-21；基线提交 `f825fc4`（Gitee `origin/master`）。
+> 后端 **490 tests / 0 failures / 17 skipped**（`mvn clean test`）；前端 **112 tests** 通过，`vue-tsc + vite build` 通过。
 
 ## 一句话定位
 
-面向个人开发者的智能体工作台：单 Agent + ReAct 多轮工具循环 + 文件级审查 + 人在环路可控性。对标 Cursor / Claude Code，但强调"看得见计划、拦得住危险、撤得回一轮"。
+Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面端是首个完整客户端。Phase 0～7 已收口，Phase 8 并入 R7；当前处于 R7 长任务能力收尾。
 
----
+## 当前主线：R7 长任务能力
 
-## 架构速览
+| 子项 | 状态 | 已完成内容 | 剩余 |
+|---|---|---|---|
+| R7a 评测扩容 | 已完成 | 每层 n≥10（L1/L2 各 20、L3 10）；`LongSessionStatsGate` 预注册阈值（Wilson 95% 下限、memoryProbe、provider 失败率、基线退化） | 真实模型 n≥10 正式基线待跑 |
+| R7b Run 级断点续跑 | 已完成 | 轮末写 `agent_run.checkpoint_json` + `CHECKPOINT` 事件；重启后 `FAILED/PROCESS_RESTARTED` 并保留断点；`POST /api/agent/runs/{runId}/resume` + 前端「继续执行」；真实 `taskkill`→重启→resume E2E 通过 | 审批中/等待用户输入仍终止；仅支持手动触发 |
+| R7b-live 续跑完成率 | 部分完成 | `P7_02_RESUME=on` A/B runner + `LongSessionResumeGate` 已落地；Key 冒烟 n=1 通过（直接执行与续跑均 success，`resumeInjected=true`） | L1 全量 20 对（约 3-4h）、L2/L3（10h+）待确认后执行；尚无完成率结论 |
+| R7c 长任务剩余项 | 未开始 | — | 完成强校验（L5）、大任务分解（L7）、检索型记忆；需按 L1～L8 门禁评估 |
+| P3-08 干净机器验收 | 未开始 | — | Windows 干净机器完整任务 + 所有者确认 |
 
-### 后端（Spring Boot 4.1.2 + Java 21 + Spring AI 2.0.2 BOM）
+判定规则：**L1～L8 全部达标才能宣称「具备长任务能力」**；当前只可表述为「中等长度任务稳定」。
 
-| 模块 | 关键类 |
+## 当前能力边界（用户可见）
+
+- 可执行多轮长会话：计划跟踪、循环保护、可选上下文压缩（默认关闭）
+- 执行中可调用 `ask_user_question` 向用户提问（仅 root agent；等待上限 15 分钟；断线可还原卡片）
+- 崩溃后仅 `RUNNING` 可手动续跑；工具副作用按 at-least-once 语义可能重复执行
+- 尚未支持子任务分解、完成状态强校验、自动续跑
+
+## 文档导航
+
+完整索引与「事实归属」见 [README.md](README.md)。常用入口：未完成计划与阈值 → [UPDATE_PLAN.md](UPDATE_PLAN.md)（第 14 节）；完成证据 → [COMPLETED_WORK.md](COMPLETED_WORK.md)；架构实现 → [architecture/README.md](architecture/README.md)；命令与排障 → [operations.md](operations.md)；新会话接手 → [handover-20261121.md](handover-20261121.md)。
+
+## 改代码前先读
+
+| 链路 | 入口 |
 |---|---|
-| 对话入口 | `AgentChatController` → SSE `/chat/stream`、审批 `/approvals/{id}`、停止 `/chat/stop`、metrics `/agent/metrics` |
-| Agent 核心 | `ReActAgentService` — ReAct 循环、`AgentPolicy`（FAST/STANDARD/DEEP × MANUAL/AUTO/FULL）、`ScopeConstraintService`（D1 范围约束）|
-| 模型层 | `SpringAiAgentClient` — 流式 ChatClient；D2 fallback（零 chunk 才切互补模型列表）|
-| 工具体系 | `ToolRegistry`（部署能力门控 / 注册 / 权限过滤 / Tool Scoring 三维度 / Timer埋点含 publishPercentiles）；内置 `read_file / write_file / edit_file / delete_file / list_dir / search_files / run_command` |
-| MCP | 默认关闭；`McpToolBridge`（stdio 启动，9 个内置等价工具注册为 fallback）、`McpHealthMonitor`（熔断冷却）；写入/删除类 MCP 工具必须审批 |
-| RAG | `VectorStoreService`（pgvector HNSW）、`EmbeddingService`、`DocumentProcessingService` |
-| 记忆 | `SessionMemoryAdvisor`（滚动摘要注入 system）、`SessionMemoryExtractionService`（每 8 轮自动提炼会话事实存 AgentRule）|
-| 审查流 | `FileReviewController`、`PendingFileChange`（turnId 关联 / 按轮回滚）|
-| 审批 | `ToolApprovalRegistry`（120s 超时 / 会话级「总是允许」/ 断连自动拒绝）|
-| 命令沙箱 | `CommandService` — 四道防线：白名单 + eval拦截 + 相对脚本禁止 + git危险子命令 + 敏感路径拦截；shell包装器(cmd/powershell/bash)单独拦截并给友好提示；默认 timeout=120s, max=600s |
-| 范围约束 | `ScopeConstraintService` — `#scope src/components` 或自然语言 "only change X"，拦截文件类工具 |
-
-### 前端（Vue 3 + Vite + Pinia + Element Plus + CodeMirror 6）
-
-| 路由 | 组件 | 说明 |
-|---|---|---|
-| `/login` | `LoginView` | RSA 加密密码、JWT；桌面端由路由守卫自动换取本地令牌，不走登录页 |
-| `/chat` | `ChatView` | SSE 流式、计划条、审批卡、工作台（变更/资料/文件/追踪/计划/**监控**）、@引用、斜杠命令、草稿持久化 |
-| `/knowledge` | `KnowledgeView` | 资料上传 / 重试 / 删除 |
-| `/settings` | `SettingsView` | 7 tab：对话默认 / 模型服务 / Agent 指令 / MCP 工具 / 外观 / 账号安全 / 应用信息；按部署能力与模式动态隐藏 |
-| `/download` | `DownloadView` | 公开页：桌面端能力介绍与最新版本，`DOWNLOAD` 能力缺失时重定向 |
-
-Pinia stores 10 个：`auth`、`chat`（会话 CRUD / 断线恢复 / 兼容 facade）、`messages`、`stream`、`approvals`、`question`、`fileChanges`、`project`、`meta`（部署能力，驱动入口显隐）、`theme`。
-
-### SSE 事件（13 种）
-
-`session_id` / `turn_id` / `thinking` / `tool_call` / `tool_result` / `content` / `plan` / `approval_required` / `approval_resolved` / `sources` / `file_change` / `done` / `error`
-
-### 数据库（PostgreSQL，dev `ddl-auto=update`）
-
-PostgreSQL + `vector_record`（pgvector）。Flyway 当前到 **V21**：V16～V18 增加 Run/Event、审批与 token 统计，V19/V21 增加审批决策来源与客户端标识，V20 增加 API 客户端凭证。V13 先于 V14 对 `pending_file_change` 执行 ALTER 的全新库顺序缺陷，已由 PR-06 的 Flyway `beforeMigrate` 幂等预检解决（不改已执行迁移）。
-
----
-
-## 构建与验证命令
-
-```powershell
-# 后端（本机没全局 mvn，用 Trae 自带的）
-$env:JAVA_HOME='C:\Users\16680\.jdks\ms-21.0.11'
-& 'C:\Users\16680\.trae-cn\tools\maven\latest\bin\mvn.cmd' -o -q compile    # 首次联网装依赖后 -o 离线可用
-& 'C:\Users\16680\.trae-cn\tools\maven\latest\bin\mvn.cmd' -o -q test       # 跑单测
-
-# 前端（在 frontend/ 下）
-node node_modules/vue-tsc/bin/vue-tsc.js --noEmit     # 类型检查
-# vite build 前需 TEMP/TMP 指向工作区内临时目录（esbuild 清理系统 Temp 会 Access denied）
-```
-
-**PowerShell 5 注意**：不能用 `&&`；`.ps1` 执行策略报错可忽略；`-D` 参数必须加引号。
-
----
-
-## 关键链路（改代码前先读这 3 个类）
-
-1. `AgentChatController.streamChat` — SSE 入口，合并三层配置（会话已存值 → 请求显式值 → 项目默认）
-2. `ReActAgentService.execute` — ReAct 主循环，scope解析 / 策略注入 / 工具打分排序 / 审批拦截 / 计划推送
-3. `ToolRegistry.dispatch` — 工具执行统一入口，含权限过滤、主工具→fallback 切链、熔断联动、Timer 埋点
-
----
-
-## 批次完成度（一句话摘要）
-
-- **Phase 1**：骨架 9 批 — 产品定位、工作区隔离、生产化、文件系统、终端命令、多模态、滚动摘要
-- **Phase 2**：交互 18 批 — 三栏骨架、三下拉、斜杠命令、@引用、草稿持久化、会话导航、时间线
-- **Phase 3**：编辑器 15 批 — 文件树、CodeMirror 6、工作台多 tab、diff 行装饰
-- **Phase 4**：Spring AI 迁移 7 批 — Boot 3.5.4 + Spring AI 成唯一模型层、Advisor 注入
-- **Phase 5**：MCP + 可观测 5 批 — stdio 接入 filesystem、健康监控 + 熔断、追踪面板聚合
-- **Phase 6**：追踪深化 2 批 — Overview 7 格大卡、耗时三段拆分
-- **Phase 7 A**：可控性 11 批 — 文件审查流、编辑器合并视图、Tool Scoring、计划面板、工具前置审批、轮次级回滚
-- **Batch B**（批 69~70）：安全加固 + 会话自动记忆
-- **Batch C**：生产化 Docker sandbox 骨架 + 测试补完
-- **Batch D**（批 71~74）：D1 范围约束 / D2 模型 fallback / D3 可观测面板 / D4 diff 打磨
-- **Batch E**（批 75）：权限三档重定义（手动审批 / 自动审批 / 完全权限）+ 审批卡可读化（不再展示入参 JSON）
-- **Batch F**（批 76）：自动审批只拦破坏性命令（`CommandRisk` + `DESTRUCTIVE` 风险）+ 内置 `delete_file`（沙箱/审查流/撤回）+ 计划卡串台与流式省略号修复
-- **双端改造**：PR-01 安全红线、PR-03 运行模式与 `/api/meta`、PR-04 工具注册和控制器能力门控、PR-05 前端能力渲染与下载页、PR-06 desktop 运行时（内嵌 PG + pgvector、无 Redis、`DbLifecycleManager`）、PR-07 桌面本地令牌 + 单用户初始化、P2-08 桌面 pgvector 运行时构建脚本与数据库集成测试（Windows x64）、P2-06 一键启动脚本（`scripts/dev-desktop.ps1`）、P2-07 命令超时与进程树终止测试、PR-12 网页端账号安全闭环（邮箱验证码 + 找回密码）已完成
-
----
-
-## 路线图
-
-### Level 1 ✅ 完成
-单 Agent 对话：SSE / 推理档位 / 权限 / 工具链 / 会话 / 审查流 / 追踪 / 审批 / 范围约束 / fallback / 监控面板
-
-### Level 2 ❌ 跳过
-IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
-
-### Level 3 ❌ 暂不做
-多智能体编排（2026 Q2 以后）
-
-### Level 4 🟡 当前方向
-| 模块 | 状态 | 说明 |
-|---|---|---|
-| 设置中心产品化 | ✅ | 默认值持久化、7 tab；MCP 与账号安全按部署模式动态显示 |
-| 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
-| 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
-| 测试覆盖 | ⚠️ | 2026-11-21 验收：后端 490 项 / 0 失败 / 17 skipped，前端 Vitest 112/112，Playwright 30 通过 + 1 性能跳过；P7-05 四条桌面模式浏览器 E2E 通过；R7b 真实崩溃续跑 E2E 通过（真后端 + 内嵌 PG + taskkill + resume）；R7b-live 真实模型续跑完成率 runner 与预注册门禁已落地，Key 冒烟 n=1 通过，全量 L1/L2/L3 待跑（尚未产出完成率结论）。浏览器 E2E 使用 API 仿真，真实 Electron + Java SSE 与真实 PG 定向复跑单独跟踪，不外推为真链路通过 |
-| 生产化缺口 | 🟡 | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；Electron 壳与侧车生命周期已有（P3-01/P3-02），jlink 裁剪 JRE 已有（P3-03，约 49 MiB）；macOS/Linux 运行时与安装包暂缓，Windows 签名、干净机器与真实桌面窗口链路冒烟未收口 |
-
-### Level 5 🟡 Windows 桌面发布收尾
-Electron 壳、侧车、Windows 安装/卸载与更新主体已交付；签名、干净机器完整任务和真实窗口链路验收见 `UPDATE_PLAN.md` Phase 3 / Phase 7。
-
----
+| SSE / 聊天请求 | `AgentChatController.streamChat` |
+| ReAct 主循环 | `AgentOrchestrator`（`ReActAgentService` 只保留入口与装配） |
+| 工具执行与审批 | `ToolExecutor` + `ApprovalGate` + `ToolRegistry.dispatch` |
+| Run 状态与断点 | `AgentRunService` + `RunEventStore` + `RunCheckpoint` |
+| 上下文组装 | `ContextAssembler` + `ContextCondenser`（`agent/context`） |
 
 ## 已知边界
 
-| 边界 | 影响 | 处理 |
-|---|---|---|
-| MCP 写入/删除类工具强制审批 | `AUTO` / `FULL` 也不会静默放行 | 用户可选择本会话「总是允许」 |
-| 审批状态存进程内存 | 重启时等待线程已消失 | 启动即收口：未完成 Run（含 `WAITING_APPROVAL`）统一标 `FAILED`（`PROCESS_RESTARTED`），残留 `PENDING` 审批标 `REJECTED`（未过期 `SYSTEM` / 过期 `TIMEOUT`），不再接受批准 |
-| scope 拦截只覆盖文件类工具 | run_command 有自己的沙箱 | 设计如此，不在此处拦截 |
-| 撤回本轮只回滚 PENDING | 已 accept 或编辑器保存过的不回滚 | 文档说明 |
-| MCP 熔断冷却默认 300s | 冷却期内不调用该 server，也不回退到内置工具 | 可用 `MCP_COOLDOWN_MS` 调整（`failure-threshold` / `probe-interval-ms` 同样可配） |
-| aggregateStats 全量 parse trace JSON | 实测 1000 条助手消息 / 15.6MB trace：p95 27～31ms（不含 JDBC） | 远低于 500ms 阈值，不做缓存；会话继续变长时用 `eval/reports` 下的基准复测 |
-| deepseek 硬编码改了但旧 profile 可能残留 | 模型通用性 | 前端 SettingsView 已切通用配置 |
+| 边界 | 说明 |
+|---|---|
+| 重启残局 | `RUNNING` 崩溃 → `FAILED/PROCESS_RESTARTED` + 保留 checkpoint，用户手动续跑；`WAITING_APPROVAL` / `WAITING_USER_INPUT` 终止且不可续跑 |
+| 审批 | 挂起 120s 自动拒绝；残留审批随 Run 终止，不再接受批准 |
+| 撤销 | `revert-run` / `revert-session` 只回滚平台记录的文件改动，命令等外部副作用不撤销 |
+| MCP | 仅支持 stdio；MCP 进程失败不阻塞主流程 |
+| 平台 | 当前只适配 Windows；PowerShell 5 与 NSIS 打包限制见 operations.md |
+| 完成判定 | 计划收口与完成仍以模型自报 + 计划快照为边界，尚未做强校验（R7c） |
 
----
+## 踩坑速查（完整版见 operations.md）
 
-## 踩坑速查
-
-| 问题 | 场景 | 处理 |
-|---|---|---|
-| BOM 混进 CSS 选择器 | `:root` 含 BOM 整段被丢弃 | TrimStart U+FEFF，UTF-8 无 BOM 重写 |
-| Windows vite build Access denied | esbuild 清理系统 Temp | `TEMP`/`TMP` 指向工作区内临时目录 |
-| PowerShell `-D` 参数被切 | Maven `-DskipTests` | 加引号：`"-DskipTests"` |
-| 前端 CORS 不支持 PATCH | 登录过期表现为网络错误 | `allowedMethods` 补 PATCH |
-| Maven wrapper 首次构建慢 | 需联网拉依赖 | 之后 `-o` 离线可用 |
-| `SessionMemoryAdvisor` 没注册 Bean | Advisor 不生效 | 必须 `@Bean` 注册到 Spring AI advisor 链 |
-| 审批阻塞等用户交互 | 固定 SSE 总超时会中断多轮审批 | SSE 不设固定总超时；审批独立 120s 超时并检查断连 |
-| `Array.find()` 返回第一个已 resolved 审批 | 批准后下一张审批卡不渲染 | **已修复**：ChatView computed 加 `!a.resolved` |
-| Micrometer Timer percentile 永远 0 | 没配 publishPercentiles | **已修复**：Timer builder 加 `.publishPercentiles(0.5, 0.95, 0.99)` + 用正确的 `timer.percentile(double, TimeUnit)` API |
-| Agent 试 `cmd /c mvn` 被白名单拦 | 错误提示弱，Agent 多绕 2 轮 | **已修复**：单独拦截 shell 包装器 + 友好 ❌→✅ 对照提示 + RunCommandTool 描述重写 |
-| scope 提取混进中文描述 | `[A-Za-z0-9_./\\\-\\\\]+` 正则 | 已修复为只提取有效路径字符 |
+1. **PowerShell 5**：不能用 `&&` / `||`，用 `;`；`-Dtest=A,B` 必须加引号。
+2. **`.ps1` 编码**：UTF-8 必须带 BOM，否则中文输出乱码、`irm` 下载脚本可能损坏。
+3. **新增公开端点**：必须同步 `PublicApiCatalog.DECLARED` 与 `src/test/resources/contract/public-api.json`，否则应用启动自检失败（`PublicApiContractTest` 有漂移守卫）。
+4. **验证用 clean**：涉及新符号时跑 `mvn clean test`；增量编译曾掩盖缺少 import 的编译错误。
+5. **前端 build**：沙箱下把 `TEMP`/`TMP` 指向 `frontend/node_modules/.cache/esbuild-tmp`，避免 esbuild 临时文件删除失败。

@@ -1,5 +1,7 @@
 # 金月（agent-gateway-v3）架构审计报告
 
+> **时点快照**：本报告写于 2026-11-21，用于驱动 R0～R7 分阶段重构；其中 P0/P1 问题已由 R1～R6 修复，R7 仍在进行。当前实现以 [architecture/README.md](architecture/README.md) 为准，未完成项以 [UPDATE_PLAN.md](UPDATE_PLAN.md) 第 14 节为准。
+
 > 审计日期：2026-11-21
 > 审计范围：后端 Agent 核心、工具层与运行时状态、持久化、前端、测试/评测/构建
 > 方法：5 路只读代码审计（文件级 + 行号级证据），不做修改

@@ -1,6 +1,6 @@
 # 部署运维手册（Agent Gateway v3）
 
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04、PR-05、PR-06、PR-07、P2-08、P3-00、PR-12。系统设计看 `design.md`，状态速查看 `STATUS.md`。
+> 当前状态与测试基线以 [STATUS.md](STATUS.md) 为准；系统设计看 [design.md](design.md)，当前实现看 [architecture/](architecture/README.md)。
 
 ---
 
@@ -42,7 +42,7 @@ npm run dev     # http://localhost:5173, 代理 /api → 8080
 
 ### 1.4 后端（desktop 桌面模式，PR-06 / PR-07）
 
-桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.lunargold/desktop/db`，首次启动自动建库并执行 Flyway V1~V21。
+桌面模式不需要预先安装 PostgreSQL 与 Redis：启动时由 `DbLifecycleManager` 在进程内拉起内嵌 PostgreSQL + pgvector，数据默认落在 `~/.lunargold/desktop/db`，首次启动自动建库并执行 Flyway V1~V23。
 
 **运行时清单与构建（P2-08，Windows x64）**：Maven 依赖内置的 zonky 二进制不含 pgvector，需先用脚本注入扩展。
 
@@ -214,10 +214,11 @@ powershell -ExecutionPolicy Bypass -File scripts\build-desktop-runtime.ps1
 
 dev 环境关闭 Flyway，以 `ddl-auto=update` 自动建表；prod 与 desktop 启动时自动执行 Flyway，并以 `ddl-auto=validate` 校验实体。
 
-当前迁移到 **Flyway V21**：
+当前迁移到 **Flyway V23**：
 - V13 为 `pending_file_change` 增加 `turn_id`，支持按轮次撤回；V14 补建该表，V15 为 `user.email` 增加唯一索引。
 - V16/V17/V18 增加 `agent_run`、`agent_run_event`、`tool_approval` 与 Run token 统计。
 - V19/V21 增加审批决策来源与客户端标识，V20 增加 API 客户端凭证。
+- V22 增加 `agent_run.plan_json`（计划快照）；V23 增加 `agent_run.checkpoint_json`（Run 断点续跑）。
 - **全新库顺序缺陷已修复**：原始 V13 会先于 V14 对不存在的表执行 ALTER。PR-06 新增 `PendingFileChangePrecheckCallback`，在 `beforeMigrate` 一次幂等预检中按 V14 最终结构预建该表，随后 V13/V14 均为空操作；存量库不受影响，已执行迁移未被修改。
 - **Boot 4 依赖要求**：必须使用 `spring-boot-starter-flyway`。只引 `flyway-core` 时 Flyway 自动配置不会加载，启动会跳过迁移并直接被 JPA `validate` 报 `missing table`。
 

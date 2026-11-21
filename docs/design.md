@@ -1,6 +1,7 @@
 # 系统设计文档（Agent Gateway v3）
 
-> 当前基线：Batch F（批 76），并已完成双端改造 PR-01、PR-03、PR-04。快速状态看 `STATUS.md`，运维启动看 `operations.md`。
+> **历史快照（2026-11-10）**：本文的产品定位与架构取舍仍然有效；类名、包结构、迁移版本、前端 store 已变化，实现细节以 [architecture/README.md](architecture/README.md) 为准。
+> 当前状态看 [STATUS.md](STATUS.md)，运维启动看 [operations.md](operations.md)，审计时点问题见 [ARCHITECTURE_AUDIT_20261121.md](ARCHITECTURE_AUDIT_20261121.md)。
 
 ---
 
@@ -185,7 +186,7 @@ Agent 写文件（WriteFileTool / EditFileTool）
 | `FULL` 完全权限 | 自动通过 | 自动通过 | 读写 + 执行 |
 | `READ_ONLY` 只读（旧版兼容，UI 已不提供） | ❌ 工具不暴露 | ❌ 工具不暴露 | 只读 |
 
-审批拦截点：`ReActAgentService` 在工具执行前判断 `permission.requiresApproval(risk, command)`，命中则挂起等
+审批拦截点：`AgentOrchestrator` 在工具执行前经 `ApprovalGate` 判断 `permission.requiresApproval(risk, command)`，命中则挂起等
 `ToolApprovalRegistry` 的决策（120s 超时自动拒绝）。MCP 写入/删除类工具及带 MCP fallback 的内置写工具即使处于 `AUTO` / `FULL` 也必须审批，除非用户已对该工具选择本会话「总是允许」。前端卡片展示的是后端整理的
 `ApprovalPreview`（路径 / 命令 / 增删行数 / 截断 diff），不再下发工具入参 JSON 原文。
 
@@ -209,7 +210,7 @@ public class McpToolBridge implements ApplicationRunner {
 
 ## 4. 数据库主要表
 
-Flyway 当前到 V15（V15 为邮箱唯一索引）。V13 为 `pending_file_change` 增加 `turn_id`，V14 补建该表，原始顺序下全新库会在 V13 失败；PR-06 已用 Flyway `beforeMigrate` 回调做幂等预检（表不存在则按 V14 结构预建），V13/V14 在存量库与全新库上都变成空操作，未修改已执行迁移。dev 关闭 Flyway、使用 `ddl-auto=update`，prod 与 desktop 启用 Flyway 并使用 `validate`。注意 Boot 4 下必须依赖 `spring-boot-starter-flyway`，只引 `flyway-core` 时自动配置不会加载。
+Flyway 迁移版本随批次递增，当前版本与逐条说明以 [architecture/08-data-persistence.md](architecture/08-data-persistence.md) 为准（当前为 V23）。dev 关闭 Flyway、使用 `ddl-auto=update`，prod 与 desktop 启用 Flyway 并使用 `validate`。注意 Boot 4 下必须依赖 `spring-boot-starter-flyway`，只引 `flyway-core` 时自动配置不会加载。
 
 | 表 | 关键列 | 用途 |
 |---|---|---|
@@ -225,12 +226,7 @@ Flyway 当前到 V15（V15 为邮箱唯一索引）。V13 为 `pending_file_chan
 
 ## 5. 前端状态管理
 
-| Store | 关键字段 | 关键方法 |
-|---|---|---|
-| `chat` | sessions[], currentSessionId, dockTab('changes'\|'docs'\|'file'\|'trace'\|'plan'\|'metrics'), pendingChanges[], pendingApprovals[], model, permission, reasoningLevel, isProcessing | sendStream(), openFile(), openDock(), fetchPendingChanges(), revertChange(), acceptAll(), dismissApproval() |
-| `project` | projects[], currentProjectId, currentRootPath | load(), switchProject(), createProject() |
-| `meta` | info(mode / version / authMode / capabilities / download), loaded | load()（幂等，8s 超时）, has(capability) — 前端只按能力渲染入口，不判断部署模式 |
-| `theme` | isDark | toggle() |
+当前已拆为 10 个 Pinia store：`auth` / `chat` / `messages` / `stream` / `approvals` / `question` / `fileChanges` / `project` / `meta` / `theme`。`chat` 只保留会话 CRUD、恢复轮询与兼容 facade；发送编排在 `services/sendMessageService.ts`，断线恢复在 `services/runRecovery.ts`。各 store 字段与职责见 [architecture/06-frontend.md](architecture/06-frontend.md)。
 
 ### 审批显示逻辑（已修复）
 `currentApproval = chat.pendingApprovals.find(a => a.sessionId === chat.currentSessionId && !a.resolved)`

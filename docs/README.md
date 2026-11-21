@@ -4,11 +4,25 @@
 
 | 文档 | 用途 |
 |---|---|
-| [STATUS.md](STATUS.md) | 当前状态速查：能跑什么、卡在哪 |
-| [UPDATE_PLAN.md](UPDATE_PLAN.md) | 总路线：各阶段目标、任务与出口 |
+| [STATUS.md](STATUS.md) | 当前状态速查：测试基线、主线进度、能力边界 |
+| [UPDATE_PLAN.md](UPDATE_PLAN.md) | 未完成计划、验收标准与预注册阈值 |
 | [COMPLETED_WORK.md](COMPLETED_WORK.md) | 已完成工作归档与验收证据 |
-| [design.md](design.md) | 架构设计与关键取舍 |
-| [operations.md](operations.md) | 启动、构建、运维与发布 |
+| [design.md](design.md) | 产品定位与架构取舍（2026-11-10 快照，实现细节以 architecture/ 为准） |
+| [operations.md](operations.md) | 启动、构建、环境变量、运维与发布 |
+| [handover-20261121.md](handover-20261121.md) | 新会话交接：现状、下一步、命令与踩坑 |
+
+## 事实归属（避免重复）
+
+| 事实 | 唯一归属 |
+|---|---|
+| 测试数、主线进度、能力边界 | STATUS.md |
+| 未完成任务、验收口径、阈值 | UPDATE_PLAN.md |
+| 已完成任务与验收证据 | COMPLETED_WORK.md |
+| 当前类名、模块边界、数据表、SSE 协议 | architecture/ |
+| 产品定位与历史取舍 | design.md |
+| 构建命令、环境变量、排障 | operations.md |
+
+出现冲突时以「唯一归属」为准，其余文档只保留链接或一句结论。
 
 ## 架构现状文档
 
@@ -22,7 +36,7 @@
 | [architecture/05-api-sse.md](architecture/05-api-sse.md) | 控制器清单、SSE 事件协议、断线续传与能力门控 |
 | [architecture/06-frontend.md](architecture/06-frontend.md) | 前端页面、Store、SSE 消费、三条恢复路径与组件 |
 | [architecture/07-desktop-deployment.md](architecture/07-desktop-deployment.md) | Electron 壳、侧车、内嵌运行时、打包、更新回滚与诊断 |
-| [architecture/08-data-persistence.md](architecture/08-data-persistence.md) | 数据选型、V1~V18 迁移、实体关系与恢复策略 |
+| [architecture/08-data-persistence.md](architecture/08-data-persistence.md) | 数据选型、迁移版本、实体关系与恢复策略 |
 | [architecture/09-security.md](architecture/09-security.md) | 威胁模型、认证授权、租户隔离、沙箱与密钥隐私 |
 | [architecture/10-quality-evaluation.md](architecture/10-quality-evaluation.md) | 三层验证、Runtime 评测、指标口径、双门禁与 CI |
 
@@ -44,11 +58,12 @@
 
 ## 书写规则
 
-1. **状态标记**：标题末尾统一写 `（已完成）`、`（部分完成）`、`（未开始）`、`（暂不做）`；不写日期、不用 emoji。
+1. **状态标记**：标题末尾统一写 `（已完成）`、`（部分完成）`、`（未开始）`、`（暂不做）`；标题不写日期。进度表内可用文字或 ✅/🟡/⬜，同一张表保持一致。
 2. **部分完成要写剩余**：在小节内或进度表里列出「剩余：…」，未完成原因一并写清；「已完成」只留结论与关键文件，不复述实现过程。
 3. **标题层级**：`##` 章节或批次，`###` 任务项（P5-xx）或批次内小节，`####` 子项（P5-xx-y）。
 4. **文档开头**：写明更新日期、状态、关联的主线文档，避免读者先猜归属。
 5. **命名与位置**：主线文档用大写文件名放在 `docs/` 根目录；阶段文档放 `docs/phases/phaseN/`，用小写中划线命名；排障文档放 `docs/troubleshooting/`。
 6. **链接**：一律相对路径；跨目录用 `../../`，不要写绝对路径。
-7. **进度表**：统一列为「子项 | 状态 | 已完成内容 | 剩余」，状态用文字，不用 ✅/🟡/⬜。
+7. **进度表**：统一列为「子项 | 状态 | 已完成内容 | 剩余」，状态用文字或符号，但同一张表保持统一。
 8. **不重复实现**：标为「已完成」的条目再次被提及时，先读原结论与文件位置，不重做。
+9. **单一事实源**：同一事实只在一处维护（见「事实归属」）；其他文档写结论并链接，不复制细节。
