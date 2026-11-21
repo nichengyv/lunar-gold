@@ -74,6 +74,17 @@ public class AgentRun {
     @Column(columnDefinition = "TEXT")
     private String planJson;
 
+    /**
+     * R7b（P8-01）：最近一个可续跑断点的 JSON 快照（{@code RunCheckpoint}）。
+     *
+     * <p>只在「一轮工具批已全部落地、下一轮模型调用前」写入，只保留最新一份。
+     * 事件流里的 {@code CHECKPOINT} 事件记录轮次与字节数，这里存完整消息快照；
+     * 续跑时以它作为初始模型上下文，避免从头再来。同样不参与默认 JSON 序列化。
+     */
+    @JsonIgnore
+    @Column(columnDefinition = "TEXT")
+    private String checkpointJson;
+
     /** 失败时的标准化错误码，与 P3-06 诊断卡片共用枚举 */
     @Column(length = 40)
     private String errorCode;

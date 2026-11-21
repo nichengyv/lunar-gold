@@ -127,4 +127,74 @@ class RunEventStoreTest {
         when(runRepo.findById(2L)).thenReturn(Optional.of(broken));
         assertTrue(store.loadPlan(2L).isEmpty());
     }
+
+    // ------------------------------------------------------------------
+    // R7b：断点快照
+    // ------------------------------------------------------------------
+
+    @Test
+    void 保存断点只更新checkpoint列并追加轻量CHECKPOINT事件() {
+        when(runRepo.updateCheckpointJson(eq(1L), anyString())).thenReturn(1);
+        when(runRepo.lockForEventAppend(1L)).thenReturn(Optional.of(new AgentRun()));
+        when(eventRepo.findMaxSeqByRunId(1L)).thenReturn(2);
+
+        RunCheckpoint checkpoint = new RunCheckpoint();
+        checkpoint.setRound(3);
+        checkpoint.setMessages(List.of(mapper.createObjectNode().put("role", "user").put("content", "hi")));
+        store.saveCheckpoint(1L, checkpoint);
+
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+        verify(runRepo).updateCheckpointJson(eq(1L), json.capture());
+        assertTrue(json.getValue().contains("\"round\":3"), json.getValue());
+        assertTrue(json.getValue().contains("\"role\":\"user\""), json.getValue());
+        verify(runRepo, never()).save(any()); // 不能整行 save 覆盖并发状态
+
+        ArgumentCaptor<AgentRunEvent> event = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo).save(event.capture());
+        assertEquals(EventType.CHECKPOINT, event.getValue().getEventType());
+        assertTrue(event.getValue().getPayload().contains("\"round\":3"));
+        assertTrue(event.getValue().getPayload().contains("\"messages\":1"));
+    }
+
+    @Test
+    void 断点快照可以完整读回() throws Exception {
+        RunCheckpoint checkpoint = new RunCheckpoint();
+        checkpoint.setRound(4);
+        checkpoint.setPromptTokens(120);
+        checkpoint.setMessages(List.of(mapper.createObjectNode().put("role", "assistant")));
+
+        AgentRun run = new AgentRun();
+        run.setCheckpointJson(mapper.writeValueAsString(checkpoint));
+        when(runRepo.findById(2L)).thenReturn(Optional.of(run));
+
+        RunCheckpoint loaded = store.loadCheckpoint(2L).orElseThrow();
+        assertEquals(4, loaded.getRound());
+        assertEquals(120, loaded.getPromptTokens());
+        assertEquals(1, loaded.getMessages().size());
+    }
+
+    @Test
+    void 断点缺失或损坏时不可续跑() {
+        when(runRepo.findById(3L)).thenReturn(Optional.of(new AgentRun()));
+        assertTrue(store.loadCheckpoint(3L).isEmpty());
+
+        AgentRun broken = new AgentRun();
+        broken.setCheckpointJson("{broken");
+        when(runRepo.findById(4L)).thenReturn(Optional.of(broken));
+        assertTrue(store.loadCheckpoint(4L).isEmpty());
+    }
+
+    @Test
+    void 超过字节上限时保留上一份断点且不追加事件() {
+        RunCheckpoint huge = new RunCheckpoint();
+        huge.setRound(1);
+        huge.setMessages(List.of(mapper.createObjectNode()
+                .put("role", "user")
+                .put("content", "x".repeat(RunEventStore.MAX_CHECKPOINT_CHARS + 1))));
+
+        store.saveCheckpoint(5L, huge);
+
+        verify(runRepo, never()).updateCheckpointJson(anyLong(), anyString());
+        verify(eventRepo, never()).save(any());
+    }
 }

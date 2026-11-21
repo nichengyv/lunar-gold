@@ -53,6 +53,12 @@ public interface AgentRunRepository extends JpaRepository<AgentRun, Long> {
     @Query("UPDATE AgentRun r SET r.planJson = :planJson WHERE r.id = :runId")
     int updatePlanJson(@Param("runId") Long runId, @Param("planJson") String planJson);
 
+    /** R7b：只更新断点快照列，理由同 {@link #updatePlanJson}——避免覆盖并发写入的 state。 */
+    @Modifying(flushAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE AgentRun r SET r.checkpointJson = :checkpointJson WHERE r.id = :runId")
+    int updateCheckpointJson(@Param("runId") Long runId, @Param("checkpointJson") String checkpointJson);
+
     /** 桌面重启后扫描未完成的 run，恢复 WAITING_APPROVAL / RUNNING */
     List<AgentRun> findByUserIdAndStateIn(Long userId, List<RunState> states);
 

@@ -75,6 +75,8 @@ public class AgentRunEvent {
         /** P7-06：用户回答了 agent 的询问，payload 含 questionId/selected/custom */
         USER_ANSWERED,
         /** R1：任务计划快照变更，payload.steps 为完整步骤列表（断线重放时重建计划） */
-        PLAN_UPDATED
+        PLAN_UPDATED,
+        /** R7b：可续跑断点已写入，payload 含 round / messages / bytes（完整快照在 agent_run.checkpoint_json） */
+        CHECKPOINT
     }
 }

@@ -435,4 +435,66 @@ public class AgentRunService {
     public List<com.capsule.agentkey.agent.run.PlanStep> loadPlan(Long runId) {
         return runEventStore.loadPlan(runId);
     }
+
+    // ---------------------------------------------------------------------
+    // R7b（P8-01）：断点快照与显式续跑
+    // ---------------------------------------------------------------------
+
+    /** 写入最近一份可续跑断点；持久化失败由调用方降级为日志，不中断主循环 */
+    @Transactional
+    public void saveCheckpoint(Long runId, com.capsule.agentkey.agent.run.RunCheckpoint checkpoint) {
+        runEventStore.saveCheckpoint(runId, checkpoint);
+    }
+
+    /** 读取可续跑断点；没有或损坏时返回空，调用方据此拒绝续跑 */
+    @Transactional(readOnly = true)
+    public Optional<com.capsule.agentkey.agent.run.RunCheckpoint> loadCheckpoint(Long runId) {
+        return runEventStore.loadCheckpoint(runId);
+    }
+
+    /** 当前 Run 是否具备显式续跑条件：已被重启中断，且留下过断点 */
+    public static boolean isResumable(AgentRun run) {
+        return run != null
+                && run.getState() == RunState.FAILED
+                && "PROCESS_RESTARTED".equals(run.getErrorCode())
+                && run.getCheckpointJson() != null
+                && !run.getCheckpointJson().isBlank();
+    }
+
+    /**
+     * FAILED(PROCESS_RESTARTED) → RUNNING：用户显式点击「继续执行」时调用。
+     *
+     * <p>终态不迁移是常规不变量；这里是唯一的显式例外，且有双重前置条件：
+     * 失败原因是进程重启，并且确实存在可续跑断点。普通失败（执行异常、预算超限、
+     * 工具错误）仍然保持终态，不能被续跑。
+     *
+     * <p>不走 {@link #transition} 是因为静态转移表对 FAILED 保持空集合；
+     * 这里把「重启中断」视为可恢复的中间态，并显式写一条 STATE_CHANGED 事件留痕。
+     */
+    @Transactional
+    public AgentRun resumeInterrupted(Long runId) {
+        AgentRun run = runRepo.findById(runId).orElseThrow(() ->
+                new IllegalArgumentException("run 不存在：id=" + runId));
+        if (!isResumable(run)) {
+            throw new IllegalStateException(
+                    String.format("运行不可续跑：runId=%d, state=%s, errorCode=%s",
+                            runId, run.getState(), run.getErrorCode()));
+        }
+        RunState from = run.getState();
+        run.setState(RunState.RUNNING);
+        run.setErrorCode(null);
+        run.setErrorMessage(null);
+        run.setEndTime(null);
+        if (run.getStartTime() == null) {
+            run.setStartTime(LocalDateTime.now());
+        }
+        AgentRun saved = runRepo.save(run);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("fromState", from);
+        payload.put("targetState", RunState.RUNNING);
+        payload.put("resumed", true);
+        appendInternal(runId, EventType.STATE_CHANGED, payload);
+        log.info("显式续跑运行：runId={}, from=FAILED/PROCESS_RESTARTED", runId);
+        return saved;
+    }
 }

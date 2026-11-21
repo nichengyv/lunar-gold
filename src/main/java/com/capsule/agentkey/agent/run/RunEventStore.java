@@ -84,6 +84,56 @@ public class RunEventStore {
         }
     }
 
+    /** 单份断点快照的字节上限；超过时保留上一份可用断点，避免把 agent_run 撑爆 */
+    static final int MAX_CHECKPOINT_CHARS = 4_000_000;
+
+    /**
+     * 写入可续跑断点（R7b）。
+     *
+     * <p>只更新 {@code agent_run.checkpoint_json} 一列，并在事件流追加一条轻量
+     * {@link EventType#CHECKPOINT} 记录轮次与字节数；超过上限时跳过本次写入并保留上一份断点，
+     * 让续跑退回到更早的安全点而不是失败。
+     */
+    @Transactional
+    public void saveCheckpoint(Long runId, RunCheckpoint checkpoint) {
+        if (checkpoint == null) {
+            return;
+        }
+        if (checkpoint.getSavedAt() == null) {
+            checkpoint.setSavedAt(java.time.LocalDateTime.now().toString());
+        }
+        String json = writeJson(checkpoint);
+        if (json.length() > MAX_CHECKPOINT_CHARS) {
+            log.warn("断点快照超过上限，保留上一份断点：runId={}, chars={}, limit={}",
+                    runId, json.length(), MAX_CHECKPOINT_CHARS);
+            return;
+        }
+        int updated = runRepo.updateCheckpointJson(runId, json);
+        if (updated == 0) {
+            throw new IllegalArgumentException("run 不存在，无法保存断点：id=" + runId);
+        }
+        Map<String, Object> meta = new java.util.LinkedHashMap<>();
+        meta.put("round", checkpoint.getRound());
+        meta.put("messages", checkpoint.getMessages() == null ? 0 : checkpoint.getMessages().size());
+        meta.put("bytes", json.length());
+        append(runId, EventType.CHECKPOINT, meta);
+    }
+
+    /** 读取最近一次断点；没有或解析失败返回空，调用方据此拒绝续跑而不是带着残缺上下文执行 */
+    @Transactional(readOnly = true)
+    public java.util.Optional<RunCheckpoint> loadCheckpoint(Long runId) {
+        String json = runRepo.findById(runId).map(AgentRun::getCheckpointJson).orElse(null);
+        if (json == null || json.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(objectMapper.readValue(json, RunCheckpoint.class));
+        } catch (Exception e) {
+            log.warn("断点快照解析失败，按不可续跑处理：runId={}, error={}", runId, e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
+
     private String writeJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);

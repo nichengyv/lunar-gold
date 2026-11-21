@@ -288,6 +288,76 @@ class AgentRunServiceTest {
         assertTrue(ex.getMessage().contains("非法状态迁移"));
     }
 
+    // ------------------------------------------------------------------
+    // R7b：显式续跑
+    // ------------------------------------------------------------------
+
+    @Test
+    void 只有重启中断且带断点的Run允许续跑() {
+        AgentRun resumable = run(21L, RunState.FAILED);
+        resumable.setErrorCode("PROCESS_RESTARTED");
+        resumable.setCheckpointJson("{\"round\":2}");
+        assertTrue(AgentRunService.isResumable(resumable));
+
+        AgentRun normalFailure = run(22L, RunState.FAILED);
+        normalFailure.setErrorCode("AGENT_EXECUTION_FAILED");
+        normalFailure.setCheckpointJson("{\"round\":2}");
+        assertFalse(AgentRunService.isResumable(normalFailure), "普通失败保持终态，不能借断点复活");
+
+        AgentRun noCheckpoint = run(23L, RunState.FAILED);
+        noCheckpoint.setErrorCode("PROCESS_RESTARTED");
+        assertFalse(AgentRunService.isResumable(noCheckpoint));
+
+        AgentRun waiting = run(24L, RunState.WAITING_APPROVAL);
+        waiting.setCheckpointJson("{\"round\":1}");
+        assertFalse(AgentRunService.isResumable(waiting));
+    }
+
+    @Test
+    void 续跑把重启中断的Run拉回RUNNING并清掉错误码() {
+        AgentRun[] holder = new AgentRun[]{ run(31L, RunState.FAILED) };
+        holder[0].setErrorCode("PROCESS_RESTARTED");
+        holder[0].setErrorMessage("应用重启，原执行线程已终止");
+        holder[0].setEndTime(LocalDateTime.now());
+        holder[0].setCheckpointJson("{\"round\":2}");
+        when(runRepo.findById(31L)).thenAnswer(inv -> Optional.of(holder[0]));
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            holder[0] = inv.getArgument(0);
+            return holder[0];
+        });
+
+        AgentRun resumed = service.resumeInterrupted(31L);
+
+        assertEquals(RunState.RUNNING, resumed.getState());
+        assertNull(resumed.getErrorCode());
+        assertNull(resumed.getErrorMessage());
+        assertNull(resumed.getEndTime());
+        assertNotNull(holder[0].getStartTime());
+
+        ArgumentCaptor<AgentRunEvent> captor = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo).save(captor.capture());
+        assertEquals(EventType.STATE_CHANGED, captor.getValue().getEventType());
+        assertTrue(captor.getValue().getPayload().contains("\"resumed\":true"));
+        assertTrue(captor.getValue().getPayload().contains("FAILED"));
+    }
+
+    @Test
+    void 普通失败或没有断点时拒绝续跑() {
+        AgentRun normalFailure = run(32L, RunState.FAILED);
+        normalFailure.setErrorCode("AGENT_EXECUTION_FAILED");
+        normalFailure.setCheckpointJson("{\"round\":2}");
+        when(runRepo.findById(32L)).thenReturn(Optional.of(normalFailure));
+
+        assertThrows(IllegalStateException.class, () -> service.resumeInterrupted(32L));
+        assertEquals(RunState.FAILED, normalFailure.getState());
+        verify(runRepo, never()).save(any());
+
+        AgentRun noCheckpoint = run(33L, RunState.FAILED);
+        noCheckpoint.setErrorCode("PROCESS_RESTARTED");
+        when(runRepo.findById(33L)).thenReturn(Optional.of(noCheckpoint));
+        assertThrows(IllegalStateException.class, () -> service.resumeInterrupted(33L));
+    }
+
     @Test
     void 幂等命中返回已存在的run() {
         AgentRun existing = run(100L, RunState.RUNNING);
