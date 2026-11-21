@@ -3,6 +3,8 @@
 > 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `handover-20261121.md`。
 > 当前基线：Phase 5、Phase 6、Phase 7 均已收口（Phase 7 于 2026-11-20 收口）。P7-01 重启残局、P7-02 统计切片与 L1～L3×3 真实模型正式基线（三层均 2/3 成功率、工具链 0 error）、P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3、成功率 0/3→2/3）、P7-04b 工具输出分档、P7-05 SSE 真机链路、P7-06 ask_user_question 均已完成；P7-03 plan-first 评估后不立项，P7-04c plan 注入尝试失败已回滚。全量 402 tests 通过。下一步为 Phase 7 收尾改进 P7-07～P7-09（计划持久化软回注 / 停滞渐进恢复 / 上下文压缩）与 P3-08 干净机器验收，详见 `UPDATE_PLAN.md` 第 13 节。历史批次与双端改造完成证据见 `COMPLETED_WORK.md`。
 
+> **架构现状（2026-11-21 全量审计）**：核心结构已到临界点，不再适合逐点补丁。关键事实：`ReActAgentService` 1498 行承担 8 类职责；`WorkspaceContext` 以 ThreadLocal 承载 13 个混杂字段；跨 turn 无权威状态源（P7-04c 回滚根因）；`agent_run_event.seq` 先查后写存在并发唯一性风险；只读批与 `ask_user_question` 绕过审批/scope 检查；前端 `useChatStore` 过大且断线恢复覆盖不全；评测 n=3 统计脆弱。完整证据、目标架构与 R0～R7 重构路线见 [`ARCHITECTURE_AUDIT_20261121.md`](ARCHITECTURE_AUDIT_20261121.md)。
+
 ---
 
 ## 一句话定位

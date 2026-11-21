@@ -14,7 +14,7 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 **最终产品形态：Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面端是首个完整客户端。** Agent Runtime 只是内部的基础执行层之一，不是独立产品类型，也不是差异化本身；现有 ReAct 循环继续保留，差异化由任务成功率、可控性、验证、恢复与使用体验共同证明。
 
-**当前产品主线：Phase 5（2026-11-16）、Phase 6（2026-11-17）、Phase 7（2026-11-20）均已收口；下一步是 Phase 7 收尾改进 P7-07～P7-09（计划持久化软回注 / 停滞渐进恢复 / 上下文压缩），以及 P3-08 干净机器验收。**
+**当前产品主线：Phase 5（2026-11-16）、Phase 6（2026-11-17）、Phase 7（2026-11-20）均已收口。2026-11-21 完成全量架构审计后重规划：不再逐点补丁，转入 R0～R7 架构重构（P7-07～P7-09 并入 R1/R4/R5，Phase 8 并入 R7），随后做 P3-08 干净机器验收。详见第 14 节与 `ARCHITECTURE_AUDIT_20261121.md`。**
 
 1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与检索质量量化、P5-08 并行只读工具均已完成；P5-07-2 用 24 切片 / 22 查询的标注语料实测 hybrid Recall@5 100% vs vector 68.42%（exact 类 0%→100%），按预写规则判定不启用模型 reranker。P5-04 已于 2026-11-16 用 deepseek-chat 完成 96 run A/B：repo map 开成功率 100% vs 关 62.5%，prompt tokens 4,126 vs 25,072，耗时 1.76s vs 10.17s，B1～B5 全过，判定保持默认开启；持久缓存按 C2 判定不建。**Phase 5 出口条件四条已全部满足，本阶段收口。**
 2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率、P5-10-4 键盘与无障碍与 P5-09 视觉体系已落地；剩余未勾选项（三态覆盖、长回答折叠、三档宽度、断网实测、J/K 与批量审批、axe 校验、500 会话性能）为打磨与合规加固，不阻塞 Phase 5 出口，转入后续批次。
@@ -49,7 +49,8 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 | Phase 6 | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | **已收口（2026-11-17）**：不同入口复用同一后端；P6-04 结论为保留现有三栏布局；详见 [phase6/plan.md](phases/phase6/plan.md) |
 | Phase 7 | 长会话：三数据集正式基线 ×3 + 记忆摘要 + 工具输出分档 + ask_user_question + SSE 真机链路 | **已收口（2026-11-20）**：P7-01 重启残局 ✅ / P7-02 统计切片 + 三数据集 ×3 正式基线（L1/L2/L3 均 2/3 成功率，LLM 固有表现）✅ / P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3）✅ / P7-04b 工具输出分档（FAST=500 / STANDARD=1000 / DEEP=2000）✅ / P7-05 SSE 真机 ✅ / P7-06 ask_user_question ✅ / P7-04c plan 注入尝试失败已回滚；P7-03 plan-first 不立项；详见 COMPLETED_WORK.md Phase 7 章节 |
 | Phase 7 收尾改进 | P7-07 计划持久化与软回注、P7-08 停滞渐进式恢复、P7-09 长会话上下文压缩 | 三项均按 L1～L3 数据集 A/B + 预注册阈值验证；完成率不降、token/耗时退化 <15% 才保留；不引入 plan-first 控制流 |
-| Phase 8（候选） | 长任务能力建设：Run 级持久化续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | **未立项**；P7-07～P7-09 收口且 L1～L4 达标后启动；8 条验收标准（L1～L8）与排期见 13.12 |
+| Phase 8（候选） | 长任务能力建设：Run 级持久化续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | **未立项**；P7-07～P7-09 收口且 L1～L4 达标后启动；8 条验收标准（L1～L8）与排期见 13.12；2026-11-21 重规划后并入 R7 |
+| Phase 9 架构重构 | R0 安全网 → R1 状态地基 → R2 Context 瘦身 → R3 工具接缝 → R4 编排接缝 → R5 上下文接缝 → R6 前端拆分 → R7 长任务能力 | **当前主线**；每批行为保持/可回滚，先补测试再动代码；目标与验收见第 14 节 |
 
 ---
 
@@ -619,6 +620,8 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 
 ### 13.8 排期（顺序 + 门禁，2026-11-21 决策更新）
 
+> **2026-11-21 重规划**：以下 P7 排期已被第 14 节「架构重构总纲」取代。P7-07 并入 R1/R5，P7-08 并入 R4，P7-09 并入 R5；Phase 8 并入 R7。本节保留为设计依据，不再作为执行队列。
+
 ```text
 ─── Phase 7 已收口（2026-11-20）──────────────────────────────
 P7-01 重启残局收口 ──────────────── ✅ 已完成
@@ -773,3 +776,136 @@ P8-05 检索型记忆 ───────── P2，按实测瓶颈决定是�
 - 每个批次以「出口」为界，不以日历工期承诺；结论必须来自落盘报告，而不是单测通过。
 - **P7-06 不依赖 P7-02 结论**——它解决的是交互原语缺口，不是 ReAct 循环内部问题，已并行落地。
 - **P7-03 plan-first 已不立项（2026-11-21）**；P7-07～P7-09 均保持 ReAct 循环不变，只做计划持久化、停滞恢复与上下文压缩，避免架构先行。
+
+---
+
+## 14. 架构重构总纲（2026-11-21 重规划，当前主线）
+
+### 14.1 重规划依据
+
+2026-11-21 完成五层只读审计（后端核心 / 工具层 / 持久化 / 前端 / 测试构建），完整证据见 [`ARCHITECTURE_AUDIT_20261121.md`](ARCHITECTURE_AUDIT_20261121.md)。核心结论：
+
+1. `ReActAgentService` 1498 行，承担循环、策略、上下文、工具调度、停滞、计划收口、流式、持久化 8 类职责。
+2. `WorkspaceContext` 以 ThreadLocal 承载 13 个混杂字段，跨 turn 无权威状态源（P7-04c 回滚根因）。
+3. `agent_run_event.seq` 先查后写，并发写同一 run 会撞唯一约束。
+4. 只读批与 `ask_user_question` 绕过审批 / scope 检查。
+5. 前端 `useChatStore` 过大，断线恢复只覆盖部分事件。
+6. 测试约 400 项，但主循环缺可重复 scripted 回归；评测 n=3。
+
+**决策：停止逐点补丁。** P7-07～P7-09 不再单独排期，作为重构接缝的验收项落地；Phase 8 并入 R7。
+
+### 14.2 目标架构原则
+
+| # | 原则 | 落地要求 |
+|---|---|---|
+| 1 | 单一事实源 | `agent_run_event` 是运行事实源；`plan_json` 等只是投影/快照，可重建 |
+| 2 | 依赖方向 | `controller → orchestration → context/tool/stream/run → tool/mcp`，基础设施不反向依赖领域 |
+| 3 | 状态归属 | 传输参数、领域状态、UI 推送标记、统计四类分离；跨 turn 状态必须进 `RunContext` |
+| 4 | 接缝优先 | 新功能落在稳定接口上，不继续写进 God Class |
+| 5 | 行为保持 | 每批重构不改外部行为；需改行为时单独开关 + A/B |
+| 6 | 可回滚 | 每批独立 commit，保留旧路径开关，测试不过立即回滚 |
+
+### 14.3 目标结构
+
+**后端**
+
+```text
+agent/
+  orchestration/   AgentOrchestrator, LoopGuard, Budget, StopReason
+  context/         ContextAssembler, PlanSnapshotProvider, MemoryPort, ContextCondenser
+  tool/            ToolContract, ToolContext, ToolExecutor, ApprovalGate, FileChangeService
+  stream/          StreamPublisher, SseEventMapper
+  run/             RunStateService, RunContext, RunEventStore
+tool/              各具体工具（只实现 ToolContract）
+mcp/               MCP 适配器
+```
+
+**前端**
+
+```text
+api/          sse.ts（协议） + agent.ts（REST）
+services/     SSEService（重连 / 事件归一化）
+stores/       messages / stream / recovery / questions / approvals / fileChanges
+composables/  useChatStream / useRecovery / useVirtualList
+views/        ChatView（只负责布局与挂载）
+```
+
+### 14.4 状态归属矩阵
+
+| 状态 | 生命周期 | 归属 | 持久化 |
+|---|---|---|---|
+| userId / projectId / cancelled | 单次调用 | `ToolContext` | 否 |
+| runId / sessionId / turnId | 单次 run | `RunContext` | run 表 |
+| plan / scope | 跨 turn | `RunContext` | `plan_json` + `PLAN_UPDATED` |
+| diagnostics / verify | 跨工具批次 | `RunContext` | 事件（可选快照） |
+| 停滞 / nudge 计数 | 单 turn | `LoopGuard` | 否（必要时 `NUDGE` 事件） |
+| 文件变更 | 单 turn | `FileChangeService` | `pending_file_change` |
+| 审批 | 跨线程 | `ApprovalGate` | `tool_approval` |
+| SSE 连接 | 单连接 | `StreamPublisher` | 否 |
+
+### 14.5 重构批次（R0～R7）
+
+| 批次 | 内容 | 出口（必须同时满足） | 回滚方式 |
+|---|---|---|---|
+| **R0 安全网** | `ScriptedAgentLoopTest`（固定模型响应驱动主循环）；`RunContext` 契约测试；seq 并发测试 | 覆盖 plan/停滞/审批/取消/恢复；全量测试绿 | 只增测试 |
+| **R1 状态地基** | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
+| **R2 Context 瘦身** | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
+| **R3 工具接缝** | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
+| **R4 编排接缝** | `AgentOrchestrator` + `LoopGuard` + `StreamPublisher`；落地 P7-08 渐进 nudge | `ReActAgentService` 行数显著下降；L1 停滞恢复达标 | 保留旧 execute |
+| **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
+| **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
+| **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
+
+### 14.6 与既有 P7/P8 的映射
+
+| 原编号 | 去向 | 说明 |
+|---|---|---|
+| P7-07 计划持久化软回注 | R1（持久化）+ R5（注入） | 不再单独排期 |
+| P7-08 停滞渐进恢复 | R4（LoopGuard） | 不再单独排期 |
+| P7-09 上下文压缩 | R5（ContextCondenser） | 不再单独排期 |
+| P8-01 Run 级续跑 | R7 | 复用 `agent_run_event` |
+| P8-02 完成强校验 | R7 | 复用 diagnostics/verify |
+| P8-03 大任务分解 | R7 | 参考 DSH 子智能体 |
+| P8-04 评测扩容 | R0 + R7 | R0 先建 scripted，R7 扩 n≥10 |
+| P8-05 检索型记忆 | R7 | 依赖折叠保留原始事件 |
+| P7-03 plan-first | 不立项 | 结论不变 |
+
+### 14.7 执行纪律
+
+1. **严格顺序**：R0 → R1 → R2 → R3/R4 → R5 → R6 → R7；不跳批、不并行改同一文件。
+2. **测试先行**：每批先补能证明行为不变的测试，再动代码。
+3. **一批一提交**：每批独立 commit，提交信息含批次号；不达标立即回滚。
+4. **预注册门禁**：涉及行为的批次（R1/R4/R5/R7）先写阈值，后看数据；完成率不降、token/耗时退化 <15%。
+5. **单一事实源**：任何新状态先问“事件流能否重建”，不能才加投影列。
+6. **禁止大爆炸**：不做一次性全量重写；每批保持可运行、可回滚。
+7. **文档同步**：每批完成更新 `STATUS.md` 与本节状态，报告落盘 `docs/phases/`。
+
+### 14.8 架构验收（完成定义）
+
+1. `AgentOrchestrator` 单类 ≤600 行，职责单一。
+2. `WorkspaceContext` ≤80 行，只含传输参数。
+3. 所有工具调用必经 `ToolExecutor`，审批/scope 无绕过（有测试）。
+4. `agent_run_event.seq` 并发测试通过（N 线程写同一 run 无冲突）。
+5. 前端单 store ≤400 行；断线恢复覆盖 plan/file_change/approval/question。
+6. 核心链路有 scripted 回归，不依赖真实模型即可验证行为。
+7. 后端全量测试 + 前端 Vitest/Playwright 全绿。
+
+### 14.9 风险与缓解
+
+| 风险 | 等级 | 缓解 |
+|---|---|---|
+| ReAct 行为漂移 | 高 | R0 scripted 回归 + 每批 A/B |
+| ThreadLocal 迁移遗漏 | 高 | 兼容访问器 + 逐字段迁移 + 全量测试 |
+| seq 原子化影响事件重放 | 中 | 先加唯一约束与并发测试，再切生成方式 |
+| 前端 store 拆分状态不同步 | 中 | 逐域迁移 + facade |
+| 一次改太多无法归因 | 高 | 严格批次顺序 + 独立提交 |
+
+### 14.10 第一刀（R0 + R1 的具体落点）
+
+1. `src/test/java/.../ScriptedAgentLoopTest.java`：用脚本化模型响应驱动 `ReActAgentService`，断言计划推进、停滞触发、审批挂起、取消清理。
+2. 新增 `agent/run/RunContext.java`：持有 `runId/sessionId/turnId/plan/scope/diagnostics/verify`，以 `runId` 为 key。
+3. 新增 `agent/run/RunEventStore.java`：封装事件追加；`seq` 改为数据库原子生成，保留唯一约束兜底。
+4. `V22__add_agent_run_plan.sql`：`agent_run` 增加 `plan_json TEXT`（投影）。
+5. `UpdatePlanTool` 写 `RunContext` + `RunEventStore`；`buildMessages` 读取快照并作为 user-role 消息注入（保护 system 前缀缓存）。
+6. 先不改 `WorkspaceContext` 字段，只加迁移适配层，保证 R1 可独立回滚。
+
