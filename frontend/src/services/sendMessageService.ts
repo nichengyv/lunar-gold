@@ -12,7 +12,8 @@ import { stageForTool } from '../utils/taskStages';
 import { useApprovalStore } from '../stores/approvals';
 import { useQuestionStore } from '../stores/question';
 import { useStreamStore } from '../stores/stream';
-import { streamChat } from './streamService';
+import { streamChat, streamResume } from './streamService';
+import type { StreamHooks } from './streamService';
 import type { FileChange, ToolInvocation, UiMessage } from '../types/api';
 import type { PermissionLevel, ReasoningLevel, TaskStageKey } from '../types/chat';
 
@@ -47,6 +48,38 @@ export interface SendMessageDeps {
 
 /** 把 SSE 事件写到气泡、流式状态、审批与询问上；失败/停止状态也在这里落定 */
 export async function sendChatMessage(params: SendMessageParams, deps: SendMessageDeps): Promise<void> {
+  await runStream(deps, (hooks, signal) =>
+    streamChat(
+      {
+        prompt: params.prompt,
+        sessionId: params.sessionId,
+        projectId: params.projectId,
+        // 个人助手定位：资料检索默认开启且不暴露开关，用户无需理解 RAG
+        useRag: true,
+        attachmentIds: params.attachmentIds,
+        model: params.model,
+        reasoning: params.reasoning,
+        permission: params.permission,
+        clientRequestId: crypto.randomUUID()
+      },
+      hooks,
+      signal
+    )
+  );
+}
+
+/**
+ * R7b：从断点续跑被进程重启中断的 Run。
+ * 事件映射、审批、决策询问与收尾逻辑与普通发送完全一致，只是入口换成 resume 接口。
+ */
+export async function resumeChatRun(runId: number, deps: SendMessageDeps): Promise<void> {
+  await runStream(deps, (hooks, signal) => streamResume(runId, hooks, signal));
+}
+
+async function runStream(
+  deps: SendMessageDeps,
+  open: (hooks: StreamHooks, signal: AbortSignal) => Promise<void>
+): Promise<void> {
   const aiMsg = deps.assistant;
   const stream = useStreamStore();
   const approvals = useApprovalStore();
@@ -66,19 +99,7 @@ export async function sendChatMessage(params: SendMessageParams, deps: SendMessa
   };
 
   try {
-    await streamChat(
-      {
-        prompt: params.prompt,
-        sessionId: params.sessionId,
-        projectId: params.projectId,
-        // 个人助手定位：资料检索默认开启且不暴露开关，用户无需理解 RAG
-        useRag: true,
-        attachmentIds: params.attachmentIds,
-        model: params.model,
-        reasoning: params.reasoning,
-        permission: params.permission,
-        clientRequestId: crypto.randomUUID()
-      },
+    await open(
       {
         onSessionId: (id) => deps.onSessionCreated(id),
         // 第六十八批 A3：本轮 id 用于「撤回本轮」文件改动

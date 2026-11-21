@@ -130,6 +130,13 @@
         <div class="failed-hint">{{ failureInfo.hint }}</div>
       </div>
       <div class="failed-actions">
+        <button
+          v-if="msg.resumableRunId != null"
+          class="retry-btn"
+          @click="chat.resumeInterrupted(msg)"
+        >
+          <Icon name="refresh" :size="13" /> 继续执行
+        </button>
         <button class="retry-btn" @click="handleFailureAction">
           <Icon :name="failureActionIcon" :size="13" /> {{ failureActionLabel }}
         </button>

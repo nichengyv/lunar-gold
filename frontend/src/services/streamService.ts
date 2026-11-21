@@ -5,7 +5,7 @@
  * 转成 `StreamHooks` 回调）以及登录态失效的收尾。store 因此只关心业务状态，
  * 不再自己解析事件名与 JSON。
  */
-import { openChatStream, parseSSE, SseAuthError } from '../api/sse';
+import { openChatStream, openResumeStream, parseSSE, SseAuthError } from '../api/sse';
 import type {
   ApprovalDecisionSource,
   ApprovalRequest,
@@ -72,9 +72,25 @@ export async function streamChat(
   hooks: StreamHooks,
   signal?: AbortSignal
 ): Promise<void> {
+  await consumeStream(() => openChatStream(payload, signal), hooks);
+}
+
+/** R7b：从断点续跑被进程重启中断的 Run，事件协议与聊天流完全一致 */
+export async function streamResume(
+  runId: number,
+  hooks: StreamHooks,
+  signal?: AbortSignal
+): Promise<void> {
+  await consumeStream(() => openResumeStream(runId, signal), hooks);
+}
+
+async function consumeStream(
+  open: () => Promise<ReadableStream<Uint8Array>>,
+  hooks: StreamHooks
+): Promise<void> {
   let body: ReadableStream<Uint8Array>;
   try {
-    body = await openChatStream(payload, signal);
+    body = await open();
   } catch (e) {
     if (e instanceof SseAuthError) {
       handleAuthExpired(hooks, e.message);

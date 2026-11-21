@@ -357,6 +357,8 @@ export interface UiMessage {
   diagnostics?: DiagnosticsInfo;
   /** P5-06：最近一次项目验证结果 */
   verify?: VerifyInfo;
+  /** R7b：进程重启中断后保留的断点 Run，可在气泡上点「继续执行」 */
+  resumableRunId?: number;
 }
 
 /**

@@ -110,3 +110,30 @@ export async function openChatStream(
   return resp.body;
 }
 
+/**
+ * R7b：从断点续跑一次被进程重启中断的 Run。
+ * 与聊天流同样使用 POST + fetch 流式读取，返回同一套 SSE 事件。
+ */
+export async function openResumeStream(runId: number, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  const token = localStorage.getItem('token') || '';
+  const resp = await fetch(`/api/agent/runs/${runId}/resume`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    signal
+  });
+
+  if (resp.status === 401) {
+    throw new SseAuthError();
+  }
+
+  if (!resp.ok || !resp.body) {
+    const err = await resp.json().catch(() => ({ message: '' }));
+    throw new Error((err as { message?: string }).message || '这次没能从断点续跑，请稍后再试');
+  }
+
+  return resp.body;
+}
+

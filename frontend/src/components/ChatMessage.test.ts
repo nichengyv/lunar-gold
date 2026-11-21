@@ -85,6 +85,22 @@ describe('ChatMessage P5-10-3', () => {
     await wrapper.find('.retry-btn').trigger('click');
     expect(reload).toHaveBeenCalled();
   });
+
+  it('进程重启中断且保留断点时给出「继续执行」', async () => {
+    const chat = useChatStore();
+    const resume = vi.spyOn(chat, 'resumeInterrupted').mockResolvedValue();
+    const msg = message({
+      failed: true,
+      errorText: '上一轮被应用重启中断，已保留断点',
+      resumableRunId: 42
+    });
+    const wrapper = mountMessage(msg);
+
+    const btn = wrapper.findAll('.retry-btn').find((b) => b.text().includes('继续执行'));
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    expect(resume).toHaveBeenCalledWith(msg);
+  });
 });
 
 describe('ChatMessage 本轮用量', () => {

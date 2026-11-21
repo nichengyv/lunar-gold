@@ -3,7 +3,7 @@ import { reactive } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
-import { sendChatMessage } from '../services/sendMessageService';
+import { resumeChatRun, sendChatMessage } from '../services/sendMessageService';
 import { streamSession } from '../services/streamSession';
 import { replayRunEvents } from '../services/runRecovery';
 import { TASK_STAGES } from '../utils/taskStages';
@@ -513,9 +513,17 @@ export const useChatStore = defineStore('chat', {
         // P5-10：先按 runId 尝试恢复（可能仍在生成，也可能只留下半截检查点），恢复不了再标成中断。
         const pending = msgs.setHistory(history);
         if (pending) {
-          this.restoreSessionRun(sessionId, pending).then((restored) => {
+          this.restoreSessionRun(sessionId, pending).then(async (restored) => {
             if (restored || msgs.messages[msgs.messages.length - 1] !== pending) return;
+            // R7b：进程重启后这一轮已是 FAILED，但可能留有断点——优先给「继续执行」而不是只能重发
+            const resumable = await agentApi.getResumableRun(sessionId).catch(() => null);
+            if (msgs.messages[msgs.messages.length - 1] !== pending) return;
             pending.failed = true;
+            if (resumable?.resumable && resumable.runId != null) {
+              pending.resumableRunId = resumable.runId;
+              pending.errorText = '上一轮被应用重启中断，已保留断点';
+              return;
+            }
             pending.errorText = '这一轮还没有回答（可能已中断或页面刷新）';
           });
         }
@@ -997,6 +1005,53 @@ export const useChatStore = defineStore('chat', {
           aiMsg.failed ? 'FAILED' : aiMsg.stopped ? 'CANCELLED' : 'SUCCEEDED'
         );
         // 生成结束后刷新审查流与任务交付视图
+        void this.refreshChanges();
+      }
+    },
+
+    /**
+     * R7b：显式续跑被进程重启中断、且保留了断点的一轮。
+     * 直接复用发送链路的 SSE 事件映射，只是入口换成 resume 接口；
+     * 断点里已有用户消息与工具结果，因此不会再追加一条用户气泡。
+     */
+    async resumeInterrupted(target: UiMessage) {
+      const runId = target.resumableRunId;
+      if (runId == null || this.isProcessing || this.currentSessionId == null) return;
+
+      const startedAt = Date.now();
+      target.resumableRunId = undefined;
+      target.failed = false;
+      target.errorText = undefined;
+      target.stopped = false;
+      target.streaming = true;
+
+      this.isProcessing = true;
+      const stream = useStreamStore();
+      stream.beginRun(startedAt);
+      stream.setRunId(runId);
+      this.markSessionRunState(this.currentSessionId, 'RUNNING');
+
+      const controller = streamSession.begin();
+      streamSession.cancelRecovery();
+
+      try {
+        await resumeChatRun(runId, {
+          assistant: target,
+          signal: controller.signal,
+          getSessionId: () => this.currentSessionId,
+          onSessionCreated: () => undefined,
+          onSessionState: (state) => this.markSessionRunState(this.currentSessionId, state),
+          markStage: (key) => this.markLiveStage(key),
+          recoverRun: (id, t) => this.recoverRun(id, t)
+        });
+      } finally {
+        target.durationMs = Date.now() - startedAt;
+        if (streamSession.isActive(controller)) streamSession.release(controller);
+        this.isProcessing = false;
+        this.markSessionRunState(
+          this.currentSessionId,
+          target.failed ? 'FAILED' : target.stopped ? 'CANCELLED' : 'SUCCEEDED'
+        );
         void this.refreshChanges();
       }
     },

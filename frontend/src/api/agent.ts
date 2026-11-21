@@ -32,7 +32,23 @@ export interface RunEventsResult {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  /** R7b：该 Run 是否可从断点显式续跑 */
+  resumable?: boolean;
   events: RunEventItem[];
+}
+
+export interface ResumableRunResult {
+  resumable: boolean;
+  runId?: number;
+  round?: number;
+  errorCode?: string | null;
+}
+
+/** R7b：当前会话最近一条 Run 若被进程重启中断且留有断点，返回续跑入口 */
+export function getResumableRun(sessionId: number): Promise<ResumableRunResult> {
+  return http
+    .get<never, ApiResponse<ResumableRunResult>>(`/api/agent/sessions/${sessionId}/resumable-run`)
+    .then(unwrap);
 }
 
 /** P5-10：断线续传 / 刷新恢复入口；sinceSeq 为空表示从头取 */
