@@ -1,37 +1,41 @@
 package com.capsule.agentkey.agent.run;
 
+import com.capsule.agentkey.diagnostics.DiagnosticsResult;
+import com.capsule.agentkey.verify.VerifyResult;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * 一次 Run 的权威内存状态（R1）。
+ * 一次 Run 的权威状态（R1 建立，R2 扩充）。
  *
- * <p>重构前，plan、runId、turnId、取消标记分散在 {@code WorkspaceContext} 的 ThreadLocal 里，
- * 跨 turn、断线重放、线程切换后无法还原；P7-04c 的「回滚后计划丢失」正是这个原因。
- * 现在这些状态统一收敛到 RunContext：
+ * <p>重构前，plan、scope、诊断、验证、工具统计、runId、取消标记分散在
+ * {@code WorkspaceContext} 的 ThreadLocal 里，跨 turn、断线重放、线程切换后无法还原；
+ * P7-04c 的「回滚后计划丢失」正是这个原因。现在这些状态统一收敛到 RunContext：
  *
  * <ul>
- *   <li>工具线程通过 {@code WorkspaceContext} 读取同一份 RunContext（迁移适配层，R2 再瘦身）；</li>
+ *   <li>工具线程通过 {@code WorkspaceContext} 读写同一份 RunContext（薄视图，不再存状态）；</li>
  *   <li>计划更新通过 {@link #updatePlan(List)} 写入，并同步触发持久化回调，
  *       落 {@code agent_run.plan_json} + {@code PLAN_UPDATED} 事件；</li>
  *   <li>持久化失败只降级为日志，不能让一次计划更新中断 ReAct 主循环。</li>
  * </ul>
  *
- * <p>线程安全：plan 用 {@link AtomicReference} 保存不可变快照，planChanged 用
- * {@link AtomicBoolean} 保证 drain 语义（读一次即清空），与原来的 ThreadLocal 行为一致。
+ * <p>线程安全：计划用 {@link AtomicReference} 保存不可变快照；planChanged 用
+ * {@link AtomicBoolean} 保证 drain 语义；工具统计用并发 Map，供并行只读工具的子线程累计。
  */
 @Slf4j
 public final class RunContext {
 
-    private final Long runId;
+    private volatile Long runId;
     private final Long userId;
     private final Long projectId;
-    private final Long sessionId;
-    private final String turnId;
+    private volatile Long sessionId;
+    private volatile String turnId;
     private final AtomicBoolean cancelled;
 
     /** 计划持久化回调；无 runId 或测试场景为 null，此时只保留内存快照 */
@@ -39,6 +43,24 @@ public final class RunContext {
 
     private final AtomicReference<List<PlanStep>> plan;
     private final AtomicBoolean planChanged = new AtomicBoolean(false);
+
+    /** D1: 用户消息声明的文件范围约束；空列表 = 不限制 */
+    private volatile List<String> scope = List.of();
+
+    /** P5-05：最近一批变更文件的诊断结果 */
+    private volatile DiagnosticsResult diagnostics;
+    /** P5-05：最近一批诊断指纹，用于识别连续相同诊断 */
+    private volatile String diagnosticsFingerprint = "";
+    /** P5-05：诊断对应的文件版本（mtime:size） */
+    private volatile String diagnosticsFileVersion = "";
+    /** P5-06：最近一次项目验证结果 */
+    private volatile VerifyResult verify;
+
+    /**
+     * P5-08：本轮会话级工具统计（tool → [calls, success, fail]）。
+     * 并行只读工具在子线程 dispatch 时仍累计到同一份统计。
+     */
+    private final Map<String, int[]> toolStats = new ConcurrentHashMap<>();
 
     private RunContext(Long runId, Long userId, Long projectId, Long sessionId, String turnId,
                        AtomicBoolean cancelled, List<PlanStep> initialPlan,
@@ -69,10 +91,13 @@ public final class RunContext {
     }
 
     public Long runId() { return runId; }
+    public void setRunId(Long runId) { this.runId = runId; }
     public Long userId() { return userId; }
     public Long projectId() { return projectId; }
     public Long sessionId() { return sessionId; }
+    public void setSessionId(Long sessionId) { this.sessionId = sessionId; }
     public String turnId() { return turnId; }
+    public void setTurnId(String turnId) { this.turnId = turnId; }
     public AtomicBoolean cancelled() { return cancelled; }
 
     /** 当前计划快照；从未提交过时返回空列表 */
@@ -106,4 +131,31 @@ public final class RunContext {
     public boolean drainPlanChanged() {
         return planChanged.getAndSet(false);
     }
+
+    /** D1: 当前 scope 列表（文件范围约束），空列表 = 不限制 */
+    public List<String> scope() { return scope; }
+
+    /** D1: 设置 scope 列表；空/null = 不限制 */
+    public void setScope(List<String> scope) {
+        this.scope = scope == null ? List.of() : List.copyOf(scope);
+    }
+
+    public DiagnosticsResult diagnostics() { return diagnostics; }
+    public void setDiagnostics(DiagnosticsResult diagnostics) { this.diagnostics = diagnostics; }
+
+    public String diagnosticsFingerprint() { return diagnosticsFingerprint; }
+    public void setDiagnosticsFingerprint(String fingerprint) {
+        this.diagnosticsFingerprint = fingerprint == null ? "" : fingerprint;
+    }
+
+    public String diagnosticsFileVersion() { return diagnosticsFileVersion; }
+    public void setDiagnosticsFileVersion(String version) {
+        this.diagnosticsFileVersion = version == null ? "" : version;
+    }
+
+    public VerifyResult verify() { return verify; }
+    public void setVerify(VerifyResult verify) { this.verify = verify; }
+
+    /** P5-08：会话级工具统计，并行只读工具共享同一份 */
+    public Map<String, int[]> toolStats() { return toolStats; }
 }

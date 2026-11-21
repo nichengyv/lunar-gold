@@ -82,4 +82,33 @@ class RunContextTest {
         assertEquals(1, ctx.plan().size());
         assertTrue(ctx.drainPlanChanged());
     }
+
+    @Test
+    void scope与诊断状态归属RunContext() {
+        RunContext ctx = context(null, new ArrayList<>());
+        assertEquals(List.of(), ctx.scope());
+
+        ctx.setScope(List.of("src/"));
+        ctx.setDiagnosticsFingerprint(null);
+        ctx.setDiagnosticsFileVersion("mtime:size");
+
+        assertEquals(List.of("src/"), ctx.scope());
+        assertEquals("", ctx.diagnosticsFingerprint(), "null 必须归一化为空串");
+        assertEquals("mtime:size", ctx.diagnosticsFileVersion());
+        assertNull(ctx.verify());
+    }
+
+    @Test
+    void runId与会话信息可在执行中补齐() {
+        RunContext ctx = RunContext.create(null, 1L, 2L, null, null,
+                new AtomicBoolean(false), List.of(), null);
+
+        ctx.setRunId(88L);
+        ctx.setSessionId(9L);
+        ctx.setTurnId("turn-9");
+
+        assertEquals(88L, ctx.runId());
+        assertEquals(9L, ctx.sessionId());
+        assertEquals("turn-9", ctx.turnId());
+    }
 }

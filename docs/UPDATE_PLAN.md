@@ -849,7 +849,7 @@ views/        ChatView（只负责布局与挂载）
 |---|---|---|---|
 | **R0 安全网** ✅ 2026-11-21 | `ScriptedAgentLoopTest`（固定模型响应驱动主循环）；`RunContext` 契约测试；seq 并发测试 | 覆盖 plan/停滞/审批/取消/恢复；全量测试绿 | 只增测试 |
 | **R1 状态地基** ✅ 2026-11-21 | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
-| **R2 Context 瘦身** | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
+| **R2 Context 瘦身** ✅ 2026-11-21 | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
 | **R3 工具接缝** | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
 | **R4 编排接缝** | `AgentOrchestrator` + `LoopGuard` + `StreamPublisher`；落地 P7-08 渐进 nudge | `ReActAgentService` 行数显著下降；L1 停滞恢复达标 | 保留旧 execute |
 | **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
@@ -929,6 +929,14 @@ views/        ChatView（只负责布局与挂载）
 - `ReActAgentService`：执行前构建 RunContext、恢复持久化计划；`buildMessages` 以 user 消息注入计划快照，system 前缀不变，保护 provider 前缀缓存。
 - 全量测试通过：**417 tests / 0 failures / 0 errors / 17 skipped**（含 `AgentRunServiceTest` / `UpdatePlanToolTest` / `ReActAgentServiceTest` / 断流与重启验收）。
 
-**下一刀（R2）**：`WorkspaceContext` 只保留传输参数，把 scope / diagnostics / verify 等字段迁入 RunContext；
-计划推进的“下一步由谁执行”仍由 ReAct 主循环决定，R2 不动编排。
+#### R2 Context 瘦身（2026-11-21）
+
+- `WorkspaceContext` 从 13 个状态字段缩为 2 个：`RunContext` 引用 + 文件变更缓冲；其余访问器全部委托，工具与测试调用签名不变。
+- scope / diagnostics / diagnosticsFingerprint / diagnosticsFileVersion / verify / toolStats 迁入 `RunContext`；runId / sessionId / turnId 改为可补齐的 volatile 字段。
+- 无外部 RunContext 时（单测 / MCP / 后台任务）由 3 参构造器创建合成 RunContext，消除「有状态 / 无状态」两套分支。
+- 子上下文共享 RunContext，仅文件变更缓冲独立；`RunContextTest` 增至 8 例，新增 `WorkspaceContextTest`（2 例）锁定门面语义。
+- 全量测试通过：**421 tests / 0 failures / 0 errors / 17 skipped**。
+
+**下一刀（R3）**：工具执行链路拆分——`ToolExecutor` 统一串行/并行与统计，`ApprovalGate` 收敛审批与 scope 检查，
+`FileChangeService` 接管变更登记；目标是让只读批与 `ask_user_question` 也走同一套审批/scope 判定。
 
