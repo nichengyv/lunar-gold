@@ -3,34 +3,31 @@ import { reactive } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
-import { streamChat } from '../services/streamService';
+import { sendChatMessage } from '../services/sendMessageService';
 import { streamSession } from '../services/streamSession';
 import { replayRunEvents } from '../services/runRecovery';
-import { createFrameThrottle } from '../utils/frameThrottle';
+import { TASK_STAGES } from '../utils/taskStages';
 import { useProjectStore } from './project';
 import { useApprovalStore } from './approvals';
 import { useFileChangeStore } from './fileChanges';
+import { useMessagesStore } from './messages';
+import type { SessionAttachment } from './messages';
 import { useQuestionStore } from './question';
 import { useStreamStore } from './stream';
 import {
   beginExperienceRecovery,
   discardExperienceRecovery,
   finishExperienceRecovery,
-  markExperienceRun,
   setExperienceSessionId
 } from '../utils/experienceDiagnostics';
-import type { ChangeSetView, FileChange, MessageTrace, PendingApproval, PendingFileChange, SessionInfo, ToolInvocation, UiMessage } from '../types/api';
+import type { ChangeSetView, PendingApproval, PendingFileChange, SessionInfo, UiMessage } from '../types/api';
 import type {
   ApprovalHistoryItem,
-  CompletionInfo,
-  FailureInfo,
   PermissionLevel,
   PlanSnapshot,
   ReasoningLevel,
   RunUsage,
-  TaskStageItem,
   TaskStageKey,
-  TaskStageStatus,
   UserQuestion
 } from '../types/chat';
 
@@ -44,14 +41,7 @@ export interface AttachmentChip {
   previewUrl?: string;
 }
 
-/** 已发送消息中关联的附件（用于会话内恢复 UI） */
-interface SessionAttachment {
-  id: number;
-  fileName: string;
-}
-
 let seq = 0;
-const nextId = () => ++seq;
 
 /**
  * P5-10：断点恢复的代际标记由 `services/streamSession` 统一管理。
@@ -84,111 +74,12 @@ function applyRunEvents(events: agentApi.RunEventItem[], target: UiMessage) {
 // 从而停止继续消耗 token。
 
 // ——— P5-10-3：阶段时间线、预算与失败分级 ———
-
-/** 五个执行阶段的固定顺序与展示名 */
-export const TASK_STAGES: { key: TaskStageKey; label: string }[] = [
-  { key: 'understand', label: '理解' },
-  { key: 'read', label: '读取' },
-  { key: 'modify', label: '修改' },
-  { key: 'verify', label: '验证' },
-  { key: 'summarize', label: '汇总' }
-];
+// R6c：纯函数移到 `utils/taskStages`（发送编排服务也要用），这里原样 re-export 保持导入路径不变。
 
 /** 停止后「继续」发送的固定提示，避免用户重述任务 */
 export const CONTINUE_PROMPT = '请继续完成上一条未完成的回答，从中断处接着做，不要重复已完成的部分。';
 
-const READ_TOOLS = new Set([
-  'read_file', 'list_files', 'list_dir', 'list_directory', 'grep', 'glob',
-  'search_code', 'search_files', 'repo_map', 'read_document'
-]);
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'apply_patch', 'delete_file', 'create_file']);
-
-/** P5-10-3：工具调用属于哪个阶段；未知工具不推进，避免误判 */
-export function stageForTool(tool: string, modified: boolean): TaskStageKey | null {
-  const name = (tool || '').toLowerCase();
-  if (WRITE_TOOLS.has(name)) return 'modify';
-  if (READ_TOOLS.has(name)) return 'read';
-  if (name.includes('lsp') || name === 'diagnostics') return 'verify';
-  if (name === 'run_command' || name === 'execute_command') return modified ? 'verify' : 'read';
-  return null;
-}
-
-/**
- * P5-10-3：把阶段首次到达时间折叠成可展示的时间线。
- * 未到达但已被后续阶段越过的阶段标记为「跳过」，不伪造耗时。
- */
-export function buildStageTimeline(
-  marks: Partial<Record<TaskStageKey, number>>,
-  now: number,
-  endedAt?: number
-): TaskStageItem[] {
-  const lastReached = [...TASK_STAGES].reverse().find((s) => !!marks[s.key])?.key;
-  return TASK_STAGES.map((stage, i) => {
-    const startedAt = marks[stage.key];
-    if (!startedAt) {
-      const laterReached = TASK_STAGES.slice(i + 1).some((s) => !!marks[s.key]);
-      return { ...stage, status: (laterReached ? 'skipped' : 'pending') as TaskStageStatus };
-    }
-    const nextStartedAt = TASK_STAGES.slice(i + 1)
-      .map((s) => marks[s.key])
-      .find((v): v is number => typeof v === 'number');
-    const durationMs = Math.max(0, (nextStartedAt ?? endedAt ?? now) - startedAt);
-    const status: TaskStageStatus = stage.key === lastReached && endedAt == null ? 'active' : 'done';
-    return { ...stage, status, startedAt, durationMs };
-  });
-}
-
-/** P5-10-3：把失败原因归到四类，并给出对应动作 */
-export function classifyFailure(errorText?: string, completion?: CompletionInfo | null): FailureInfo {
-  const reason = completion?.reason || '';
-  const text = `${errorText || ''} ${reason} ${completion?.message || ''}`;
-
-  if (reason === 'APPROVAL_REJECTED' || /审批|拒绝|approval|被拦截/i.test(text)) {
-    return {
-      class: 'approval',
-      label: '需审批',
-      hint: '上次审批被拒绝或未通过，重新发起会再次请求审批。',
-      primaryAction: 'retry'
-    };
-  }
-  if (
-    /(api[\s_-]?key|apikey|密钥).*(未配置|缺失|无效)|未配置.*(key|密钥|模型)|unauthorized|\b401\b|\b403\b|模型不可用|model.*(not found|unavailable)|\b404\b/i.test(text)
-  ) {
-    return {
-      class: 'config',
-      label: '需配置',
-      hint: '模型密钥或模型配置有问题，去设置检查后再试。',
-      primaryAction: 'settings'
-    };
-  }
-  if (
-    reason === 'MAX_TOOL_ROUNDS' ||
-    /\b5\d\d\b|timeout|timed out|超时|\b429\b|rate limit|network|failed to fetch|网络|连接中断/i.test(text)
-  ) {
-    return {
-      class: 'retryable',
-      label: '可重试',
-      hint: reason === 'MAX_TOOL_ROUNDS'
-        ? '已达到工具轮次上限，可以重试或切换到深度推理。'
-        : '网络波动或模型临时不可用，可以直接重试这一轮。',
-      primaryAction: 'retry'
-    };
-  }
-  if (reason === 'TOKEN_BUDGET_EXCEEDED' || reason === 'TIME_BUDGET_EXCEEDED') {
-    return {
-      class: 'manual',
-      label: '需人工',
-      hint: '本轮预算已用完，请缩小任务范围或调高预算后再试。',
-      primaryAction: 'reload'
-    };
-  }
-  return {
-    class: 'manual',
-    label: '需人工',
-    hint: '需要检查工作区权限、文件冲突或诊断/验证结果。',
-    primaryAction: 'reload'
-  };
-}
+export { buildStageTimeline, classifyFailure, TASK_STAGES, stageForTool } from '../utils/taskStages';
 
 // 输入草稿持久化：键为会话 id 字符串（未发消息的新会话用 new-<projectId>），值为未发送的输入文字
 const DRAFT_STORAGE_KEY = 'chat.drafts';
@@ -220,16 +111,6 @@ function loadDraftChips(): Record<string, DraftChipMeta[]> {
   }
 }
 
-/** 解析后端存的轨迹 JSON；损坏或缺失都当作没有轨迹，不能让历史加载失败 */
-function parseTrace(raw?: string): MessageTrace | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as MessageTrace;
-  } catch {
-    return null;
-  }
-}
-
 /** 旧版权限值归一化：EXECUTE/WRITE → 手动审批，非法/空 → 手动审批 */
 export function normalizePermission(p: string | null | undefined): PermissionLevel {
   if (p === 'MANUAL' || p === 'AUTO' || p === 'FULL' || p === 'READ_ONLY') return p;
@@ -258,12 +139,7 @@ export const useChatStore = defineStore('chat', {
     // 侧栏按工作区分组展示：projectId -> 该工作区的会话列表
     sessionsByProject: {} as Record<number, SessionInfo[]>,
     currentSessionId: null as number | null,
-    messages: [] as UiMessage[],
     isProcessing: false,
-    /** P5-09：会话历史加载中，用于骨架屏 */
-    messagesLoading: false,
-    /** P5-09：会话历史加载失败原因，非空时展示统一错误态 */
-    loadError: '',
     // 消息全文搜索命中后要定位到的后端消息 id；消息加载完成后由 ChatView 滚动过去并清空
     focusMessageId: null as number | null,
     // 右侧工作台打开的文件 tab（相对路径，去重）；activeFilePath 是当前显示的那个
@@ -278,8 +154,6 @@ export const useChatStore = defineStore('chat', {
     dockOpen: false,
     dockTab: 'changes' as 'changes' | 'docs' | 'file' | 'trace' | 'plan',
     pendingChips: [] as AttachmentChip[],
-    // sessionId -> 已随消息发送的附件（仅前端内存，用于切回会话时恢复 chips）
-    sessionAttachments: {} as Record<number, SessionAttachment[]>,
     // 各会话未发送的输入草稿（localStorage 持久化），切会话 / 刷新后回填
     drafts: loadDrafts(),
     // 各会话未发送的附件元信息（localStorage 持久化），键与 drafts 相同
@@ -304,6 +178,20 @@ export const useChatStore = defineStore('chat', {
     /** 任意一个文件 tab 有未保存改动 */
     editorDirty(): boolean {
       return this.openFiles.some((p) => this.fileDirty[p]);
+    },
+
+    // ——— R6c：消息域 store 的兼容访问器；视图继续用 chat.messages / chat.messagesLoading ———
+    messages(): UiMessage[] {
+      return useMessagesStore().messages;
+    },
+    messagesLoading(): boolean {
+      return useMessagesStore().messagesLoading;
+    },
+    loadError(): string {
+      return useMessagesStore().loadError;
+    },
+    sessionAttachments(): Record<number, SessionAttachment[]> {
+      return useMessagesStore().sessionAttachments;
     },
 
     // ——— R6：域 store 的兼容访问器；视图继续用 chat.xxx，写入走下方 action ———
@@ -535,7 +423,7 @@ export const useChatStore = defineStore('chat', {
     async onProjectChanged() {
       this.startNewSession();
       this.sessions = [];
-      this.sessionAttachments = {};
+      useMessagesStore().clearAttachments();
       // 切换项目时重新拉审查流（新项目的 PendingFileChange）
       const projectStore = useProjectStore();
       useFileChangeStore().reset();
@@ -549,7 +437,7 @@ export const useChatStore = defineStore('chat', {
       useStreamStore().resetSessionState();
       useQuestionStore().clear();
       this.currentSessionId = null;
-      this.messages = [];
+      useMessagesStore().reset();
       this.pendingChips = [];
       // P7-06：决策询问属于上一会话的 Run，切会话/新会话时清掉，避免答到别的会话
       useApprovalStore().clearHistory();
@@ -603,7 +491,7 @@ export const useChatStore = defineStore('chat', {
         this.reasoning = (info.reasoning as ReasoningLevel) || 'STANDARD';
         this.permission = normalizePermission(info.permission);
       }
-      this.pendingChips = (this.sessionAttachments[sessionId] || []).map((a) => ({
+      this.pendingChips = (useMessagesStore().sessionAttachments[sessionId] || []).map((a) => ({
         key: `s${a.id}`,
         fileName: a.fileName,
         status: 'done' as const,
@@ -615,55 +503,28 @@ export const useChatStore = defineStore('chat', {
     /** 拉取并还原某个会话的历史消息；加载中与失败分别交给骨架屏和错误态展示 */
     async loadSessionMessages(sessionId: number, silent = false) {
       setExperienceSessionId(sessionId);
-      if (!silent) this.messagesLoading = true;
-      this.loadError = '';
+      const msgs = useMessagesStore();
+      if (!silent) msgs.messagesLoading = true;
+      msgs.loadError = '';
       try {
         const history = await agentApi.getSessionMessages(sessionId);
         useStreamStore().setPlan(null);
-        this.messages = history.map((m) => {
-          // 助手消息的思考/工具/来源/改动从 trace 还原，切回会话仍能展开查看
-          const trace = parseTrace(m.trace);
-          return {
-            id: nextId(),
-            sourceId: m.id,
-            role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),
-            content: m.content,
-            thinking: trace?.thinking,
-            tools: trace?.tools ?? [],
-            sources: trace?.sources,
-            changes: trace?.changes,
-            plan: trace?.plan,
-            turnId: trace?.turnId,
-            durationMs: trace?.durationMs,
-            completion: trace?.completion,
-            diagnostics: trace?.diagnostics,
-            verify: trace?.verify
-          };
-        });
         // 后端只在本轮完整结束时才存助手回答：历史停在用户消息上，说明那一轮被刷新/断线/停止打断了。
         // P5-10：先按 runId 尝试恢复（可能仍在生成，也可能只留下半截检查点），恢复不了再标成中断。
-        if (this.messages.length && this.messages[this.messages.length - 1].role === 'user') {
-          const bubble = reactive<UiMessage>({
-            id: nextId(),
-            role: 'assistant',
-            content: '',
-            thinking: '',
-            tools: []
-          });
-          this.messages.push(bubble);
-          const target = bubble as UiMessage;
-          this.restoreSessionRun(sessionId, target).then((restored) => {
-            if (restored || this.messages[this.messages.length - 1] !== target) return;
-            target.failed = true;
-            target.errorText = '这一轮还没有回答（可能已中断或页面刷新）';
+        const pending = msgs.setHistory(history);
+        if (pending) {
+          this.restoreSessionRun(sessionId, pending).then((restored) => {
+            if (restored || msgs.messages[msgs.messages.length - 1] !== pending) return;
+            pending.failed = true;
+            pending.errorText = '这一轮还没有回答（可能已中断或页面刷新）';
           });
         }
       } catch (e) {
         // 保留空列表而不是旧会话内容，避免把上一个会话的消息当成当前会话展示
-        this.messages = [];
-        this.loadError = (e as Error).message || '会话加载失败';
+        msgs.reset();
+        msgs.loadError = (e as Error).message || '会话加载失败';
       } finally {
-        this.messagesLoading = false;
+        msgs.messagesLoading = false;
         // P5-14：刷新/切回会话时由后端重建同一交付视图
         if (this.currentSessionId === sessionId) void this.fetchChangeSet();
       }
@@ -996,7 +857,7 @@ export const useChatStore = defineStore('chat', {
       }
       if (userIdx < 0) return;
       const text = this.messages[userIdx].content;
-      this.messages = this.messages.slice(0, userIdx);
+      useMessagesStore().truncateFrom(userIdx);
       await this.sendMessage(text);
     },
 
@@ -1047,10 +908,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     mergeSessionAttachments(sessionId: number, attachments: SessionAttachment[]) {
-      const existing = this.sessionAttachments[sessionId] || [];
-      const map = new Map<number, SessionAttachment>();
-      [...existing, ...attachments].forEach((a) => map.set(a.id, a));
-      this.sessionAttachments[sessionId] = [...map.values()];
+      useMessagesStore().mergeSessionAttachments(sessionId, attachments);
     },
 
     async sendMessage(text: string) {
@@ -1068,52 +926,23 @@ export const useChatStore = defineStore('chat', {
       }
 
       // 快照本次要发送的附件，然后清空输入区 chips
+      const msgs = useMessagesStore();
       const sentAttachments = this.pendingChips
         .filter((c) => c.status === 'done' && c.id)
         .map((c) => ({ id: c.id as number, fileName: c.fileName }));
       const isNewSession = this.currentSessionId == null;
       if (!isNewSession && sentAttachments.length > 0) {
-        this.mergeSessionAttachments(this.currentSessionId as number, sentAttachments);
+        msgs.mergeSessionAttachments(this.currentSessionId as number, sentAttachments);
       }
       this.pendingChips.forEach((c) => c.previewUrl && URL.revokeObjectURL(c.previewUrl));
       this.pendingChips = [];
 
-      if (trimmed) {
-        this.messages.push({ id: nextId(), role: 'user', content: trimmed, tools: [] });
-      }
-      if (sentAttachments.length > 0) {
-        this.messages.push({
-          id: nextId(),
-          role: 'hint',
-          content: `已上传 ${sentAttachments.length} 个文件`,
-          tools: []
-        });
-      }
+      if (trimmed) msgs.appendUser(trimmed);
+      if (sentAttachments.length > 0) msgs.appendHint(`已上传 ${sentAttachments.length} 个文件`);
 
-      // 必须是响应式对象：push 之后再改原始对象的字段，Vue 不会追踪到，
-      // 表现就是流式回答已经返回、气泡却一直停在"输入中"动画上，刷新后才出现内容。
-      const aiMsg = reactive<UiMessage>({
-        id: nextId(),
-        role: 'assistant',
-        content: '',
-        thinking: '',
-        tools: [],
-        streaming: true
-      });
       const startedAt = Date.now();
-      this.messages.push(aiMsg);
-      // P5-11-3：SSE 每个 chunk 只保留最新全量文本，实际写响应式状态按帧合并（最多 20 次/秒）。
-      // 结束、失败、停止与 finally 都会 flush，保证正文最终与后端全量文本逐字一致。
-      const contentThrottle = createFrameThrottle<string>((full) => {
-        aiMsg.content = full;
-      });
-      const thinkingThrottle = createFrameThrottle<string>((thought) => {
-        aiMsg.thinking = thought;
-      });
-      const flushStreamedText = () => {
-        contentThrottle.flush();
-        thinkingThrottle.flush();
-      };
+      // R6c：气泡由 messages store 创建并挂载，返回响应式引用供流式写入
+      const aiMsg = msgs.beginAssistant();
       this.isProcessing = true;
       const stream = useStreamStore();
       stream.beginRun(startedAt);
@@ -1124,177 +953,40 @@ export const useChatStore = defineStore('chat', {
       streamSession.cancelRecovery();
 
       try {
-        await streamChat(
+        // R6c：发送与流式事件映射抽到 `services/sendMessageService`，这里只注入会话/侧栏回调
+        await sendChatMessage(
           {
             prompt: trimmed,
             sessionId: this.currentSessionId,
             // 当前项目：后端据此决定检索哪个项目的资料
             projectId: useProjectStore().currentProjectId ?? undefined,
-            // 个人助手定位：资料检索默认开启且不暴露开关，用户无需理解 RAG
-            useRag: true,
             attachmentIds,
             // 会话头当前选择的模型 / 推理档位 / 工作权限，每轮都随请求下发
             model: this.model,
             reasoning: this.reasoning,
-            permission: this.permission,
-            clientRequestId: crypto.randomUUID()
+            permission: this.permission
           },
           {
-            onSessionId: (id) => {
+            assistant: aiMsg,
+            signal: controller.signal,
+            getSessionId: () => this.currentSessionId,
+            onSessionCreated: (id) => {
               this.currentSessionId = id;
               setExperienceSessionId(id);
               // 新建会话：等后端返回 sessionId 后，把本次附件正式关联
               if (isNewSession && sentAttachments.length > 0) {
-                this.mergeSessionAttachments(id, sentAttachments);
+                msgs.mergeSessionAttachments(id, sentAttachments);
               }
               // P5-12-2：新任务一建立就在侧栏点亮运行态，不用等列表接口回来
               this.markSessionRunState(id, 'RUNNING');
               this.loadSessions();
             },
-            // 第六十八批 A3：本轮 id 用于「撤回本轮」文件改动
-            onTurnId: (turnId) => {
-              aiMsg.turnId = turnId;
-            },
-            // P5-10：记下运行 id，连接断了可以凭它续上这一轮
-            onRunId: (runId) => {
-              stream.setRunId(runId);
-              markExperienceRun(runId, this.currentSessionId);
-            },
-            onThinking: (thought) => {
-              thinkingThrottle.push(thought);
-            },
-            onSources: (sources) => {
-              aiMsg.sources = sources;
-            },
-            // Agent 提交/更新任务计划：同一轮内覆盖最新的计划快照
-            onPlan: (plan) => {
-              aiMsg.plan = plan;
-              // 同时记到 store 级别：即使消息数组被刷新替换，计划面板仍能实时显示
-              stream.setPlan(plan);
-            },
-            // 危险工具执行前挂起：把审批项挂到当前会话，切换会话时互不干扰
-            onApprovalRequired: (req) => {
-              useApprovalStore().request(req, this.currentSessionId);
-              // P5-12-2：侧栏状态点同步成「待审批」，和审批卡片一致
-              this.markSessionRunState(this.currentSessionId, 'WAITING_APPROVAL');
-            },
-            // 审批被处理（用户点击 / 超时 / 停止会话）：标记为 resolved，卡片切到"已处理"态并给叉号
-            onApprovalResolved: (approvalId, decision, source, batchId) => {
-              // P5-10-2：通知追踪页刷新审批历史（resolve 内部已自增 approvalRevision）
-              useApprovalStore().resolve(approvalId, decision, source, batchId);
-              // P5-12-2：处理完就回到运行中，终态由本轮收尾统一落
-              this.markSessionRunState(this.currentSessionId, 'RUNNING');
-            },
-            // P7-06：agent 暂停等用户回答决策询问
-            onUserQuestion: (question) => {
-              this.handleUserQuestion(question);
-            },
-            //同一文件被多次改动时只保留最新一条，避免面板里重复堆叠
-            onFileChange: (change: FileChange) => {
-              if (!aiMsg.changes) aiMsg.changes = [];
-              const idx = aiMsg.changes.findIndex((c) => c.path === change.path);
-              if (idx >= 0) aiMsg.changes[idx] = change;
-              else aiMsg.changes.push(change);
-              this.markLiveStage('modify');
-            },
-            onToolCall: (tool, args) => {
-              aiMsg.tools.push({ name: tool, args, status: 'running', startedAt: Date.now() } as ToolInvocation);
-              const stage = stageForTool(tool, !!stream.liveStageMarks.modify);
-              if (stage) this.markLiveStage(stage);
-            },
-            onToolResult: (tool, data) => {
-              const target =
-                [...aiMsg.tools].reverse().find((t) => t.name === tool && t.status === 'running') ||
-                aiMsg.tools[aiMsg.tools.length - 1];
-              if (target) {
-                target.status = data.success ? 'success' : 'error';
-                target.result = data.content;
-                target.error = data.error;
-                target.costMs = data.costMs;
-              }
-            },
-            onContent: (full) => {
-              contentThrottle.push(full);
-            },
-            onCompletion: (completion) => {
-              aiMsg.completion = completion;
-            },
-            onDiagnostics: (diagnostics) => {
-              aiMsg.diagnostics = diagnostics;
-              this.markLiveStage('verify');
-            },
-            onVerify: (verify) => {
-              aiMsg.verify = verify;
-              this.markLiveStage('verify');
-            },
-            // P5-10-3：每轮实时预算进度；旧后端不会发 usage 时保持 null 降级展示
-            onUsage: (usage) => {
-              stream.setBudget(usage);
-              // 气泡上展示本轮用量：usage 是 Run 累计值，取最新一次即可
-              aiMsg.usage = {
-                promptTokens: usage.promptTokens,
-                completionTokens: usage.completionTokens,
-                totalTokens: usage.totalTokens
-              };
-            },
-            onDone: () => {
-              // 先提交最后一段文本，再切到完成态：避免合帧丢掉结尾或最后一帧仍是流式渲染
-              flushStreamedText();
-              this.markLiveStage('summarize');
-              aiMsg.streaming = false;
-              stream.finish();
-              // P7-06：Run 已结束，等待中的询问不可能再被回答（超时/取消后后端会拉回 RUNNING）
-              useQuestionStore().clear();
-              // 思考内容保留：完成后折叠成「思考过程」入口，切回会话也仍能看到
-            },
-            onError: (message) => {
-              flushStreamedText();
-              aiMsg.streaming = false;
-              aiMsg.failed = true;
-              stream.finish();
-              // P7-06：Run 已失败，残留的询问卡片不再可用
-              useQuestionStore().clear();
-              // 只记失败原因，不覆盖已经流出来的半截回答
-              aiMsg.errorText = message || '这一轮没有完成';
-            }
-          },
-          controller.signal
-        );
-        // 流正常结束（无论是否收到 done）先把合帧中的最后一段提交出去
-        flushStreamedText();
-        // P5-10：流先结束了却没收到 done（后端收尾前连接被掐断）——按 runId 把这一轮补完
-        if (aiMsg.streaming && !controller.signal.aborted) {
-          if (stream.activeRunId != null) {
-            await this.recoverRun(stream.activeRunId, aiMsg);
-          } else {
-            aiMsg.streaming = false;
-            aiMsg.failed = true;
-            aiMsg.errorText = '连接提前结束了，请稍后再试';
-            stream.finish();
+            onSessionState: (state) => this.markSessionRunState(this.currentSessionId, state),
+            markStage: (key) => this.markLiveStage(key),
+            recoverRun: (runId, target) => this.recoverRun(runId, target)
           }
-        }
-      } catch (e) {
-        flushStreamedText();
-        aiMsg.streaming = false;
-        if (controller.signal.aborted) {
-          // 用户主动停止：保留已生成的部分，不标成失败
-          aiMsg.stopped = true;
-          stream.finish();
-          if (!aiMsg.content) aiMsg.content = '（已停止生成）';
-        } else if (stream.activeRunId != null) {
-          // P5-10：连接断了但后端还在跑——按 runId 续上已生成内容和后续输出
-          await this.recoverRun(stream.activeRunId, aiMsg);
-        } else {
-          aiMsg.failed = true;
-          stream.finish();
-          const raw = (e as Error).message || '';
-          // 浏览器网络层错误只会说 "Failed to fetch"，对普通用户没有意义
-          aiMsg.errorText = /failed to fetch|networkerror|load failed/i.test(raw)
-            ? '网络连接中断了'
-            : raw || '这一轮没有完成';
-        }
+        );
       } finally {
-        flushStreamedText();
         // 成功、失败、主动停止都记一次耗时；完成后的折叠摘要和执行轨迹共用这个值
         aiMsg.durationMs = Date.now() - startedAt;
         if (streamSession.isActive(controller)) streamSession.release(controller);

@@ -824,9 +824,10 @@ mcp/               MCP 适配器
 
 ```text
 api/          sse.ts（SSE 协议解析 + 建连/鉴权） + agent.ts（REST）
-services/     streamService（事件归一化）/ streamSession（中断句柄 + 恢复代际）/ runRecovery（事件折叠）
-stores/       chat（会话与消息 facade）/ stream / approvals / question / fileChanges
-composables/  useChatStream / useRecovery / useVirtualList（规划中，尚未拆出）
+services/     streamService（事件归一化）/ streamSession（中断句柄 + 恢复代际）/ runRecovery（事件折叠）/ sendMessageService（发送与流式收尾编排）
+stores/       chat（会话与兼容 facade）/ messages / stream / approvals / question / fileChanges
+utils/        taskStages（阶段时间线与失败分级纯函数）
+composables/  useVirtualMessages（消息虚拟窗口）；其余交互仍在 ChatView
 views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 ```
 
@@ -854,7 +855,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | **R4a 循环与流接缝** ✅ 2026-11-21 | `LoopGuard` 统一五组无进展计数与分级 nudge（P7-08）；`StreamPublisher` 统一流式调用与预算 | 全量测试绿；重复调用先 nudge、超过自救窗口才停止（有测试） | 保留旧 streamChat 调用 |
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
-| **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
+| **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分（含 messages）+ 发送编排 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
 | **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
@@ -1011,6 +1012,15 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - 测试适配：审批用例改为直接写入 `useApprovalStore().pendingApprovals`（facade getter 只读）；其余断言仍走 `chat.xxx`。
 - 前端测试：**112 tests / 0 failures**；`vue-tsc + vite build` 通过。
 - **未迁移项（如实记录）**：`messages` / `sessions` / 发送编排仍在 `chat.ts`。`sendMessage` 同时驱动流、计划、审批、询问、文件变更与侧栏运行态，单独拆 messages store 需要先拆发送编排（composables/useChatStream），否则只是把 `this` 换成跨 store 调用，收益有限、回归风险高；留到 R6c 或 R7 前处理。
+
+#### R6c messages 与发送编排拆分（2026-11-21）
+
+- 新增 `stores/messages.ts`：承载 `messages` / `messagesLoading` / `loadError` / `sessionAttachments`，动作 `reset` / `setHistory` / `appendUser` / `appendHint` / `beginAssistant` / `truncateFrom` / `mergeSessionAttachments` / `clearAttachments`；`parseTrace` 与 `toUiMessage` 一并迁入。
+- 新增 `services/sendMessageService.ts`：`sendChatMessage(params, deps)` 接管原 `sendMessage` 的流式编排——帧合并、`StreamHooks` 全量事件映射、停止/失败的收尾、以及「流提前结束但后端仍在跑」的按 runId 恢复；`chat.sendMessage` 只做参数校验、消息落位、`isProcessing` / 耗时 / 侧栏状态点 / 审查流刷新等 store 簿记。
+- 阶段时间线与失败分级的纯函数（`TASK_STAGES` / `stageForTool` / `buildStageTimeline` / `classifyFailure`）移到 `utils/taskStages.ts`，由 `stores/chat` 原样 re-export，避免 store ↔ service 循环依赖；ChatView / ChatMessage / 测试导入路径不变。
+- 兼容性：`useChatStore` 继续以 getter 暴露 `messages` / `messagesLoading` / `loadError` / `sessionAttachments`，视图零改动；`focusMessageId` 仍是可写 state（搜索结果定位需要）。`chat.messages.push(...)`、`chat.sessionAttachments[id]` 等只读访问行为不变。
+- 前端测试：**112 tests / 0 failures**；`vue-tsc + vite build` 通过。
+- 剩余：`sessions` 与会话 CRUD 仍在 `chat.ts`（属会话域，下一步可独立拆出）；ChatView 内仍有较多交互编排。
 
 
 
