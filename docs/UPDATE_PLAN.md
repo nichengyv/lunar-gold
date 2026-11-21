@@ -1046,7 +1046,16 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **验证**：新增 `RunEventStoreTest` 4 例（写入/读回/缺失损坏/超限）、`AgentRunServiceTest` 3 例（可续跑判定、续跑清错、普通失败拒绝）、`ScriptedAgentLoopTest` 2 例（轮末断点内容、续跑不重建历史）；前端新增「继续执行」按钮用例。后端全量 **485 tests / 0 failures / 17 skipped**；前端 **112 tests / 0 failures**；`vue-tsc + vite build` 通过。
 - **真实崩溃续跑 E2E**（2026-11-21 通过）：`scripts/resume-e2e.ps1` + `scripts/fake-openai-server.mjs`，用 desktop 真后端 + 内嵌 PG + 假 OpenAI 流式服务，流程为：模型返回 `write_file` → 落 `CHECKPOINT`（round=1）→ **`taskkill /T /F` 真实杀掉后端进程树** → 同一数据目录重启（断言 `FAILED / PROCESS_RESTARTED / resumable=true`）→ `POST /runs/{id}/resume` → `SUCCEEDED`。断言 `note.txt` 内容严格一致、续跑模型请求里 `role=tool` 恰 1 条、原始用户 prompt 与 `write_file` 参数命中、SSE 含最终回答。运行命令：`powershell -ExecutionPolicy Bypass -File scripts\resume-e2e.ps1`。
 - **E2E 暴露并修复的回归**：R7b2 新增的两个 `@PublicApi` 端点未登记到 `PublicApiCatalog.DECLARED`，应用启动自检直接失败（既有单测不启动 Spring，故漏网）。已补齐清单与契约快照，并新增反射扫描 controller 的漂移测试 `PublicApiContractTest.代码里每个PublicApi注解都必须登记到清单`，防止再次出现。
-- **未验证项**：未用真实模型验证续跑后的任务完成率；未补 Playwright 真机用例；`write_file` 的 tool 结果本身只有「已写入文件」，写入内容断言落在同快照的 tool_calls 参数上。
+- **未验证项**：未用真实模型验证续跑后的任务完成率（runner 与预注册门禁见下一小节，真实数据仍待 Key）；未补 Playwright 真机用例；`write_file` 的 tool 结果本身只有「已写入文件」，写入内容断言落在同快照的 tool_calls 参数上。
+
+#### R7b-live 真实模型续跑完成率评测（2026-11-21，runner + 门禁已落地，真实数据未产出）
+
+- **预注册阈值（先于数据，调整需单独提交并说明理由）**：`LongSessionResumeGate` 固定——每层 ≥10 个「已注入中断并完成续跑」的配对 case；续跑成功率 Wilson 95% 置信下限 ≥0.50；续跑成功率相对同一批直接执行下降 ≤10pp；续跑臂 provider 失败率 ≤5%；续跑 token 中位数 / 直接执行 ≤1.50；耗时中位数 / 直接执行 ≤2.00。耗时阈值更宽是因为真实重启有启动开销；token 更严格，因为中断发生在模型调用前，理论上不应重放已落地的轮次。
+- **续跑 A/B 机制**：`P7_02_RESUME=on` 时，每个 case 先跑「直接执行」，再在全新工作区跑「续跑臂」。续跑臂由 `ResumeCrashClient` 在第 1 个 `CHECKPOINT` 落库后的下一次模型调用前抛出模拟崩溃，`Capture.onError` 把 Run 落成 `FAILED / PROCESS_RESTARTED`，随后走生产链路 `AgentRunService.resumeInterrupted` + `ReActAgentService.resume` 继续；工件与 coverage 判定完全复用直接执行的 `evaluate(...)`，不另写一套。
+- **报告**：`report.resume.gate` 逐层输出 attempts / cases / notApplicable / unmatched / 续跑与直接执行成功率及下降幅度 / Wilson 下限 / provider 失败率 / token 与耗时比值 / reasons；未注入中断的 case 记 `notApplicable`，不计入成功率，避免把「没测到」算成「通过」。配置项 `resume_mode`、`resume_interrupt_point` 一并落盘。
+- **运行方式（需自行提供 Key，会产生真实费用）**：设置 `P7_02_RESUME=on`、`P7_02_LEVELS=L1,L2,L3`、`P7_02_REPEATS=...`，其余沿用 `LUNARGOLD_LIVE_*`；报告写入 `eval/runtime-reports/`。
+- **离线验证**：新增 `LongSessionResumeGateTest` 5 例（通过、下降 >10pp、未注入不计入、provider/token 触发、缺少配对记 unmatched）；后端全量 **490 tests / 0 failures / 17 skipped**。
+- **未验证项（必须如实标注）**：当前环境未设置 `LUNARGOLD_LIVE_API_KEY`，**未产生任何真实模型续跑完成率数字**；不得引用离线样例或默认值冒充结果。阈值已预注册，提供 Key 后按上述命令执行即可产出。
 
 
 

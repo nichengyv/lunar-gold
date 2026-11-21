@@ -1,5 +1,6 @@
 package com.capsule.agentkey.eval.longsession;
 
+import com.capsule.agentkey.agent.run.RunCheckpoint;
 import com.capsule.agentkey.client.AgentClient;
 import com.capsule.agentkey.client.AgentStreamCallback;
 import com.capsule.agentkey.client.ProviderCircuitBreaker;
@@ -94,6 +95,12 @@ import static org.mockito.Mockito.when;
 /**
  * P7-02 真实模型长会话基线。缺 Key 默认跳过；每次真实执行都必须显式设置环境变量。
  * 数据集、usage、工具覆盖和失败归因均落盘，不用脚本模型或字符估算冒充结果。
+ *
+ * <p>R7b live 验证：设置 {@code P7_02_RESUME=on} 后，每个 case 会先跑一次「直接执行」，
+ * 再在全新工作区跑一次「首个 CHECKPOINT 写入后模拟进程崩溃 → 显式续跑」。
+ * 续跑中断点由 {@link ResumeCrashClient} 在下一轮模型调用前抛出，语义等价于进程重启：
+ * Run 落为 FAILED/PROCESS_RESTARTED，必须走 {@code resumeInterrupted} 才能继续。
+ * 完成率与 token/耗时下限由 {@link LongSessionResumeGate} 预注册阈值判定。
  */
 public class LongSessionLiveRunner {
 
@@ -113,6 +120,8 @@ public class LongSessionLiveRunner {
     /** R7a：上一版 n≥10 基线；存在时才做 token/耗时/成功率退化比较 */
     static final Path BASELINE_PATH = Paths.get("eval", "baselines", "long-session-baseline.json");
     static final String BASELINE_ENV = "P7_02_BASELINE";
+    /** R7b live 验证：续跑 A/B 开关；默认关闭，开启后同一批 case 同时跑直接执行与中断续跑 */
+    static final String RESUME_ENV = "P7_02_RESUME";
 
     private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
@@ -138,6 +147,7 @@ public class LongSessionLiveRunner {
         boolean planInjection = "on".equalsIgnoreCase(envOr(PLAN_INJECTION_ENV, "off"));
         boolean condense = "on".equalsIgnoreCase(envOr(CONDENSE_ENV, "off"));
         int condenseWindowChars = Math.max(4_000, intEnv(CONDENSE_WINDOW_ENV, 120_000));
+        boolean resumeMode = "on".equalsIgnoreCase(envOr(RESUME_ENV, "off"));
         Set<String> levels = parseLevels(envOr(LEVELS_ENV, "L1"));
 
         List<LongSessionDataset.Spec> specs = new ArrayList<>(LongSessionDataset.loadAll());
@@ -151,17 +161,30 @@ public class LongSessionLiveRunner {
         assertNoPlaceholders(specs);
 
         List<RunOutcome> outcomes = new ArrayList<>();
+        List<RunOutcome> resumeOutcomes = new ArrayList<>();
         for (int repeat = 1; repeat <= repeats; repeat++) {
             for (LongSessionDataset.Spec spec : specs) {
                 System.out.printf("[P7-02] start case=%s level=%s repeat=%d/%d model=%s askUser=%s%n",
                         spec.id(), spec.level(), repeat, repeats, model, askUser ? "on" : "off");
                 RunOutcome outcome = runOne(apiKey, baseUrl, model, spec, repeat, askUser, maxSeconds,
-                        planInjection, condense, condenseWindowChars);
+                        planInjection, condense, condenseWindowChars, false);
                 outcomes.add(outcome);
                 System.out.printf("[P7-02] done case=%s level=%s repeat=%d success=%s attribution=%s calls=%d tokens=%d wall=%dms%n",
                         spec.id(), spec.level(), repeat, outcome.success(), outcome.attribution(),
                         outcome.data().path("modelCalls").asInt(), outcome.data().path("totalTokens").asLong(),
                         outcome.data().path("wallMs").asLong());
+                if (resumeMode) {
+                    System.out.printf("[P7-02] resume-arm start case=%s level=%s repeat=%d%n",
+                            spec.id(), spec.level(), repeat);
+                    RunOutcome resumed = runOne(apiKey, baseUrl, model, spec, repeat, askUser, maxSeconds,
+                            planInjection, condense, condenseWindowChars, true);
+                    resumeOutcomes.add(resumed);
+                    System.out.printf("[P7-02] resume-arm done case=%s level=%s repeat=%d success=%s injected=%s attribution=%s tokens=%d wall=%dms%n",
+                            spec.id(), spec.level(), repeat, resumed.success(),
+                            resumed.data().path("resumeInjected").asBoolean(), resumed.attribution(),
+                            resumed.data().path("totalTokens").asLong(),
+                            resumed.data().path("wallMs").asLong());
+                }
             }
         }
 
@@ -171,6 +194,19 @@ public class LongSessionLiveRunner {
         report.put("context_plan_injection", planInjection ? "on" : "off");
         report.put("context_condense", condense ? "on" : "off");
         report.put("context_condense_window_chars", condenseWindowChars);
+        report.put("resume_mode", resumeMode ? "on" : "off");
+        if (resumeMode) {
+            report.put("stage", "p7-02-long-session-resume-ab");
+            report.put("resume_interrupt_point", "first_checkpoint_then_next_model_call");
+            ObjectNode resume = report.putObject("resume");
+            resume.set("gate", LongSessionResumeGate.evaluate(
+                    outcomes.stream().map(RunOutcome::data).toList(),
+                    resumeOutcomes.stream().map(RunOutcome::data).toList()));
+            ObjectNode decision = (ObjectNode) report.path("decision");
+            decision.put("resumeGatePassed", resume.path("gate").path("pass").asBoolean());
+            decision.put("summary", decision.path("summary").asText()
+                    + "；续跑门禁：" + resume.path("gate").path("reasons"));
+        }
         Path path = writeReport(report);
         System.out.println("P7-02 报告已写入: " + path.toAbsolutePath());
         System.out.println("结论: " + report.path("decision").path("summary").asText());
@@ -180,7 +216,8 @@ public class LongSessionLiveRunner {
     private static RunOutcome runOne(String apiKey, String baseUrl, String model,
                                      LongSessionDataset.Spec spec, int repeat,
                                      boolean askUserEnabled, long maxSeconds,
-                                     boolean planInjection, boolean condense, int condenseWindowChars) {
+                                     boolean planInjection, boolean condense, int condenseWindowChars,
+                                     boolean resumeMode) {
         long started = System.nanoTime();
         Metrics metrics = new Metrics();
         metrics.firstChunkMs = -1;
@@ -212,10 +249,16 @@ public class LongSessionLiveRunner {
 
             AskUserQuestionTool askTool = askUserEnabled ? new AskUserQuestionTool() : null;
             if (askUserEnabled) tools.register(new AskUserQuestionSchemaTool());
+            // R1/R5：计划必须真正落库，否则软注入只能读到内存快照，无法验证单一事实源。
+            // R7b：断点/续跑也需要真实 Run 服务，因此先于 agent 构造。
+            RunHarness runs = new RunHarness();
             CountingAgentClient client = new CountingAgentClient(new SpringAiAgentClient(
                     new EvalChatModelConfig(baseUrl), new ProviderCircuitBreaker(5, 30_000)), metrics);
+            // R7b live：续跑臂在首个断点后的下一次模型调用前抛异常，等价于进程崩溃
+            ResumeCrashClient resumeCrash = resumeMode ? new ResumeCrashClient(client, runs) : null;
             ToolApprovalRegistry approvals = new ToolApprovalRegistry();
-            ReActAgentService agent = new ReActAgentService(client, tools, mock(DocumentService.class),
+            ReActAgentService agent = new ReActAgentService(resumeCrash == null ? client : resumeCrash,
+                    tools, mock(DocumentService.class),
                     projectService, fileService, mock(McpToolBridge.class), ruleRepo, approvals,
                     new ScopeConstraintService(), new SessionPermissionTracker(),
                     new PromptCatalog(new MockEnvironment()),
@@ -231,8 +274,6 @@ public class LongSessionLiveRunner {
             ReflectionTestUtils.setField(agent, "condenseEnabled", condense);
             ReflectionTestUtils.setField(agent, "condenseWindowChars", condenseWindowChars);
             if (askTool != null) ReflectionTestUtils.setField(agent, "askUserQuestionTool", askTool);
-            // R1/R5：计划必须真正落库，否则软注入只能读到内存快照，无法验证单一事实源
-            RunHarness runs = new RunHarness();
             ReflectionTestUtils.setField(agent, "agentRunService", runs.service());
             ReflectionTestUtils.setField(agent, "runEventStore", runs.store());
 
@@ -258,13 +299,23 @@ public class LongSessionLiveRunner {
                     AgentRun run = runs.service.create(USER_ID, SESSION_ID, PROJECT_ID, null,
                             MAPPER.writeValueAsString(Map.of("prompt", prompt))).run();
                     runs.service.start(run.getId());
+                    String turnId = "p7-02-" + LongSessionDataset.baseId(spec.id())
+                            + "-r" + LongSessionDataset.replicaIndex(spec.id())
+                            + "-" + repeat + "-" + (turnIndex + 1);
+                    // R7b live：每个 turn 重新布防，直到本 case 的首个断点被注入
+                    if (resumeCrash != null && !resumeCrash.injected()) {
+                        resumeCrash.arm(run.getId());
+                    }
                     Capture capture = new Capture(metrics, runs.service, approvals, askTool, run.getId(), started);
                     agent.execute(apiKey, policy, prompt, List.copyOf(history.subList(0, history.size() - 1)),
                             USER_ID, PROJECT_ID, run.getId(), SESSION_ID,
-                            "p7-02-" + LongSessionDataset.baseId(spec.id())
-                                    + "-r" + LongSessionDataset.replicaIndex(spec.id())
-                                    + "-" + repeat + "-" + (turnIndex + 1),
+                            turnId,
                             false, "", "", contextSummary, "", new AtomicBoolean(false), capture);
+                    if (resumeCrash != null && resumeCrash.wasInjectedFor(run.getId())) {
+                        metrics.resumeTurn = turnIndex + 1;
+                        capture = resumeAfterCrash(apiKey, policy, runs, agent, run, turnId, prompt,
+                                capture, metrics, approvals, askTool, started);
+                    }
                     history.add(message(ChatMessage.MessageRole.ASSISTANT, capture.answer.toString()));
                     metrics.answers.add(capture.answer.toString());
                     // P7-04：turn 成功执行后，记录本 turn 的文件区间
@@ -300,6 +351,44 @@ public class LongSessionLiveRunner {
             if (workspace != null) {
                 try { LongSessionDataset.deleteRecursively(workspace); } catch (IOException ignored) { }
             }
+        }
+    }
+
+    /**
+     * R7b live：把「断点后模拟崩溃」的 Run 显式续跑。
+     *
+     * <p>真实崩溃路径是：进程退出 → 重启扫描把 RUNNING 标为 FAILED/PROCESS_RESTARTED →
+     * 用户点继续执行。这里在同一进程内复现该状态迁移（Capture.onError 把模拟崩溃落成
+     * PROCESS_RESTARTED），再走 {@link AgentRunService#resumeInterrupted} 与
+     * {@link ReActAgentService#resume}，确保测的是生产续跑链路。
+     */
+    private static Capture resumeAfterCrash(String apiKey, AgentPolicy policy, RunHarness runs,
+                                            ReActAgentService agent, AgentRun run, String turnId,
+                                            String prompt, Capture crashed, Metrics metrics,
+                                            ToolApprovalRegistry approvals, AskUserQuestionTool askTool,
+                                            long started) {
+        metrics.resumeInjected = true;
+        RunCheckpoint checkpoint = runs.service.loadCheckpoint(run.getId()).orElse(null);
+        if (checkpoint == null) {
+            metrics.errors.add("simulated_crash_without_checkpoint");
+            return crashed;
+        }
+        metrics.crashRound = checkpoint.getRound();
+        try {
+            if (!AgentRunService.isResumable(runs.service.findById(run.getId()).orElseThrow())) {
+                metrics.errors.add("simulated_crash_not_resumable");
+                return crashed;
+            }
+            runs.service.resumeInterrupted(run.getId());
+            Capture resumed = new Capture(metrics, runs.service, approvals, askTool, run.getId(), started);
+            agent.resume(apiKey, policy, run.getId(), USER_ID, PROJECT_ID, SESSION_ID, turnId, prompt,
+                    checkpoint, new AtomicBoolean(false), resumed);
+            // 崩溃前已流出的文本与续跑文本属于同一轮回答，拼接后再进入历史与记忆探针
+            resumed.answer.insert(0, crashed.answer);
+            return resumed;
+        } catch (Exception e) {
+            metrics.errors.add("resume_error: " + e.getMessage());
+            return crashed;
         }
     }
 
@@ -637,6 +726,10 @@ public class LongSessionLiveRunner {
         long firstChunkMs;
         boolean memoryProbePassed;
         boolean previousToolFailed;
+        /** R7b live：续跑臂是否真的在断点后中断并完成显式续跑 */
+        boolean resumeInjected;
+        int resumeTurn;
+        int crashRound;
         final Set<String> signatures = new HashSet<>();
         final List<String> errors = new ArrayList<>();
         final List<String> answers = new ArrayList<>();
@@ -685,6 +778,11 @@ public class LongSessionLiveRunner {
             node.put("memoryProbePassed", memoryProbePassed);
             node.put("askUserQuestions", askUserQuestions);
             node.put("fileChanges", fileChanges);
+            node.put("resumeInjected", resumeInjected);
+            if (resumeInjected) {
+                node.put("resumeTurn", resumeTurn);
+                node.put("crashRound", crashRound);
+            }
             node.put("wallMs", wallMs);
             if (firstChunkMs >= 0) node.put("firstChunkMs", firstChunkMs); else node.putNull("firstChunkMs");
             node.set("completionReasons", MAPPER.valueToTree(completionReasons));
@@ -816,10 +914,77 @@ public class LongSessionLiveRunner {
         }
         @Override public void onError(Throwable error) {
             failure = error;
-            metrics.errors.add(String.valueOf(error.getMessage()));
+            // R7b live：模拟崩溃不是执行失败，按真实重启后的状态落库，才能被显式续跑
+            boolean simulatedCrash = error instanceof SimulatedProcessCrash;
+            if (!simulatedCrash) {
+                metrics.errors.add(String.valueOf(error.getMessage()));
+            }
             AgentRun current = runs.findById(runId).orElseThrow();
-            if (!AgentRun.isTerminal(current.getState())) runs.fail(runId, "P7_02_ERROR", error.getMessage());
+            if (!AgentRun.isTerminal(current.getState())) {
+                runs.fail(runId, simulatedCrash ? "PROCESS_RESTARTED" : "P7_02_ERROR", error.getMessage());
+            }
             metrics.runStates.add(runs.findById(runId).orElseThrow().getState().name());
+        }
+    }
+
+    /**
+     * R7b live：在首个断点落库后的下一次模型调用前抛异常，模拟进程崩溃。
+     *
+     * <p>断点只在轮末写入；等到下一次 streamChat 才抛，保证中断点与真实进程退出一致：
+     * 上一轮的工具副作用已全部落地，续跑不会再重放这一轮。
+     */
+    private static final class ResumeCrashClient implements AgentClient {
+        private final AgentClient delegate;
+        private final RunHarness runs;
+        private Long armedRunId;
+        private Long injectedRunId;
+
+        private ResumeCrashClient(AgentClient delegate, RunHarness runs) {
+            this.delegate = delegate;
+            this.runs = runs;
+        }
+
+        private void arm(long runId) {
+            this.armedRunId = runId;
+        }
+
+        private boolean injected() {
+            return injectedRunId != null;
+        }
+
+        private boolean wasInjectedFor(long runId) {
+            return injectedRunId != null && injectedRunId.longValue() == runId;
+        }
+
+        @Override
+        public StreamResult streamChat(String apiKey, String model, List<ObjectNode> messages,
+                                       List<ToolCallback> toolCallbacks, String memorySummary,
+                                       AgentStreamCallback callback) {
+            Long runId = armedRunId;
+            if (runId != null && injectedRunId == null
+                    && runs.service.loadCheckpoint(runId).isPresent()) {
+                injectedRunId = runId;
+                armedRunId = null;
+                throw new SimulatedProcessCrash("simulated process crash after checkpoint: runId=" + runId);
+            }
+            return delegate.streamChat(apiKey, model, messages, toolCallbacks, memorySummary, callback);
+        }
+
+        @Override
+        public String callSync(String apiKey, String model, List<ObjectNode> messages) {
+            return delegate.callSync(apiKey, model, messages);
+        }
+
+        @Override
+        public String callVision(String apiKey, String model, String instruction, List<String> imageDataUrls) {
+            return delegate.callVision(apiKey, model, instruction, imageDataUrls);
+        }
+    }
+
+    /** 仅用于续跑评测内部标记；生产代码不会出现 */
+    private static final class SimulatedProcessCrash extends RuntimeException {
+        private SimulatedProcessCrash(String message) {
+            super(message);
         }
     }
 
@@ -899,6 +1064,15 @@ public class LongSessionLiveRunner {
                     return 0;
                 }
                 run.setPlanJson(inv.getArgument(1));
+                return 1;
+            });
+            // R7b：断点落库；不 mock 时 updateCheckpointJson 返回 0，续跑评测会拿不到断点
+            when(runRepo.updateCheckpointJson(anyLong(), anyString())).thenAnswer(inv -> {
+                AgentRun run = runs.get(inv.getArgument(0));
+                if (run == null) {
+                    return 0;
+                }
+                run.setCheckpointJson(inv.getArgument(1));
                 return 1;
             });
             when(eventRepo.findMaxSeqByRunId(anyLong())).thenAnswer(inv -> {
