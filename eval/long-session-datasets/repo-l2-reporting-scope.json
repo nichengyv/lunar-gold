@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "repo-l2-reporting-scope",
+  "level": "L2",
+  "description": "真实工程形态快照：报表模块三个周期包共 21 个格式化器修正注册顺序，中途切换 scope 并走审批与统一审查。",
+  "replicas": 10,
+  "minModelCalls": 40,
+  "reasoning": "DEEP",
+  "permission": "MANUAL",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# 报表模块跨包修复\ndaily/weekly/monthly 三个包共 21 个 ReportNNFormatter 的 priority() 均错误返回 -1，应返回其注册顺序编号（1 至 21）。\n全部修正后将 src/main/java/com/shop/reporting/ReportRegistry.java 的 FORMATTER_COUNT 从 0 改为 21。\n各文件先读后改；审批通过不等于审查接受，最终变更还需统一审查。\n"
+      },
+      {
+        "path": "src/main/java/com/shop/reporting/Period.java",
+        "content": "package com.shop.reporting;\n\npublic enum Period {\n    DAILY, WEEKLY, MONTHLY\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/reporting/ReportRegistry.java",
+        "content": "package com.shop.reporting;\n\npublic final class ReportRegistry {\n    public static final int FORMATTER_COUNT = 0;\n}\n"
+      }
+    ],
+    "series": [
+      {
+        "start": 1,
+        "count": 7,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/reporting/daily/Report{index2}Formatter.java",
+        "contentTemplate": "package com.shop.reporting.daily;\n\npublic final class Report{index2}Formatter {\n    public int priority() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 8,
+        "count": 7,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/reporting/weekly/Report{index2}Formatter.java",
+        "contentTemplate": "package com.shop.reporting.weekly;\n\npublic final class Report{index2}Formatter {\n    public int priority() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 15,
+        "count": 7,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/reporting/monthly/Report{index2}Formatter.java",
+        "contentTemplate": "package com.shop.reporting.monthly;\n\npublic final class Report{index2}Formatter {\n    public int priority() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      }
+    ]
+  },
+  "success": {
+    "fileContains": {
+      "src/main/java/com/shop/reporting/ReportRegistry.java": "FORMATTER_COUNT = 21"
+    }
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "approvalScope": "APPROVAL_OR_SCOPE",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 2,
+    "minToolFailures": 1,
+    "minRecoveredTools": 0,
+    "minApprovals": 1,
+    "minScopeChanges": 1,
+    "minScopeRejections": 1,
+    "minReviewAccepted": 1,
+    "minExecuteTurns": 3,
+    "minSummaryInjectedCalls": 0,
+    "requireMemoryProbe": false
+  },
+  "memory": null,
+  "turns": [
+    {
+      "prompt": "开始报表模块跨包修复。先 update_plan，然后按 TASK.md 要求读取 src/main/java/com/shop/reporting/daily/Report01Formatter.java 做一次边界确认；若被 scope 拒绝，保留该真实错误并继续在允许范围内工作，不要反复尝试。逐个读取并修正 Report{first} 至 Report{last}。每次响应最多一个工具调用，写入审批由评测回调处理。",
+      "scope": "src/main/java/com/shop/reporting/daily",
+      "first": 1,
+      "last": 7
+    },
+    {
+      "prompt": "scope 切换到 weekly。根据已有进度更新计划，只处理 Report{first} 至 Report{last}；每个文件仍须先读后改，不要重复上一 turn 的文件。",
+      "scope": "src/main/java/com/shop/reporting/weekly",
+      "first": 8,
+      "last": 14
+    },
+    {
+      "prompt": "最后扩大 scope 到整个 reporting 目录。修正 monthly 的 Report{first} 至 Report{last}，再读取并修正 ReportRegistry.java。更新计划为真实完成状态；所有文件变更进入统一待审流，不要声称审批通过就等于审查接受。",
+      "scope": "src/main/java/com/shop/reporting",
+      "first": 15,
+      "last": 21
+    }
+  ]
+}

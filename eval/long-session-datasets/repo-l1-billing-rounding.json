@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "id": "repo-l1-billing-rounding",
+  "level": "L1",
+  "description": "真实工程形态快照：结算模块十个区域税率策略统一改为 Money.applyRate 并修复分位舍入，含过期入口失败恢复。",
+  "replicas": 10,
+  "minModelCalls": 20,
+  "reasoning": "DEEP",
+  "permission": "AUTO",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# 结算模块舍入修复\n旧入口 src/main/java/com/shop/billing/LegacyRateLoader.java 已删除，不要读取；路径失败后用 list_dir 定位真实文件。\n各区域税率策略直接做整数除法，导致分位被截断；统一改为调用 Money.applyRate(amountCents, 税率)。\nMoney.applyRate 必须使用 Math.round(amountCents * ratePercent / 100.0)。\n最后把 InvoiceRegistry 的 TAX_POLICY_COUNT 从 0 改为 10。\n每个文件先读后改，不得无变化重写。\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/Money.java",
+        "content": "package com.shop.billing;\n\npublic final class Money {\n    private Money() {\n    }\n\n    public static long applyRate(long amountCents, int ratePercent) {\n        return amountCents * ratePercent / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/InvoiceRegistry.java",
+        "content": "package com.shop.billing;\n\npublic final class InvoiceRegistry {\n    public static final int TAX_POLICY_COUNT = 0;\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/CnTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class CnTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 6 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/UsTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class UsTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 7 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/DeTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class DeTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 19 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/FrTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class FrTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 20 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/GbTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class GbTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 18 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/JpTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class JpTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 10 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/KrTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class KrTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 9 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/SgTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class SgTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 8 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/AuTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class AuTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 12 / 100;\n    }\n}\n"
+      },
+      {
+        "path": "src/main/java/com/shop/billing/tax/CaTaxPolicy.java",
+        "content": "package com.shop.billing.tax;\n\nimport com.shop.billing.Money;\n\npublic final class CaTaxPolicy {\n    public long taxOf(long amountCents) {\n        return amountCents * 5 / 100;\n    }\n}\n"
+      }
+    ],
+    "series": []
+  },
+  "success": {
+    "fileContains": {
+      "src/main/java/com/shop/billing/Money.java": "Math.round(amountCents * ratePercent / 100.0)",
+      "src/main/java/com/shop/billing/InvoiceRegistry.java": "TAX_POLICY_COUNT = 10",
+      "src/main/java/com/shop/billing/tax/CnTaxPolicy.java": "Money.applyRate(amountCents, 6)",
+      "src/main/java/com/shop/billing/tax/UsTaxPolicy.java": "Money.applyRate(amountCents, 7)",
+      "src/main/java/com/shop/billing/tax/DeTaxPolicy.java": "Money.applyRate(amountCents, 19)",
+      "src/main/java/com/shop/billing/tax/FrTaxPolicy.java": "Money.applyRate(amountCents, 20)",
+      "src/main/java/com/shop/billing/tax/GbTaxPolicy.java": "Money.applyRate(amountCents, 18)",
+      "src/main/java/com/shop/billing/tax/JpTaxPolicy.java": "Money.applyRate(amountCents, 10)",
+      "src/main/java/com/shop/billing/tax/KrTaxPolicy.java": "Money.applyRate(amountCents, 9)",
+      "src/main/java/com/shop/billing/tax/SgTaxPolicy.java": "Money.applyRate(amountCents, 8)",
+      "src/main/java/com/shop/billing/tax/AuTaxPolicy.java": "Money.applyRate(amountCents, 12)",
+      "src/main/java/com/shop/billing/tax/CaTaxPolicy.java": "Money.applyRate(amountCents, 5)"
+    }
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "toolRecovery": "TOOL_RECOVERY",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 2,
+    "minToolFailures": 1,
+    "minRecoveredTools": 1,
+    "minApprovals": 0,
+    "minScopeChanges": 0,
+    "minScopeRejections": 0,
+    "minReviewAccepted": 0,
+    "minExecuteTurns": 1,
+    "minSummaryInjectedCalls": 0,
+    "requireMemoryProbe": false
+  },
+  "memory": null,
+  "turns": [
+    {
+      "prompt": "按 TASK.md 修复结算模块分位舍入。先 update_plan 建立可追踪计划，再读取登记的 LegacyRateLoader.java；路径失败后用 list_dir 定位真实文件并继续，不要重复同一失败调用。逐个 read_file 后 edit_file：把十个区域策略改为调用 Money.applyRate，修正 Money.applyRate 的舍入，再把 InvoiceRegistry 的计数改为 10。执行中至少再 update_plan 一次，收口前把所有已完成步骤标为 completed。每次模型响应最多一个工具调用，不要做与交付无关的读写。",
+      "scope": "",
+      "first": 1,
+      "last": 10
+    }
+  ]
+}

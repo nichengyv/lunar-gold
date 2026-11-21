@@ -33,10 +33,40 @@ class LongSessionDatasetTest {
     void allThreeDatasetsLoadAndValidate() throws IOException {
         List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
         assertNotNull(specs, "loadAll() 不应返回 null");
-        assertEquals(3, specs.size(), "必须恰好 L1/L2/L3 三个数据集");
+        assertTrue(specs.size() >= LongSessionDataset.MIN_CASES_PER_LEVEL * 3,
+                () -> "展开后的 case 数不足：实际=" + specs.size());
 
         List<String> errors = LongSessionDataset.validate(specs);
         assertTrue(errors.isEmpty(), () -> "数据集校验发现错误：\n  - " + String.join("\n  - ", errors));
+    }
+
+    @Test
+    void everyLevelHasAtLeastTenCasesAndTwoBaseDatasets() throws IOException {
+        List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
+        for (String level : List.of("L1", "L2", "L3")) {
+            var selected = specs.stream().filter(s -> level.equals(s.level())).toList();
+            assertTrue(selected.size() >= LongSessionDataset.MIN_CASES_PER_LEVEL,
+                    () -> level + " 至少 " + LongSessionDataset.MIN_CASES_PER_LEVEL + " 个 case，实际=" + selected.size());
+            long bases = selected.stream().map(s -> LongSessionDataset.baseId(s.id())).distinct().count();
+            assertTrue(bases >= LongSessionDataset.MIN_BASE_DATASETS_PER_LEVEL,
+                    () -> level + " 至少 " + LongSessionDataset.MIN_BASE_DATASETS_PER_LEVEL + " 个独立数据集，实际=" + bases);
+            assertTrue(selected.stream().anyMatch(s -> LongSessionDataset.baseId(s.id()).startsWith("repo-")),
+                    () -> level + " 必须包含真实工程形态数据集（repo-*）");
+        }
+    }
+
+    @Test
+    void expandedReplicaIdsKeepBaseAndReplicaIndex() throws IOException {
+        List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
+        LongSessionDataset.Spec first = specs.get(0);
+        assertTrue(first.id().contains("#r01"), () -> "首条 case 应为 #r01，实际=" + first.id());
+        assertEquals(LongSessionDataset.baseId(first.id()) + "#r01", first.id());
+        assertTrue(LongSessionDataset.replicaIndex(first.id()) >= 1);
+
+        long replicas = specs.stream()
+                .filter(s -> LongSessionDataset.baseId(s.id()).equals(LongSessionDataset.baseId(first.id())))
+                .count();
+        assertEquals(first.replicas(), (int) replicas, "replicas 声明与实际展开数必须一致");
     }
 
     @Test
@@ -44,7 +74,7 @@ class LongSessionDatasetTest {
         List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
 
         var ids = specs.stream().map(LongSessionDataset.Spec::id).distinct().toList();
-        assertEquals(3, ids.size(), "数据集 id 必须唯一");
+        assertEquals(specs.size(), ids.size(), "展开后的 case id 必须唯一");
 
         var levels = specs.stream().map(LongSessionDataset.Spec::level).distinct().toList();
         assertTrue(levels.containsAll(List.of("L1", "L2", "L3")),
@@ -65,7 +95,7 @@ class LongSessionDatasetTest {
 
     @Test
     void l1PreRegisteredGates() throws IOException {
-        LongSessionDataset.Spec l1 = findByLevel("L1");
+        LongSessionDataset.Spec l1 = findBase("l1-single-module-refactor");
 
         // L1 应为单次 execute，至少 10 个独立交付断言
         assertEquals(1, l1.turns().size(), "L1 应为单次 execute");
@@ -82,7 +112,7 @@ class LongSessionDatasetTest {
 
     @Test
     void l2PreRegisteredGates() throws IOException {
-        LongSessionDataset.Spec l2 = findByLevel("L2");
+        LongSessionDataset.Spec l2 = findBase("l2-cross-file-scope-review");
 
         // L2 至少三次 execute 覆盖 scope 变化，至少 20 个独立交付断言
         assertTrue(l2.turns().size() >= 3, "L2 至少三次 execute");
@@ -108,7 +138,7 @@ class LongSessionDatasetTest {
 
     @Test
     void l3PreRegisteredGates() throws IOException {
-        LongSessionDataset.Spec l3 = findByLevel("L3");
+        LongSessionDataset.Spec l3 = findBase("l3-cumulative-history-memory");
 
         // L3 至少十次 execute，确保早期历史被裁剪；至少 50 个独立交付断言
         assertTrue(l3.turns().size() >= 10, "L3 至少十次 execute");
@@ -135,7 +165,7 @@ class LongSessionDatasetTest {
         List<LongSessionDataset.Spec> specs = LongSessionDataset.loadAll();
 
         for (LongSessionDataset.Spec spec : specs) {
-            Path workspace = tempDir.resolve(spec.level().toLowerCase());
+            Path workspace = tempDir.resolve(spec.id().replace('#', '-'));
             LongSessionDataset.materialize(spec, workspace);
 
             // 物化后每个 fixture 文件必须存在且内容正确
@@ -188,7 +218,7 @@ class LongSessionDatasetTest {
 
     @Test
     void turnPromptSubstitutesFirstAndLast() throws IOException {
-        LongSessionDataset.Spec l2 = findByLevel("L2");
+        LongSessionDataset.Spec l2 = findBase("l2-cross-file-scope-review");
 
         String first = LongSessionDataset.render(l2.turns().get(0));
         assertTrue(first.contains("Rule1 至 Rule8"), () -> "首 turn 未替换区间占位符：" + first);
@@ -203,9 +233,9 @@ class LongSessionDatasetTest {
 
     @Test
     void failureAttributionHintsCoverAllRequiredKeys() throws IOException {
-        LongSessionDataset.Spec l1 = findByLevel("L1");
-        LongSessionDataset.Spec l2 = findByLevel("L2");
-        LongSessionDataset.Spec l3 = findByLevel("L3");
+        LongSessionDataset.Spec l1 = findBase("l1-single-module-refactor");
+        LongSessionDataset.Spec l2 = findBase("l2-cross-file-scope-review");
+        LongSessionDataset.Spec l3 = findBase("l3-cumulative-history-memory");
 
         // 每个数据集必须包含 5+ 预注册的失败归因 hint
         assertTrue(l1.failureAttribution().size() >= 5, "L1 至少 5 个失败归因 hint");
@@ -240,10 +270,10 @@ class LongSessionDatasetTest {
 
     // —— helper ——
 
-    private LongSessionDataset.Spec findByLevel(String level) throws IOException {
+    private LongSessionDataset.Spec findBase(String baseId) throws IOException {
         return LongSessionDataset.loadAll().stream()
-                .filter(s -> level.equals(s.level()))
+                .filter(s -> baseId.equals(LongSessionDataset.baseId(s.id())))
                 .findFirst()
-                .orElseThrow(() -> new AssertionError("找不到 level=" + level + " 的数据集"));
+                .orElseThrow(() -> new AssertionError("找不到 baseId=" + baseId + " 的数据集"));
     }
 }

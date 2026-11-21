@@ -64,7 +64,29 @@ class LongSessionLiveRunnerTest {
     }
 
     @Test
-    void 完整三次取样才允许触发架构结论() {
+    void 每层十个case且统计门禁通过才允许触发架构结论() {
+        List<LongSessionLiveRunner.RunOutcome> outcomes = new ArrayList<>();
+        for (int repeat = 1; repeat <= 10; repeat++) {
+            for (String level : List.of("L1", "L2", "L3")) {
+                outcomes.add(outcome(level, repeat, true, "NONE"));
+            }
+        }
+        ObjectNode report = LongSessionLiveRunner.buildReport("deepseek-flash", "https://api.deepseek.com",
+                10, Set.of("L1", "L2", "L3"), false, 300, outcomes);
+        assertTrue(report.path("decision").path("eligible").asBoolean());
+        assertTrue(report.path("decision").path("gatePassed").asBoolean());
+        assertFalse(report.path("decision").path("rule2PlanFirst").asBoolean());
+        assertFalse(report.path("decision").path("rule3ContextMemory").asBoolean());
+        assertEquals(30, report.path("runs").size());
+        assertEquals(10, report.path("byLevel").path("L1").path("runs").asInt());
+        assertTrue(report.path("byLevel").path("L1").path("successRateLowerBound95").asDouble() > 0.70);
+        assertEquals(LongSessionDataset.MIN_CASES_PER_LEVEL,
+                report.path("statistics").path("thresholds").path("minCasesPerLevel").asInt());
+        assertFalse(report.has("apiKey"));
+    }
+
+    @Test
+    void 三层样本不足时只作冒烟不触发规则() {
         List<LongSessionLiveRunner.RunOutcome> outcomes = new ArrayList<>();
         for (int repeat = 1; repeat <= 3; repeat++) {
             for (String level : List.of("L1", "L2", "L3")) {
@@ -73,25 +95,25 @@ class LongSessionLiveRunnerTest {
         }
         ObjectNode report = LongSessionLiveRunner.buildReport("deepseek-flash", "https://api.deepseek.com",
                 3, Set.of("L1", "L2", "L3"), false, 300, outcomes);
-        assertTrue(report.path("decision").path("eligible").asBoolean());
+        assertFalse(report.path("decision").path("eligible").asBoolean(), "每层 3 个 case 不满足 n≥10");
+        assertFalse(report.path("decision").path("gatePassed").asBoolean());
         assertFalse(report.path("decision").path("rule2PlanFirst").asBoolean());
         assertFalse(report.path("decision").path("rule3ContextMemory").asBoolean());
-        assertEquals(9, report.path("runs").size());
-        assertFalse(report.has("apiKey"));
     }
 
     @Test
     void 计划类失败过半触发规则二但L1冒烟不触发() {
         List<LongSessionLiveRunner.RunOutcome> outcomes = new ArrayList<>();
-        for (int repeat = 1; repeat <= 3; repeat++) {
+        for (int repeat = 1; repeat <= 10; repeat++) {
             for (String level : List.of("L1", "L2", "L3")) {
-                boolean failed = repeat <= 2 && !"L3".equals(level);
+                boolean failed = repeat <= 1 && !"L3".equals(level);
                 outcomes.add(outcome(level, repeat, !failed, failed ? "NO_PROGRESS" : "NONE"));
             }
         }
         ObjectNode report = LongSessionLiveRunner.buildReport("deepseek-flash", "https://api.deepseek.com",
-                3, Set.of("L1", "L2", "L3"), false, 300, outcomes);
+                10, Set.of("L1", "L2", "L3"), false, 300, outcomes);
         assertTrue(report.path("decision").path("eligible").asBoolean());
+        assertTrue(report.path("decision").path("gatePassed").asBoolean());
         assertTrue(report.path("decision").path("rule2PlanFirst").asBoolean());
 
         ObjectNode smoke = LongSessionLiveRunner.buildReport("deepseek-flash", "https://api.deepseek.com",
@@ -203,6 +225,7 @@ class LongSessionLiveRunnerTest {
         data.put("wallMs", 1000);
         data.put("success", success);
         data.put("failureAttribution", attribution);
+        data.put("memoryProbePassed", "L3".equals(level) && success);
         return new LongSessionLiveRunner.RunOutcome(data, success, attribution);
     }
 }

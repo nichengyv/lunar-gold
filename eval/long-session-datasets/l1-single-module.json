@@ -3,6 +3,7 @@
   "id": "l1-single-module-refactor",
   "level": "L1",
   "description": "单模块 12 个策略实现的确定性重构，包含计划更新、过期路径失败与纠正恢复。",
+  "replicas": 10,
   "minModelCalls": 20,
   "reasoning": "DEEP",
   "permission": "AUTO",

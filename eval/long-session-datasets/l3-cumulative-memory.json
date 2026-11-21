@@ -3,6 +3,7 @@
   "id": "l3-cumulative-history-memory",
   "level": "L3",
   "description": "十二次 execute 累积历史，60 个独立修复提供至少百轮真实工作；后期注入检查点摘要并隔离验证早期记忆锚点。",
+  "replicas": 5,
   "minModelCalls": 100,
   "reasoning": "DEEP",
   "permission": "AUTO",

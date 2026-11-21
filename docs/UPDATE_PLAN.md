@@ -1022,6 +1022,19 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - 前端测试：**112 tests / 0 failures**；`vue-tsc + vite build` 通过。
 - 剩余：`sessions` 与会话 CRUD 仍在 `chat.ts`（属会话域，下一步可独立拆出）；ChatView 内仍有较多交互编排。
 
+#### R7a 评测扩容与统计门禁（2026-11-21）
+
+- **预注册阈值（先于数据，调整需单独提交）**：每层 ≥10 个 case 且 ≥2 个独立数据集；每层成功率 Wilson 95% 置信下限 ≥0.50；L3 `memoryProbe` ≥95%；provider 失败率 ≤5%；相对基线成功率不下降、token/耗时中位数退化 <15%。
+- `LongSessionDataset` 新增 `replicas`：`loadAll()` 展开为 `base-id#rNN`；L1/L2 各 20 个 case（合成 10 + 真实工程形态 10），L3 10 个 case（合成 5 + 真实工程形态 5）。离线校验强制每层 n≥10、每层 ≥2 个独立 base 数据集，且每层至少含一个 `repo-*`。
+- 新增三组**真实工程形态快照**任务集（仓库内固定 fixture，非线上开源仓库采样）：
+  - `repo-l1-billing-rounding`：`com.shop.billing` 十个区域税率策略 + `Money` + `InvoiceRegistry`，修复分位截断并恢复过期入口失败。
+  - `repo-l2-reporting-scope`：`com.shop.reporting` 三个周期包 21 个 formatter，三次 execute 中途切换 scope，覆盖审批与统一审查。
+  - `repo-l3-payment-adapters`：`com.shop.payment` 六个通道包 60 个适配器，12 turns，第 9 turn 注入检查点摘要、末轮验证早期记忆锚点。
+- 新增 `LongSessionStatsGate`：输出逐层 n / 成功率 / Wilson 95% 下限 / provider 失败率 / memoryProbe 通过率 / 中位数与基线退化原因；`LongSessionLiveRunner` 报告新增 `statistics` 与 `decision.gatePassed` / `gateReasons`，`eligible` 改为「三层齐备 + 每层 ≥10 + provider ≤5%」，样本不足时不再触发架构规则。
+- 基线：`eval/baselines/long-session-baseline.json`（可用 `P7_02_BASELINE` 覆盖）；不存在时退化比较标记 `missing`，不伪造对比。
+- 验证：新增 `LongSessionStatsGateTest` 8 例；数据集、离线 Runner、实时报告单测同步更新。后端全量 **477 tests / 0 failures / 17 skipped**。
+- **未验证项**：本轮未配置 `LUNARGOLD_LIVE_API_KEY`，未执行真实模型 n≥10 评测，也没有生成新基线；`repo-*` 为工程形态快照，不等同于线上仓库任务采样。
+
 
 
 

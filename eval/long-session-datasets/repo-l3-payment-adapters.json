@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "id": "repo-l3-payment-adapters",
+  "level": "L3",
+  "description": "真实工程形态快照：六个支付通道包共 60 个适配器修正费率，十二次 execute 累积历史后注入检查点摘要并验证早期记忆锚点。",
+  "replicas": 5,
+  "minModelCalls": 100,
+  "reasoning": "DEEP",
+  "permission": "AUTO",
+  "fixture": {
+    "files": [
+      {
+        "path": "TASK.md",
+        "content": "# 支付通道费率适配\n六个通道包共 60 个适配器，feeBps() 均错误返回 -1，应返回各自文件编号。\n每个 turn 只处理指定区间，先 read_file 再 edit_file；不得无变化重写或用无关调用增加轮次。\n"
+      }
+    ],
+    "series": [
+      {
+        "start": 1,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/alipay/AlipayAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.alipay;\n\npublic final class AlipayAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 11,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/wechat/WechatAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.wechat;\n\npublic final class WechatAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 21,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/unionpay/UnionpayAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.unionpay;\n\npublic final class UnionpayAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 31,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/visa/VisaAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.visa;\n\npublic final class VisaAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 41,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/mastercard/MastercardAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.mastercard;\n\npublic final class MastercardAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      },
+      {
+        "start": 51,
+        "count": 10,
+        "module": "",
+        "pathTemplate": "src/main/java/com/shop/payment/stripe/StripeAdapter{index2}.java",
+        "contentTemplate": "package com.shop.payment.stripe;\n\npublic final class StripeAdapter{index2} {\n    public int feeBps() {\n        return -1;\n    }\n}\n",
+        "expectedContainsTemplate": "return {index};"
+      }
+    ]
+  },
+  "success": {
+    "fileContains": {}
+  },
+  "failureAttribution": {
+    "provider": "MODEL_OR_PROVIDER",
+    "context": "CONTEXT_TRUNCATION",
+    "noProgress": "NO_PROGRESS",
+    "maxRounds": "PLAN_DRIFT",
+    "planIncomplete": "STEP_OMISSION",
+    "missingArtifact": "STEP_OMISSION",
+    "memory": "MEMORY_MISSING",
+    "repetition": "HISTORY_REPETITION"
+  },
+  "requiredCoverage": {
+    "minUpdatePlanCalls": 3,
+    "minToolFailures": 0,
+    "minRecoveredTools": 0,
+    "minApprovals": 0,
+    "minScopeChanges": 0,
+    "minScopeRejections": 0,
+    "minReviewAccepted": 0,
+    "minExecuteTurns": 12,
+    "minSummaryInjectedCalls": 1,
+    "requireMemoryProbe": true
+  },
+  "memory": {
+    "anchor": "MEMO-2026-FEE-CAP-200BPS",
+    "summaryAfterTurn": 9,
+    "probeTurn": 12
+  },
+  "turns": [
+    {
+      "prompt": "开始支付通道费率修复。早期记忆锚点是 MEMO-2026-FEE-CAP-200BPS，只需记住，现在不要复述。先 update_plan，再按 TASK.md 修正适配器 {first} 至 {last}。每个模型响应最多一个工具调用，每个文件先读后改。",
+      "scope": "",
+      "first": 1,
+      "last": 5
+    },
+    {
+      "prompt": "继续累积会话，只处理适配器 {first} 至 {last}，不要重复已完成文件或进行无关调用。",
+      "scope": "",
+      "first": 6,
+      "last": 10
+    },
+    {
+      "prompt": "继续下一组适配器 {first} 至 {last}，逐个读取并精确修复，保持既有计划进度真实。",
+      "scope": "",
+      "first": 11,
+      "last": 15
+    },
+    {
+      "prompt": "只处理适配器 {first} 至 {last}。每个文件必须有对应的读取和有效编辑，不要用重复调用代替进展。",
+      "scope": "",
+      "first": 16,
+      "last": 20
+    },
+    {
+      "prompt": "继续适配器 {first} 至 {last}，根据实际完成情况更新计划，再逐文件修复。",
+      "scope": "",
+      "first": 21,
+      "last": 25
+    },
+    {
+      "prompt": "处理适配器 {first} 至 {last}，不要重做旧区间；每次响应最多一个工具调用。",
+      "scope": "",
+      "first": 26,
+      "last": 30
+    },
+    {
+      "prompt": "继续修复适配器 {first} 至 {last}，读取当前内容后再编辑，避免任何无变化写入。",
+      "scope": "",
+      "first": 31,
+      "last": 35
+    },
+    {
+      "prompt": "处理适配器 {first} 至 {last}，保持历史累计进度，不需要复述早期锚点。",
+      "scope": "",
+      "first": 36,
+      "last": 40
+    },
+    {
+      "prompt": "完成适配器 {first} 至 {last} 的独立修复并更新一次计划；后续将形成检查点摘要。",
+      "scope": "",
+      "first": 41,
+      "last": 45
+    },
+    {
+      "prompt": "基于当前会话和已注入的检查点摘要继续，只处理适配器 {first} 至 {last}。",
+      "scope": "",
+      "first": 46,
+      "last": 50
+    },
+    {
+      "prompt": "继续最后修复前的适配器 {first} 至 {last}，不要重复旧文件，也不要提前复述早期锚点。",
+      "scope": "",
+      "first": 51,
+      "last": 55
+    },
+    {
+      "prompt": "先完成适配器 {first} 至 {last} 并收口计划。最终回答必须单独写出本会话最初提供的记忆锚点原值；不要猜测，也不要把文件编号当作锚点。",
+      "scope": "",
+      "first": 56,
+      "last": 60
+    }
+  ]
+}

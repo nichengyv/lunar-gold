@@ -69,6 +69,8 @@ class LongSessionOfflineRunner {
         for (LongSessionDataset.Spec spec : specs) {
             ObjectNode caseNode = MAPPER.createObjectNode();
             caseNode.put("id", spec.id());
+            caseNode.put("baseId", LongSessionDataset.baseId(spec.id()));
+            caseNode.put("replica", LongSessionDataset.replicaIndex(spec.id()));
             caseNode.put("level", spec.level());
             caseNode.put("turns", spec.turns().size());
             caseNode.put("minModelCalls", spec.minModelCalls());
@@ -78,7 +80,7 @@ class LongSessionOfflineRunner {
             caseNode.put("capacity", capacity);
 
             try {
-                Path ws = workspaceRoot.resolve(spec.level().toLowerCase());
+                Path ws = workspaceRoot.resolve(spec.id().replace('#', '-'));
                 LongSessionDataset.materialize(spec, ws);
                 caseNode.put("materialized_at", ws.toAbsolutePath().toString());
 
@@ -110,9 +112,25 @@ class LongSessionOfflineRunner {
         root.set("schemaIssues", issues);
         root.put("totalCases", specs.size());
         root.put("blockers", issues.size());
+        root.put("minCasesPerLevel", LongSessionDataset.MIN_CASES_PER_LEVEL);
+        root.put("minBaseDatasetsPerLevel", LongSessionDataset.MIN_BASE_DATASETS_PER_LEVEL);
+
+        // R7a：每层 case 数与独立数据集数必须达到预注册下限，离线即可发现「只重复同一任务」
+        ObjectNode byLevel = root.putObject("byLevel");
+        for (String level : List.of("L1", "L2", "L3")) {
+            List<LongSessionDataset.Spec> selected = specs.stream()
+                    .filter(spec -> level.equals(spec.level())).toList();
+            ObjectNode node = byLevel.putObject(level);
+            node.put("cases", selected.size());
+            node.put("baseDatasets", selected.stream()
+                    .map(spec -> LongSessionDataset.baseId(spec.id())).distinct().count());
+            node.put("requiredCases", LongSessionDataset.MIN_CASES_PER_LEVEL);
+            node.put("requiredBaseDatasets", LongSessionDataset.MIN_BASE_DATASETS_PER_LEVEL);
+        }
 
         ArrayNode summary = MAPPER.createArrayNode();
-        summary.add("离线验证完成：" + specs.size() + " 个数据集，" + issues.size() + " 个阻断问题");
+        summary.add("离线验证完成：" + specs.size() + " 个 case，每层下限 "
+                + LongSessionDataset.MIN_CASES_PER_LEVEL + "，阻断问题 " + issues.size());
         summary.add("注：本 Runner 只验证数据集质量，不触发真实模型或 ReAct 循环。");
         root.set("summary", summary);
 

@@ -110,6 +110,9 @@ public class LongSessionLiveRunner {
     /** R5 A/B：压缩滑窗（字符）；L2 的 prompt 峰值约 1 万 tokens，默认值不会触发，需要显式调低 */
     static final String CONDENSE_WINDOW_ENV = "P7_02_CONDENSE_WINDOW_CHARS";
     static final Path REPORT_DIR = Paths.get("eval", "runtime-reports");
+    /** R7a：上一版 n≥10 基线；存在时才做 token/耗时/成功率退化比较 */
+    static final Path BASELINE_PATH = Paths.get("eval", "baselines", "long-session-baseline.json");
+    static final String BASELINE_ENV = "P7_02_BASELINE";
 
     private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
@@ -150,19 +153,20 @@ public class LongSessionLiveRunner {
         List<RunOutcome> outcomes = new ArrayList<>();
         for (int repeat = 1; repeat <= repeats; repeat++) {
             for (LongSessionDataset.Spec spec : specs) {
-                System.out.printf("[P7-02] start level=%s repeat=%d/%d model=%s askUser=%s%n",
-                        spec.level(), repeat, repeats, model, askUser ? "on" : "off");
+                System.out.printf("[P7-02] start case=%s level=%s repeat=%d/%d model=%s askUser=%s%n",
+                        spec.id(), spec.level(), repeat, repeats, model, askUser ? "on" : "off");
                 RunOutcome outcome = runOne(apiKey, baseUrl, model, spec, repeat, askUser, maxSeconds,
                         planInjection, condense, condenseWindowChars);
                 outcomes.add(outcome);
-                System.out.printf("[P7-02] done level=%s repeat=%d success=%s attribution=%s calls=%d tokens=%d wall=%dms%n",
-                        spec.level(), repeat, outcome.success(), outcome.attribution(),
+                System.out.printf("[P7-02] done case=%s level=%s repeat=%d success=%s attribution=%s calls=%d tokens=%d wall=%dms%n",
+                        spec.id(), spec.level(), repeat, outcome.success(), outcome.attribution(),
                         outcome.data().path("modelCalls").asInt(), outcome.data().path("totalTokens").asLong(),
                         outcome.data().path("wallMs").asLong());
             }
         }
 
-        ObjectNode report = buildReport(model, baseUrl, repeats, levels, askUser, maxSeconds, outcomes);
+        ObjectNode report = buildReport(model, baseUrl, repeats, levels, askUser, maxSeconds, outcomes,
+                loadBaseline());
         // R5 A/B 的配置必须写进报告，否则两次运行无法区分开关状态
         report.put("context_plan_injection", planInjection ? "on" : "off");
         report.put("context_condense", condense ? "on" : "off");
@@ -257,7 +261,9 @@ public class LongSessionLiveRunner {
                     Capture capture = new Capture(metrics, runs.service, approvals, askTool, run.getId(), started);
                     agent.execute(apiKey, policy, prompt, List.copyOf(history.subList(0, history.size() - 1)),
                             USER_ID, PROJECT_ID, run.getId(), SESSION_ID,
-                            "p7-02-" + spec.level() + "-" + repeat + "-" + (turnIndex + 1),
+                            "p7-02-" + LongSessionDataset.baseId(spec.id())
+                                    + "-r" + LongSessionDataset.replicaIndex(spec.id())
+                                    + "-" + repeat + "-" + (turnIndex + 1),
                             false, "", "", contextSummary, "", new AtomicBoolean(false), capture);
                     history.add(message(ChatMessage.MessageRole.ASSISTANT, capture.answer.toString()));
                     metrics.answers.add(capture.answer.toString());
@@ -391,6 +397,12 @@ public class LongSessionLiveRunner {
 
     static ObjectNode buildReport(String model, String baseUrl, int repeats, Set<String> levels,
                                   boolean askUser, long maxSeconds, List<RunOutcome> outcomes) {
+        return buildReport(model, baseUrl, repeats, levels, askUser, maxSeconds, outcomes, null);
+    }
+
+    static ObjectNode buildReport(String model, String baseUrl, int repeats, Set<String> levels,
+                                  boolean askUser, long maxSeconds, List<RunOutcome> outcomes,
+                                  ObjectNode baseline) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("version", 1);
         root.put("generated_at", LocalDateTime.now().toString());
@@ -406,6 +418,12 @@ public class LongSessionLiveRunner {
         ArrayNode runs = root.putArray("runs");
         outcomes.forEach(o -> runs.add(o.data()));
 
+        // R7a：统计门禁先于结论生成，报告里保留阈值与逐层判据
+        ObjectNode statistics = LongSessionStatsGate.evaluate(
+                outcomes.stream().map(RunOutcome::data).toList(), baseline);
+        root.set("statistics", statistics);
+        ObjectNode statsByLevel = (ObjectNode) statistics.path("byLevel");
+
         ObjectNode byLevel = root.putObject("byLevel");
         for (String level : List.of("L1", "L2", "L3")) {
             List<RunOutcome> selected = outcomes.stream()
@@ -419,6 +437,9 @@ public class LongSessionLiveRunner {
             node.put("modelCallsMedian", median(selected.stream().map(o -> o.data().path("modelCalls").asLong()).toList()));
             node.put("totalTokensMedian", median(selected.stream().map(o -> o.data().path("totalTokens").asLong()).toList()));
             node.put("wallMsMedian", median(selected.stream().map(o -> o.data().path("wallMs").asLong()).toList()));
+            node.set("successRateLowerBound95", statsByLevel.path(level).path("successRateLowerBound95"));
+            node.set("memoryProbeRate", statsByLevel.path(level).path("memoryProbeRate"));
+            node.set("statisticsPass", statsByLevel.path(level).path("pass"));
             ObjectNode failures = node.putObject("failureAttributions");
             selected.stream().filter(o -> !o.success()).forEach(o -> {
                 String key = o.attribution();
@@ -432,27 +453,43 @@ public class LongSessionLiveRunner {
         long contextFailures = failed.stream().filter(o -> Set.of("CONTEXT_TRUNCATION", "MEMORY_MISSING", "HISTORY_REPETITION")
                 .contains(o.attribution())).count();
         long providerFailures = outcomes.stream().filter(o -> "MODEL_OR_PROVIDER".equals(o.attribution())).count();
-        boolean shapeComplete = levels.equals(Set.of("L1", "L2", "L3")) && repeats >= 3
-                && outcomes.size() == repeats * 3;
+        boolean shapeComplete = levels.equals(Set.of("L1", "L2", "L3"));
+        for (String level : List.of("L1", "L2", "L3")) {
+            shapeComplete = shapeComplete && statsByLevel.path(level).path("cases").asInt()
+                    >= LongSessionDataset.MIN_CASES_PER_LEVEL;
+        }
         double providerFailureRate = outcomes.isEmpty() ? 1.0 : (double) providerFailures / outcomes.size();
-        boolean eligible = shapeComplete && providerFailureRate <= 0.05;
+        boolean eligible = shapeComplete && providerFailureRate <= LongSessionStatsGate.MAX_PROVIDER_FAILURE_RATE;
+        boolean gatePassed = statistics.path("pass").asBoolean();
         boolean rule2 = !failed.isEmpty() && planFailures * 2 >= failed.size();
         boolean rule3 = !failed.isEmpty() && contextFailures * 2 >= failed.size();
 
         ObjectNode decision = root.putObject("decision");
         decision.put("eligible", eligible);
         decision.put("shapeComplete", shapeComplete);
+        decision.put("gatePassed", gatePassed);
         decision.put("providerFailureRate", providerFailureRate);
         decision.put("failedRuns", failed.size());
         decision.put("planRelatedFailures", planFailures);
         decision.put("contextRelatedFailures", contextFailures);
-        decision.put("rule2PlanFirst", eligible && rule2);
-        decision.put("rule3ContextMemory", eligible && rule3);
+        decision.set("gateReasons", statistics.path("reasons"));
+        decision.put("successRateLowerBound95",
+                statistics.path("overall").path("successRateLowerBound95").asDouble());
+        decision.put("rule2PlanFirst", eligible && gatePassed && rule2);
+        decision.put("rule3ContextMemory", eligible && gatePassed && rule3);
         String summary;
-        if (!eligible) summary = "数据不足或 provider 失败率过高，只作冒烟/诊断，不触发 P7-03/P7-04";
-        else if (rule2) summary = "规则 2 命中：评估 P7-03，且仍需证明 P7-06 不足以覆盖";
-        else if (rule3) summary = "规则 3 命中：优先评估 P7-04 上下文与记忆";
-        else summary = "规则 2/3 均未命中：Phase 7 可收口";
+        if (!eligible) {
+            summary = "样本不足（每层需 ≥" + LongSessionDataset.MIN_CASES_PER_LEVEL
+                    + "）或 provider 失败率过高，只作冒烟/诊断，不触发统计结论";
+        } else if (!gatePassed) {
+            summary = "样本达标但统计门禁未通过：" + statistics.path("reasons");
+        } else if (rule2) {
+            summary = "统计门禁通过；计划类失败过半，优先排查计划跟踪";
+        } else if (rule3) {
+            summary = "统计门禁通过；上下文/记忆类失败过半，优先排查上下文与记忆";
+        } else {
+            summary = "统计门禁通过；规则 2/3 均未命中";
+        }
         decision.put("summary", summary);
         return root;
     }
@@ -523,6 +560,19 @@ public class LongSessionLiveRunner {
         Path path = REPORT_DIR.resolve("long-session-" + LocalDateTime.now().format(STAMP) + ".json");
         Files.writeString(path, MAPPER.writeValueAsString(report) + System.lineSeparator(), StandardCharsets.UTF_8);
         return path;
+    }
+
+    /** R7a：读取上一版 n≥10 基线；不存在时统计门禁只做绝对阈值，报告标记 missing。 */
+    static ObjectNode loadBaseline() {
+        String override = System.getenv(BASELINE_ENV);
+        Path path = override == null || override.isBlank() ? BASELINE_PATH : Paths.get(override.trim());
+        if (!Files.exists(path)) return null;
+        try {
+            return (ObjectNode) MAPPER.readTree(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (IOException | ClassCastException e) {
+            System.out.println("[P7-02] 基线读取失败，按 missing 处理: " + e.getMessage());
+            return null;
+        }
     }
 
     private static Set<String> parseLevels(String raw) {

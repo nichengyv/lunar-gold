@@ -3,6 +3,7 @@
   "id": "l2-cross-file-scope-review",
   "level": "L2",
   "description": "三个模块 24 个实现与注册表的跨文件修复，三次 execute 中改变 scope，写操作审批并进入待审/接受流。",
+  "replicas": 10,
   "minModelCalls": 40,
   "reasoning": "DEEP",
   "permission": "MANUAL",

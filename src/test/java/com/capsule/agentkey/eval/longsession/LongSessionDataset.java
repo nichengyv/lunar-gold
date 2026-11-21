@@ -20,6 +20,10 @@ import java.util.stream.Stream;
 /** P7-02 数据集与 fixture；只负责离线形态校验和隔离工作区物化。 */
 final class LongSessionDataset {
     static final Path DATASET_DIR = Paths.get("eval", "long-session-datasets");
+    /** R7a/P8-04 预注册：每层至少 10 个可执行 case，否则 L8 统计结论不成立 */
+    static final int MIN_CASES_PER_LEVEL = 10;
+    /** R7a/P8-04 预注册：每层至少两个独立数据集（合成形态 + 真实工程形态），防止只重复同一任务 */
+    static final int MIN_BASE_DATASETS_PER_LEVEL = 2;
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Set<String> ATTRIBUTIONS = Set.of(
             "PLAN_DRIFT", "NO_PROGRESS", "STEP_OMISSION", "CONTEXT_TRUNCATION",
@@ -29,7 +33,8 @@ final class LongSessionDataset {
     private LongSessionDataset() {
     }
 
-    static List<Spec> loadAll() throws IOException {
+    /** 读取原始数据集（未展开重复），主要供离线形态检查与报告分组使用。 */
+    static List<Spec> loadBase() throws IOException {
         List<Spec> specs = new ArrayList<>();
         try (Stream<Path> files = Files.list(DATASET_DIR)) {
             for (Path path : files.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().toList()) {
@@ -39,26 +44,77 @@ final class LongSessionDataset {
         return specs;
     }
 
+    /** 按 replicas 展开为 n≥10 的 case 集合；case id 形如 {@code base-id#r01}。 */
+    static List<Spec> loadAll() throws IOException {
+        List<Spec> expanded = new ArrayList<>();
+        for (Spec base : loadBase()) {
+            int replicas = base.replicas() <= 0 ? 1 : base.replicas();
+            for (int index = 1; index <= replicas; index++) {
+                expanded.add(withId(base, baseId(base.id()) + "#r" + String.format("%02d", index)));
+            }
+        }
+        return expanded;
+    }
+
+    static String baseId(String id) {
+        if (id == null) return "";
+        int cut = id.indexOf('#');
+        return cut < 0 ? id : id.substring(0, cut);
+    }
+
+    static int replicaIndex(String id) {
+        if (id == null) return 0;
+        int cut = id.indexOf("#r");
+        if (cut < 0) return 0;
+        try {
+            return Integer.parseInt(id.substring(cut + 2));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static Spec withId(Spec spec, String id) {
+        return new Spec(spec.schemaVersion(), id, spec.level(), spec.description(), spec.minModelCalls(),
+                spec.reasoning(), spec.permission(), spec.fixture(), spec.success(), spec.failureAttribution(),
+                spec.requiredCoverage(), spec.memory(), spec.turns(), spec.replicas());
+    }
+
     static List<String> validate(List<Spec> specs) {
         List<String> errors = new ArrayList<>();
-        if (specs.size() != 3) {
-            errors.add("必须恰好包含 L1/L2/L3 三个数据集，实际=" + specs.size());
+        if (specs.isEmpty()) {
+            errors.add("没有加载到任何长会话数据集");
+            return errors;
         }
         Set<String> ids = new HashSet<>();
         Set<String> levels = new HashSet<>();
+        Set<String> validatedBases = new HashSet<>();
+        Map<String, List<Spec>> byLevel = new LinkedHashMap<>();
         for (Spec spec : specs) {
             if (!ids.add(spec.id())) errors.add("重复用例 id: " + spec.id());
+            if (spec.replicas() <= 0) errors.add(baseId(spec.id()) + ": replicas 必须为正数");
             levels.add(spec.level());
-            validateSpec(spec, errors);
+            byLevel.computeIfAbsent(spec.level(), key -> new ArrayList<>()).add(spec);
+            if (validatedBases.add(baseId(spec.id()))) validateSpec(spec, errors);
         }
         if (!levels.equals(Set.of("L1", "L2", "L3"))) {
             errors.add("数据集级别必须完整覆盖 L1/L2/L3，实际=" + levels);
+        }
+        for (String level : List.of("L1", "L2", "L3")) {
+            List<Spec> cases = byLevel.getOrDefault(level, List.of());
+            if (cases.size() < MIN_CASES_PER_LEVEL) {
+                errors.add(level + ": 至少 " + MIN_CASES_PER_LEVEL + " 个 case 才能满足 L8，实际=" + cases.size());
+            }
+            long bases = cases.stream().map(spec -> baseId(spec.id())).distinct().count();
+            if (bases < MIN_BASE_DATASETS_PER_LEVEL) {
+                errors.add(level + ": 至少 " + MIN_BASE_DATASETS_PER_LEVEL
+                        + " 个独立数据集（合成 + 真实工程形态），实际=" + bases);
+            }
         }
         return errors;
     }
 
     private static void validateSpec(Spec spec, List<String> errors) {
-        String id = spec.id() == null ? "<missing>" : spec.id();
+        String id = spec.id() == null ? "<missing>" : baseId(spec.id());
         if (spec.schemaVersion() != 1) errors.add(id + ": schemaVersion 必须为 1");
         if (spec.minModelCalls() <= 0) errors.add(id + ": minModelCalls 必须为正数");
         int expectedMin = switch (spec.level()) {
@@ -258,7 +314,7 @@ final class LongSessionDataset {
     record Spec(int schemaVersion, String id, String level, String description, int minModelCalls,
                 String reasoning, String permission, Fixture fixture, Success success,
                 Map<String, String> failureAttribution, RequiredCoverage requiredCoverage,
-                Memory memory, List<Turn> turns) {
+                Memory memory, List<Turn> turns, int replicas) {
     }
 
     record Fixture(List<FixtureFile> files, List<Series> series) {
