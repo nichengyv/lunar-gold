@@ -122,6 +122,8 @@ public class LongSessionLiveRunner {
     static final String BASELINE_ENV = "P7_02_BASELINE";
     /** R7b live 验证：续跑 A/B 开关；默认关闭，开启后同一批 case 同时跑直接执行与中断续跑 */
     static final String RESUME_ENV = "P7_02_RESUME";
+    /** 冒烟用：每层最多执行多少个 case（0=不限）；不改变预注册阈值，只用于付费前验证链路 */
+    static final String MAX_CASES_ENV = "P7_02_MAX_CASES";
 
     private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
@@ -148,12 +150,17 @@ public class LongSessionLiveRunner {
         boolean condense = "on".equalsIgnoreCase(envOr(CONDENSE_ENV, "off"));
         int condenseWindowChars = Math.max(4_000, intEnv(CONDENSE_WINDOW_ENV, 120_000));
         boolean resumeMode = "on".equalsIgnoreCase(envOr(RESUME_ENV, "off"));
+        int maxCasesPerLevel = Math.max(0, intEnv(MAX_CASES_ENV, 0));
         Set<String> levels = parseLevels(envOr(LEVELS_ENV, "L1"));
 
         List<LongSessionDataset.Spec> specs = new ArrayList<>(LongSessionDataset.loadAll());
         List<String> validation = LongSessionDataset.validate(specs);
         if (!validation.isEmpty()) throw new IllegalStateException("数据集校验失败: " + validation);
         specs.removeIf(spec -> !levels.contains(spec.level()));
+        if (maxCasesPerLevel > 0) {
+            Map<String, Integer> taken = new HashMap<>();
+            specs.removeIf(spec -> taken.merge(spec.level(), 1, Integer::sum) > maxCasesPerLevel);
+        }
         if (specs.isEmpty()) throw new IllegalArgumentException("没有匹配的数据集: " + levels);
 
         // 付费调用前的前置检查：渲染后的 prompt 不允许残留 {xxx} 占位符。

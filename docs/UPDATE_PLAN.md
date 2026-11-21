@@ -856,7 +856,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分（含 messages）+ 发送编排 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
-| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃，真实 kill→重启→resume E2E 通过）；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测、构建与真实崩溃续跑 E2E 均通过 | 按项开关 |
+| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃，真实 kill→重启→resume E2E 通过）；R7b-live 真实模型续跑完成率 🔲 待跑：runner + 预注册门禁已落地，Key 冒烟 n=1 通过，L1 全量 20 对（约 3-4h）与 L2/L3（10h+）待执行；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测、构建与真实崩溃续跑 E2E 均通过 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
 
@@ -1053,9 +1053,10 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **预注册阈值（先于数据，调整需单独提交并说明理由）**：`LongSessionResumeGate` 固定——每层 ≥10 个「已注入中断并完成续跑」的配对 case；续跑成功率 Wilson 95% 置信下限 ≥0.50；续跑成功率相对同一批直接执行下降 ≤10pp；续跑臂 provider 失败率 ≤5%；续跑 token 中位数 / 直接执行 ≤1.50；耗时中位数 / 直接执行 ≤2.00。耗时阈值更宽是因为真实重启有启动开销；token 更严格，因为中断发生在模型调用前，理论上不应重放已落地的轮次。
 - **续跑 A/B 机制**：`P7_02_RESUME=on` 时，每个 case 先跑「直接执行」，再在全新工作区跑「续跑臂」。续跑臂由 `ResumeCrashClient` 在第 1 个 `CHECKPOINT` 落库后的下一次模型调用前抛出模拟崩溃，`Capture.onError` 把 Run 落成 `FAILED / PROCESS_RESTARTED`，随后走生产链路 `AgentRunService.resumeInterrupted` + `ReActAgentService.resume` 继续；工件与 coverage 判定完全复用直接执行的 `evaluate(...)`，不另写一套。
 - **报告**：`report.resume.gate` 逐层输出 attempts / cases / notApplicable / unmatched / 续跑与直接执行成功率及下降幅度 / Wilson 下限 / provider 失败率 / token 与耗时比值 / reasons；未注入中断的 case 记 `notApplicable`，不计入成功率，避免把「没测到」算成「通过」。配置项 `resume_mode`、`resume_interrupt_point` 一并落盘。
-- **运行方式（需自行提供 Key，会产生真实费用）**：设置 `P7_02_RESUME=on`、`P7_02_LEVELS=L1,L2,L3`、`P7_02_REPEATS=...`，其余沿用 `LUNARGOLD_LIVE_*`；报告写入 `eval/runtime-reports/`。
+- **运行方式（需自行提供 Key，会产生真实费用）**：设置 `P7_02_RESUME=on`、`P7_02_LEVELS=L1,L2,L3`、`P7_02_REPEATS=...`，其余沿用 `LUNARGOLD_LIVE_*`；报告写入 `eval/runtime-reports/`。付费前可用 `P7_02_MAX_CASES=1` 每层只跑 1 个 case 做链路冒烟（不改变预注册阈值，仅缩小样本）。
 - **离线验证**：新增 `LongSessionResumeGateTest` 5 例（通过、下降 >10pp、未注入不计入、provider/token 触发、缺少配对记 unmatched）；后端全量 **490 tests / 0 failures / 17 skipped**。
-- **未验证项（必须如实标注）**：当前环境未设置 `LUNARGOLD_LIVE_API_KEY`，**未产生任何真实模型续跑完成率数字**；不得引用离线样例或默认值冒充结果。阈值已预注册，提供 Key 后按上述命令执行即可产出。
+- **真实模型冒烟（2026-11-21，`P7_02_MAX_CASES=1`，仅链路诊断）**：`L1 / l1-single-module-refactor#r01` 直接执行 success=true（35 次模型调用、174,565 tokens、173s）；续跑臂 success=true、`resumeInjected=true`（196,954 tokens、173s），`FAILED/PROCESS_RESTARTED → resumeInterrupted → resume` 全链路通过。按预注册门禁 cases=1 判为样本不足，**不构成完成率结论**。Key 仅经环境变量注入，未写入仓库。
+- **待办**：L1 全量 20 对（约 3-4 小时）→ 产出 L1 层可引用完成率；L2/L3 全量（预计 10 小时以上、token 成本最高）需另行确认后执行。两者都必须沿用当前预注册阈值，不得事后调整。
 
 
 
