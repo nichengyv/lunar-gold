@@ -225,8 +225,85 @@ class VerifyServiceTest {
                 "用户显式配置时不应标成自动探测");
     }
 
-    private void writeConfig(String json) throws Exception {
-        Path dir = workspace.resolve(".lunargold");
+    @Test
+    void 无构建文件时按纯Java源码全量编译通过() throws Exception {
+        Path src = workspace.resolve("src/main/java/demo");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("App.java"), "package demo; public class App { }");
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.PASSED, result.status());
+        assertTrue(result.configured());
+        assertEquals(JavaSourceVerifier.COMMAND_NAME, result.commands().get(0).name());
+        assertTrue(result.message().contains("自动探测自 java-sources"), result.message());
+        verify(commandService, never()).run(anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void 纯Java源码编译失败时映射为失败并带指纹() throws Exception {
+        Path src = workspace.resolve("src/main/java/demo");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("Broken.java"), """
+                package demo;
+                public class Broken {
+                    void m() { int value = ; }
+                }
+                """);
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.FAILED, result.status());
+        assertTrue(result.configured());
+        assertFalse(result.failureFingerprint().isBlank());
+        assertTrue(result.formatForPrompt().contains("请修复"), result.formatForPrompt());
+        verify(commandService, never()).run(anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void 混合语言源码降级为不可用并要求显式配置() throws Exception {
+        Path src = workspace.resolve("src/main/java/demo");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("App.java"), "package demo; public class App { }");
+        Files.writeString(workspace.resolve("tool.py"), "print('hi')");
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.UNAVAILABLE, result.status());
+        assertTrue(result.message().contains("tool.py"), result.message());
+        assertTrue(result.message().contains("verify.json"), result.message());
+        assertTrue(result.commands().isEmpty());
+    }
+
+    @Test
+    void 自动探测关闭时即使有Java源码也保持未配置() throws Exception {
+        properties.setAutoDetect(false);
+        Path src = workspace.resolve("src/main/java/demo");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("App.java"), "package demo; public class App { }");
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.NOT_CONFIGURED, result.status());
+        assertTrue(result.commands().isEmpty());
+    }
+
+    @Test
+    void 源码数量超限时不误报通过() throws Exception {
+        properties.setSourceScanMaxFiles(1);
+        Path src = workspace.resolve("src");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("A.java"), "public class A { }");
+        Files.writeString(src.resolve("B.java"), "public class B { }");
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.UNAVAILABLE, result.status());
+        assertTrue(result.message().contains("文件数"), result.message());
+        assertTrue(result.commands().isEmpty());
+    }
+
+    private void writeConfig(String json) throws Exception {        Path dir = workspace.resolve(".lunargold");
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("verify.json"), json);
     }

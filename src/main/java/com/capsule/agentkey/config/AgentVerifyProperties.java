@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
  * 配置路径、重试上限与输出/超时兜底，便于不同机器调整而不用改项目文件。
  *
  * <p>R7c L5 起，缺少 verify.json 时会按构建文件（pom.xml / build.gradle / package.json /
- * go.mod / Cargo.toml / tsconfig.json）自动探测一条验证命令，避免「未配置 → 只能模型自报」。
+ * go.mod / Cargo.toml / tsconfig.json）自动探测一条验证命令，避免「未配置 → 只能模型自报」；
+ * 连构建文件都没有的纯 Java 工作区则退回有界全量源码编译，扫描上限也在本类配置。
  */
 @Component
 @ConfigurationProperties(prefix = "agent.verify")
@@ -37,6 +38,15 @@ public class AgentVerifyProperties {
     /** 自动探测命令的超时（秒）；编译类命令通常比普通命令更久 */
     private int autoDetectTimeoutSeconds = 300;
 
+    /** R7c L5：裸 Java 源码扫描的最大目录深度（含工作区根为 0） */
+    private int sourceScanMaxDepth = 12;
+
+    /** R7c L5：裸 Java 源码扫描的最大文件数；超限降级而不是只编译子集 */
+    private int sourceScanMaxFiles = 2000;
+
+    /** R7c L5：裸 Java 源码扫描的最大总字节数；超限降级而不是只编译子集 */
+    private long sourceScanMaxBytes = 10L * 1024 * 1024;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public String getConfigPath() { return configPath; }
@@ -54,5 +64,17 @@ public class AgentVerifyProperties {
     public int getAutoDetectTimeoutSeconds() { return autoDetectTimeoutSeconds; }
     public void setAutoDetectTimeoutSeconds(int autoDetectTimeoutSeconds) {
         this.autoDetectTimeoutSeconds = autoDetectTimeoutSeconds;
+    }
+    public int getSourceScanMaxDepth() { return sourceScanMaxDepth; }
+    public void setSourceScanMaxDepth(int sourceScanMaxDepth) {
+        this.sourceScanMaxDepth = sourceScanMaxDepth;
+    }
+    public int getSourceScanMaxFiles() { return sourceScanMaxFiles; }
+    public void setSourceScanMaxFiles(int sourceScanMaxFiles) {
+        this.sourceScanMaxFiles = sourceScanMaxFiles;
+    }
+    public long getSourceScanMaxBytes() { return sourceScanMaxBytes; }
+    public void setSourceScanMaxBytes(long sourceScanMaxBytes) {
+        this.sourceScanMaxBytes = sourceScanMaxBytes;
     }
 }

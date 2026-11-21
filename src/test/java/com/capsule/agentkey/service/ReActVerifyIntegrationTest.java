@@ -103,11 +103,26 @@ class ReActVerifyIntegrationTest {
 
         RunResult run = run(commandService, 3, List.of(
                 writeTurn("public class Ok {}"),
-                ScriptedTurn.ofText("done")));
+                ScriptedTurn.ofText("done")), properties -> properties.setAutoDetect(false));
 
         assertEquals(ReActAgentService.CompletionStatus.UNVERIFIED, run.completion().status());
         assertEquals("VERIFY_NOT_CONFIGURED", run.completion().reason());
         assertEquals(List.of(VerifyResult.Status.NOT_CONFIGURED),
+                run.verifyEvents().stream().map(VerifyResult::status).toList());
+        verify(commandService, never()).run(anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void bareJavaSourceIsVerifiedByInProcessCompile() throws Exception {
+        CommandService commandService = mock(CommandService.class);
+
+        RunResult run = run(commandService, 3, List.of(
+                writeTurn("public class Ok {}"),
+                ScriptedTurn.ofText("done")));
+
+        assertEquals(ReActAgentService.CompletionStatus.COMPLETED, run.completion().status());
+        assertEquals("VERIFY_PASSED", run.completion().reason());
+        assertEquals(List.of(VerifyResult.Status.PASSED),
                 run.verifyEvents().stream().map(VerifyResult::status).toList());
         verify(commandService, never()).run(anyString(), anyString(), anyString(), any(), any());
     }
@@ -147,6 +162,11 @@ class ReActVerifyIntegrationTest {
     }
 
     private RunResult run(CommandService commandService, int maxRepeats, List<ScriptedTurn> turns) {
+        return run(commandService, maxRepeats, turns, properties -> { });
+    }
+
+    private RunResult run(CommandService commandService, int maxRepeats, List<ScriptedTurn> turns,
+                          java.util.function.Consumer<AgentVerifyProperties> verifyCustomizer) {
         try {
             ScriptedAgentClient client = new ScriptedAgentClient(turns);
             WorkspaceFileService fileService = workspaceFileService();
@@ -171,6 +191,7 @@ class ReActVerifyIntegrationTest {
             tools.register(new WriteFileTool(projectService, fileService, pendingRepo));
 
             AgentVerifyProperties properties = new AgentVerifyProperties();
+            verifyCustomizer.accept(properties);
             VerifyService verifyService = new VerifyService(properties, commandService);
             // 本测试只关注验证回路，关闭真实 javac 诊断以缩短耗时、避免与 P5-05 测试争抢编译资源
             com.capsule.agentkey.config.AgentDiagnosticsProperties diagnosticsProperties =

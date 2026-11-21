@@ -182,6 +182,11 @@ agent:
     max-retries: ${AGENT_VERIFY_MAX_RETRIES:2}
     max-output-chars: ${AGENT_VERIFY_MAX_OUTPUT_CHARS:4000}
     default-timeout-seconds: ${AGENT_VERIFY_DEFAULT_TIMEOUT_SECONDS:120}
+    # R7c L5：既没有 verify.json 也没有构建文件时，对纯 Java 源码做有界全量编译；
+    # 任一上限被突破都会降级为 UNAVAILABLE，不会只编译子集冒充通过
+    source-scan-max-depth: ${AGENT_VERIFY_SOURCE_SCAN_MAX_DEPTH:12}
+    source-scan-max-files: ${AGENT_VERIFY_SOURCE_SCAN_MAX_FILES:2000}
+    source-scan-max-bytes: ${AGENT_VERIFY_SOURCE_SCAN_MAX_BYTES:10485760}
   # 【P5-04】repo map：工作区目录 + 关键符号摘要，替代原来的单层目录树；
   # 字符预算耗尽时截断并提示模型改用 list_dir / search_files
   repo-map:

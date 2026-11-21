@@ -76,10 +76,8 @@ public class VerifyService {
                             .orElse(null)
                     : null;
             if (detected == null) {
-                return notConfigured(safeAttempt, 1, configPath,
-                        properties.isAutoDetect()
-                                ? "项目未配置验证命令，也未探测到可识别的构建文件"
-                                : "项目未配置验证命令");
+                //R7c L5：连构建文件都没有时，退回纯 Java 源码的有界全量编译
+                return verifyJavaSources(root, safeAttempt, configPath, cancelled);
             }
             config = new VerifyConfig(Boolean.TRUE, 0, List.of(detected.command()));
             autoSource = detected.source();
@@ -166,6 +164,61 @@ public class VerifyService {
     /** 自动探测时在结论里显式标注来源，避免用户误以为是自己配置的命令 */
     private String autoNote(String autoSource) {
         return autoSource == null ? "" : "（自动探测自 " + autoSource + "）";
+    }
+
+    /**
+     * R7c L5：无显式配置、无构建文件时的纯 Java 源码验证。
+     *
+     * <p>只有全量、成功、无错误的编译才算通过；混合语言、扫描超限、无 JDK、超时与取消都如实降级，
+     * 不截取子集冒充通过。扫描与编译异常在这里吞掉并转为 {@link VerifyResult.Status#UNAVAILABLE}。
+     */
+    private VerifyResult verifyJavaSources(Path root, int attempt, String configPath,
+                                           AtomicBoolean cancelled) {
+        if (!properties.isAutoDetect()) {
+            return notConfigured(attempt, 1, configPath, "项目未配置验证命令");
+        }
+        JavaSourceVerifier.Limits limits = new JavaSourceVerifier.Limits(
+                properties.getSourceScanMaxDepth(),
+                properties.getSourceScanMaxFiles(),
+                properties.getSourceScanMaxBytes());
+
+        JavaSourceVerifier.Scan scan;
+        try {
+            scan = JavaSourceVerifier.scan(root, limits, cancelled);
+        } catch (Exception e) {
+            log.warn("扫描工作区 Java 源码失败: workspace={}, error={}", root, e.getMessage());
+            return unavailable(attempt, 1, configPath, false, List.of(),
+                    "扫描工作区 Java 源码失败：" + e.getMessage());
+        }
+        if (cancelled != null && cancelled.get()) {
+            return unavailable(attempt, 1, configPath, false, List.of(), "验证已取消");
+        }
+        if (scan.truncated()) {
+            return unavailable(attempt, 1, configPath, false, List.of(),
+                    scan.truncationReason() + "，无法保证全量编译；请显式配置 " + configPath);
+        }
+        if (scan.javaFiles().isEmpty()) {
+            String reason = scan.foreignCount() > 0
+                    ? "项目未配置验证命令，未发现 Java 源码（检测到其他语言源码），"
+                            + "如需验证请显式配置验证配置"
+                    : "项目未配置验证命令，也未探测到可识别的构建文件或 Java 源码";
+            return notConfigured(attempt, 1, configPath, reason);
+        }
+        if (scan.foreignCount() > 0) {
+            return unavailable(attempt, 1, configPath, true, List.of(),
+                    "工作区同时存在 Java 与其他语言源码（" + String.join("、", scan.foreignSamples())
+                            + "），裸源码编译无法保证全量验证；请显式配置 " + configPath);
+        }
+
+        JavaSourceVerifier.Result result = JavaSourceVerifier.compile(root, scan,
+                properties.getAutoDetectTimeoutSeconds(), properties.getMaxOutputChars(), cancelled);
+        log.info("裸 Java 源码验证: workspace={}, files={}, status={}",
+                root, scan.javaFiles().size(), result.status());
+        String message = result.message() + autoNote(JavaSourceVerifier.SOURCE);
+        String fingerprint = result.status() == VerifyResult.Status.FAILED
+                ? fingerprint(result.outcomes()) : "";
+        return new VerifyResult(result.status(), configPath, result.configured(),
+                attempt, 1, result.outcomes(), fingerprint, message);
     }
 
     /**
