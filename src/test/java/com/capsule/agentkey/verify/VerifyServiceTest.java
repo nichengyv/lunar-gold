@@ -180,6 +180,51 @@ class VerifyServiceTest {
         assertTrue(tail.endsWith("END"));
     }
 
+    @Test
+    void 缺少配置时按pom自动探测验证命令() throws Exception {
+        Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+        when(commandService.run(anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(success("compile ok"));
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.PASSED, result.status());
+        assertTrue(result.configured());
+        assertEquals("mvn -B -q -DskipTests compile", result.commands().get(0).command());
+        assertTrue(result.message().contains("自动探测自 pom.xml"),
+                "结论必须标注命令来源，不能冒充用户配置：" + result.message());
+        verify(commandService).run(anyString(),
+                org.mockito.ArgumentMatchers.eq("mvn -B -q -DskipTests compile"),
+                anyString(), any(), any());
+    }
+
+    @Test
+    void 自动探测可关闭且关闭后仍报未配置() throws Exception {
+        Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+        properties.setAutoDetect(false);
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.NOT_CONFIGURED, result.status());
+        verify(commandService, never()).run(anyString(), anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void 显式配置优先于自动探测() throws Exception {
+        Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+        writeConfig("""
+                {"commands":[{"name":"custom","command":"npm run typecheck"}]}
+                """);
+        when(commandService.run(anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(success("ok"));
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals("npm run typecheck", result.commands().get(0).command());
+        assertFalse(result.message().contains("自动探测"),
+                "用户显式配置时不应标成自动探测");
+    }
+
     private void writeConfig(String json) throws Exception {
         Path dir = workspace.resolve(".lunargold");
         Files.createDirectories(dir);

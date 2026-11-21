@@ -62,7 +62,7 @@ class RunTermination {
                     }
                     case NOT_CONFIGURED -> {
                         return new Completion(CompletionStatus.UNVERIFIED, "VERIFY_NOT_CONFIGURED",
-                                "文件已修改，但项目未配置验证命令；可在 "
+                                "文件已修改，但既未配置验证命令，也未探测到可识别的构建文件；可在 "
                                         + verify.configPath()
                                         + " 配置验证，或人工审查并接受未验证变更。", true);
                     }

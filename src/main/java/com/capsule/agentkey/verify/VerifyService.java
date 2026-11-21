@@ -61,6 +61,7 @@ public class VerifyService {
         }
 
         VerifyConfig config;
+        String autoSource = null;
         try {
             config = load(root);
         } catch (Exception e) {
@@ -69,7 +70,21 @@ public class VerifyService {
                     "验证配置无法解析：" + e.getMessage());
         }
         if (config == null) {
-            return notConfigured(safeAttempt, 1, configPath, "项目未配置验证命令");
+            //R7c L5：没有显式配置时按构建文件自动探测，让完成判定仍能走工具验证
+            VerifyCommandDetector.Detected detected = properties.isAutoDetect()
+                    ? VerifyCommandDetector.detect(root, properties.getAutoDetectTimeoutSeconds())
+                            .orElse(null)
+                    : null;
+            if (detected == null) {
+                return notConfigured(safeAttempt, 1, configPath,
+                        properties.isAutoDetect()
+                                ? "项目未配置验证命令，也未探测到可识别的构建文件"
+                                : "项目未配置验证命令");
+            }
+            config = new VerifyConfig(Boolean.TRUE, 0, List.of(detected.command()));
+            autoSource = detected.source();
+            log.info("验证命令自动探测: workspace={}, source={}, command={}",
+                    root, autoSource, detected.command().command());
         }
 
         int maxAttempts = maxAttempts(config);
@@ -138,14 +153,19 @@ public class VerifyService {
                     .count();
             return new VerifyResult(VerifyResult.Status.FAILED, configPath, true,
                     safeAttempt, maxAttempts, outcomes, fingerprint(outcomes),
-                    failedCount + " 条必跑验证命令失败");
+                    failedCount + " 条必跑验证命令失败" + autoNote(autoSource));
         }
 
         String message = optionalFailed
-                ? "必跑验证命令通过，但存在可选命令失败"
-                : "验证命令全部通过（" + outcomes.size() + " 条）";
+                ? "必跑验证命令通过，但存在可选命令失败" + autoNote(autoSource)
+                : "验证命令全部通过（" + outcomes.size() + " 条）" + autoNote(autoSource);
         return new VerifyResult(VerifyResult.Status.PASSED, configPath, true,
                 safeAttempt, maxAttempts, outcomes, "", message);
+    }
+
+    /** 自动探测时在结论里显式标注来源，避免用户误以为是自己配置的命令 */
+    private String autoNote(String autoSource) {
+        return autoSource == null ? "" : "（自动探测自 " + autoSource + "）";
     }
 
     /**
