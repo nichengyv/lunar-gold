@@ -107,7 +107,7 @@ class HttpCrossTenantAcceptanceTest {
     @BeforeEach
     void setUp() throws Exception {
         registry = new ToolApprovalRegistry();
-        AgentRunService runService = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
+        AgentRunService runService = new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper()));
         com.capsule.agentkey.service.PromptCatalog promptCatalog =
                 new com.capsule.agentkey.service.PromptCatalog(new org.springframework.mock.env.MockEnvironment());
         controller = new AgentChatController(

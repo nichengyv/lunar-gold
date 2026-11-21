@@ -249,11 +249,11 @@ public final class ChatStreamBridge implements ReActAgentService.StreamCallback 
     }
 
     @Override
-    public void onPlan(List<WorkspaceContext.PlanStep> steps) {
+    public void onPlan(List<com.capsule.agentkey.agent.run.PlanStep> steps) {
         try {
             // 下发任务计划：前端凭 plan 事件实时刷新计划面板
             List<Map<String, Object>> list = new ArrayList<>();
-            for (WorkspaceContext.PlanStep step : steps) {
+            for (com.capsule.agentkey.agent.run.PlanStep step : steps) {
                 Map<String, Object> item = new HashMap<>();
                 item.put("title", step.title());
                 item.put("status", step.status());

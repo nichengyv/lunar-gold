@@ -572,7 +572,7 @@ public class LongSessionLiveRunner {
         final List<String> runStates = new ArrayList<>();
         final List<String> missingArtifacts = new ArrayList<>();
         final List<String> coverageFailures = new ArrayList<>();
-        List<WorkspaceContext.PlanStep> finalPlan = List.of();
+        List<com.capsule.agentkey.agent.run.PlanStep> finalPlan = List.of();
 
         double planCompletionRate() {
             if (finalPlan.isEmpty()) return 0;
@@ -681,7 +681,7 @@ public class LongSessionLiveRunner {
             runs.appendEvent(runId, AgentRunEvent.EventType.TOOL_RESULT, payload);
         }
         @Override public void onFileChange(FileChange change) { metrics.fileChanges++; }
-        @Override public void onPlan(List<WorkspaceContext.PlanStep> steps) { metrics.finalPlan = List.copyOf(steps); }
+        @Override public void onPlan(List<com.capsule.agentkey.agent.run.PlanStep> steps) { metrics.finalPlan = List.copyOf(steps); }
         @Override public void onUsage(long prompt, long completionTokens) {
             metrics.usageCalls++;
             metrics.promptTokens += prompt;
@@ -816,6 +816,8 @@ public class LongSessionLiveRunner {
                 return run;
             });
             when(runRepo.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
+            // R1：事件追加前先锁 Run 行
+            when(runRepo.lockForEventAppend(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
             when(eventRepo.findMaxSeqByRunId(anyLong())).thenAnswer(inv -> {
                 List<AgentRunEvent> list = events.get(inv.getArgument(0));
                 return list == null || list.isEmpty() ? null : list.get(list.size() - 1).getSeq();
@@ -828,7 +830,7 @@ public class LongSessionLiveRunner {
             });
             when(eventRepo.findByRunIdOrderBySeqAsc(anyLong())).thenAnswer(inv ->
                     List.copyOf(events.getOrDefault(inv.getArgument(0), List.of())));
-            this.service = new AgentRunService(runRepo, eventRepo, MAPPER);
+            this.service = new AgentRunService(runRepo, eventRepo, MAPPER, new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, MAPPER));
         }
     }
 }

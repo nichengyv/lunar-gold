@@ -162,7 +162,7 @@ public class RuntimeEvalRunner {
         AtomicReference<ReActAgentService.Completion> completion = new AtomicReference<>();
         AtomicReference<ReActAgentService.NoProgress> noProgress = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        AtomicReference<List<WorkspaceContext.PlanStep>> finalPlan = new AtomicReference<>(List.of());
+        AtomicReference<List<com.capsule.agentkey.agent.run.PlanStep>> finalPlan = new AtomicReference<>(List.of());
         AtomicInteger approvalCount = new AtomicInteger();
         AtomicBoolean cancelled = new AtomicBoolean(false);
         List<FileChange> fileChanges = new ArrayList<>();
@@ -204,7 +204,7 @@ public class RuntimeEvalRunner {
                         runService.appendEvent(run.getId(), AgentRunEvent.EventType.TOOL_RESULT, payload);
                     }
                     @Override public void onFileChange(FileChange change) { fileChanges.add(change); }
-                    @Override public void onPlan(List<WorkspaceContext.PlanStep> steps) {
+                    @Override public void onPlan(List<com.capsule.agentkey.agent.run.PlanStep> steps) {
                         finalPlan.set(List.copyOf(steps));
                     }
                     @Override public void onUsage(long prompt, long completion) {
@@ -378,11 +378,11 @@ public class RuntimeEvalRunner {
         }
     }
 
-    private static void assertPlan(JsonNode expect, List<WorkspaceContext.PlanStep> plan, List<String> mismatches) {
+    private static void assertPlan(JsonNode expect, List<com.capsule.agentkey.agent.run.PlanStep> plan, List<String> mismatches) {
         if (!expect.has("planStatuses")) return;
         List<String> expected = new ArrayList<>();
         expect.path("planStatuses").forEach(node -> expected.add(node.asText()));
-        List<String> actual = plan.stream().map(WorkspaceContext.PlanStep::status).toList();
+        List<String> actual = plan.stream().map(com.capsule.agentkey.agent.run.PlanStep::status).toList();
         if (!expected.equals(actual)) mismatches.add("plan=" + actual + ", expected=" + expected);
     }
 
@@ -499,6 +499,8 @@ public class RuntimeEvalRunner {
                 return run;
             });
             when(runRepo.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
+            // R1：事件追加前先锁 Run 行
+            when(runRepo.lockForEventAppend(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
             when(eventRepo.findMaxSeqByRunId(anyLong())).thenAnswer(inv -> {
                 List<AgentRunEvent> list = events.get(inv.getArgument(0));
                 return list == null || list.isEmpty() ? null : list.get(list.size() - 1).getSeq();
@@ -511,7 +513,7 @@ public class RuntimeEvalRunner {
             });
             when(eventRepo.findByRunIdOrderBySeqAsc(anyLong())).thenAnswer(inv ->
                     List.copyOf(events.getOrDefault(inv.getArgument(0), List.of())));
-            this.service = new AgentRunService(runRepo, eventRepo, MAPPER);
+            this.service = new AgentRunService(runRepo, eventRepo, MAPPER, new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, MAPPER));
         }
     }
 }

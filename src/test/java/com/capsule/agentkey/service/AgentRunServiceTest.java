@@ -1,5 +1,6 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.agent.run.RunEventStore;
 import com.capsule.agentkey.entity.AgentRun;
 import com.capsule.agentkey.entity.AgentRun.RunState;
 import com.capsule.agentkey.entity.AgentRunEvent;
@@ -46,9 +47,13 @@ class AgentRunServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new AgentRunService(runRepo, eventRepo, om);
+        service = new AgentRunService(runRepo, eventRepo, om,
+                new RunEventStore(runRepo, eventRepo, om));
         // 默认：事件 repo 查最大 seq 返回 null（空表）
         lenient().when(eventRepo.findMaxSeqByRunId(anyLong())).thenReturn(null);
+        // R1：追加事件前会先锁 Run 行；mock 默认返回空 Optional，会让 append 抛错
+        lenient().when(runRepo.lockForEventAppend(anyLong()))
+                .thenReturn(Optional.of(run(0L, RunState.RUNNING)));
     }
 
     // ------------------------------------------------------------------

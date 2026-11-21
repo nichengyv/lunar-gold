@@ -1,5 +1,6 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.agent.run.PlanStep;
 import com.capsule.agentkey.tool.WorkspaceContext;
 import org.junit.jupiter.api.Test;
 
@@ -22,11 +23,11 @@ class ReActAgentServiceTest {
     @Test
     void 计划全部完成时_abortRemainingPlan_不应产生额外事件() {
         // 三步全 completed → 没有 remaining 需要 abort → callback.onPlan 不应该被调
-        AtomicReference<List<WorkspaceContext.PlanStep>> captured = new AtomicReference<>();
+        AtomicReference<List<PlanStep>> captured = new AtomicReference<>();
         var plan = List.of(
-                new WorkspaceContext.PlanStep("读文件", "completed"),
-                new WorkspaceContext.PlanStep("分析", "completed"),
-                new WorkspaceContext.PlanStep("写回复", "completed"));
+                new PlanStep("读文件", "completed"),
+                new PlanStep("分析", "completed"),
+                new PlanStep("写回复", "completed"));
 
         // 手动调 abortRemainingPlan 的纯逻辑：它内部会检查 hasRemaining
         // 如果全 completed，应该直接 return 不发事件
@@ -42,12 +43,12 @@ class ReActAgentServiceTest {
     void 计划进行中_abortRemainingPlan_把剩余步骤标aborted() {
         // 步骤 1 已完成，步骤 2 进行中，步骤 3 待开始 → abort 后 2 和 3 变 aborted
         var plan = List.of(
-                new WorkspaceContext.PlanStep("读文件", "completed"),
-                new WorkspaceContext.PlanStep("分析代码", "in_progress"),
-                new WorkspaceContext.PlanStep("写回复", "pending"));
+                new PlanStep("读文件", "completed"),
+                new PlanStep("分析代码", "in_progress"),
+                new PlanStep("写回复", "pending"));
 
-        List<WorkspaceContext.PlanStep> aborted = plan.stream()
-                .map(s -> new WorkspaceContext.PlanStep(s.title(),
+        List<PlanStep> aborted = plan.stream()
+                .map(s -> new PlanStep(s.title(),
                         "completed".equals(s.status()) ? "completed" : "aborted"))
                 .toList();
 
@@ -63,11 +64,11 @@ class ReActAgentServiceTest {
     @Test
     void 计划全pending_abortRemainingPlan_全部标aborted() {
         var plan = List.of(
-                new WorkspaceContext.PlanStep("a", "pending"),
-                new WorkspaceContext.PlanStep("b", "pending"));
+                new PlanStep("a", "pending"),
+                new PlanStep("b", "pending"));
 
-        List<WorkspaceContext.PlanStep> aborted = plan.stream()
-                .map(s -> new WorkspaceContext.PlanStep(s.title(), "aborted"))
+        List<PlanStep> aborted = plan.stream()
+                .map(s -> new PlanStep(s.title(), "aborted"))
                 .toList();
 
         assertTrue(aborted.stream().allMatch(s -> "aborted".equals(s.status())));

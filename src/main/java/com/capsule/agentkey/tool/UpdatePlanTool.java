@@ -1,5 +1,6 @@
 package com.capsule.agentkey.tool;
 
+import com.capsule.agentkey.agent.run.PlanStep;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -83,7 +84,7 @@ public class UpdatePlanTool implements BaseTool {
             return ToolResult.fail("步骤过多：最多 " + MAX_STEPS + " 步，当前 " + stepsNode.size() + " 步");
         }
 
-        List<WorkspaceContext.PlanStep> steps = new ArrayList<>();
+        List<PlanStep> steps = new ArrayList<>();
         int inProgress = 0;
         for (int i = 0; i < stepsNode.size(); i++) {
             JsonNode node = stepsNode.get(i);
@@ -102,7 +103,7 @@ public class UpdatePlanTool implements BaseTool {
             if ("in_progress".equals(status)) {
                 inProgress++;
             }
-            steps.add(new WorkspaceContext.PlanStep(title, status));
+            steps.add(new PlanStep(title, status));
         }
         if (inProgress > 1) {
             return ToolResult.fail("同一时间最多只能有一个进行中的步骤，当前有 " + inProgress + " 个");

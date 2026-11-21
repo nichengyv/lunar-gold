@@ -73,6 +73,8 @@ public class AgentRunEvent {
         /** P7-06：agent 暂停等待用户输入，payload 含 questionId/question/header/options/multi_select */
         USER_QUESTION,
         /** P7-06：用户回答了 agent 的询问，payload 含 questionId/selected/custom */
-        USER_ANSWERED
+        USER_ANSWERED,
+        /** R1：任务计划快照变更，payload.steps 为完整步骤列表（断线重放时重建计划） */
+        PLAN_UPDATED
     }
 }

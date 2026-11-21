@@ -127,7 +127,7 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
         AgentRun waiting = seedRun(1L, 12L, RunState.WAITING_APPROVAL);
 
         // 模拟新进程启动：全新的 Service 实例扫描真实库
-        AgentRunService restarted = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
+        AgentRunService restarted = new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper()));
         restarted.recoverAfterRestart();
 
         AgentRun queuedAfter = runRepo.findById(queued.getId()).orElseThrow();
@@ -198,8 +198,8 @@ class RestartRecoveryAndMultiInstanceAcceptanceTest {
 
     @Test
     void 双实例共享run状态() {
-        AgentRunService instanceA = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
-        AgentRunService instanceB = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
+        AgentRunService instanceA = new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper()));
+        AgentRunService instanceB = new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper()));
 
         AgentRunService.CreateResult created = instanceA.create(1L, 10L, 20L, "req-d", "{\"prompt\":\"hi\"}");
         Long runId = created.run().getId();

@@ -1,5 +1,8 @@
 package com.capsule.agentkey.tool;
 
+import com.capsule.agentkey.agent.run.PlanStep;
+import com.capsule.agentkey.agent.run.RunContext;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -8,17 +11,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 工作区工具的请求上下文（ThreadLocal）。
  * ReActAgentService 在执行 Agent 前设置 userId + projectId，
  * 工作区工具（list_dir / read_file / run_command 等）从中取出，避免改动 dispatch 签名。
+ *
+ * <p>R1：这里只保留「工具线程视图」。run 级别的权威状态（runId / plan / 取消标记）
+ * 收敛到 {@link RunContext}，本类通过 {@link #runContext()} 访问同一份实例。
+ * 未注入 RunContext 的测试/旧调用仍走本地字段，保证可回滚。
  */
 public class WorkspaceContext {
-
-    /** 任务计划中的一个步骤：标题 + 状态（pending / in_progress / completed / aborted） */
-    public record PlanStep(String title, String status) {
-    }
 
     private static final ThreadLocal<WorkspaceContext> HOLDER = new ThreadLocal<>();
 
     private final Long userId;
     private final Long projectId;
+    /** R1：Run 级权威状态；构造时可空（测试路径） */
+    private final RunContext runContext;
     /** P7-06：当前 run id——ask_user_question 挂起/恢复的 key */
     private Long runId;
     /** 当前会话 id（可为空，MCP 工具或后台任务无会话时） */
@@ -29,10 +34,10 @@ public class WorkspaceContext {
     private final AtomicBoolean cancelled;
     /** 本次生成中工具对工作区文件产生的变更，供上层逐个推送给前端 */
     private final List<FileChange> fileChanges = new ArrayList<>();
-    /** 本轮任务计划快照：update_plan 工具写入，ReAct 循环在工具执行后推送给前端 */
-    private List<PlanStep> plan = List.of();
-    /** 计划是否有更新（推送后清空，避免同一份计划重复下发） */
-    private boolean planChanged;
+    /** 未注入 RunContext 时的本地计划快照（迁移适配层） */
+    private List<PlanStep> localPlan = List.of();
+    /** 未注入 RunContext 时的本地「计划已更新」标记 */
+    private boolean localPlanChanged;
     /** D1: 用户消息里声明的文件范围约束——scope 列表非空时，文件类工具只能在这些路径下操作；空 = 不限制 */
     private List<String> scope = List.of();
     /** P5-05：最近一批变更文件的诊断结果，供完成判定与前端验证摘要复用 */
@@ -53,6 +58,19 @@ public class WorkspaceContext {
         this.userId = userId;
         this.projectId = projectId;
         this.cancelled = cancelled;
+        this.runContext = null;
+        this.toolStats = new java.util.concurrent.ConcurrentHashMap<>();
+    }
+
+    /** R1：以 RunContext 为权威状态创建工具视图 */
+    public WorkspaceContext(RunContext runContext) {
+        this.userId = runContext.userId();
+        this.projectId = runContext.projectId();
+        this.cancelled = runContext.cancelled();
+        this.runContext = runContext;
+        this.runId = runContext.runId();
+        this.sessionId = runContext.sessionId();
+        this.turnId = runContext.turnId();
         this.toolStats = new java.util.concurrent.ConcurrentHashMap<>();
     }
 
@@ -61,6 +79,7 @@ public class WorkspaceContext {
         this.userId = parent.userId;
         this.projectId = parent.projectId;
         this.cancelled = parent.cancelled;
+        this.runContext = parent.runContext;
         this.runId = parent.runId;
         this.sessionId = parent.sessionId;
         this.turnId = parent.turnId;
@@ -95,6 +114,8 @@ public class WorkspaceContext {
 
     public Long userId() { return userId; }
     public Long projectId() { return projectId; }
+    /** R1：Run 级权威状态；测试/旧调用可能为 null */
+    public RunContext runContext() { return runContext; }
     public Long runId() { return runId; }
     public void setRunId(Long runId) { this.runId = runId; }
     public Long sessionId() { return sessionId; }
@@ -126,19 +147,26 @@ public class WorkspaceContext {
 
     /** 当前计划快照；没有上下文或还没提交过时返回空列表 */
     public List<PlanStep> plan() {
-        return plan;
+        return runContext != null ? runContext.plan() : localPlan;
     }
 
-    /** 更新计划快照并标记为「待推送」 */
+    /** 更新计划快照并标记为「待推送」；注入 RunContext 时同步触发持久化 */
     public void setPlan(List<PlanStep> steps) {
-        this.plan = List.copyOf(steps);
-        this.planChanged = true;
+        if (runContext != null) {
+            runContext.updatePlan(steps);
+            return;
+        }
+        this.localPlan = List.copyOf(steps);
+        this.localPlanChanged = true;
     }
 
     /** 有无未推送的计划变化；返回 true 时同时清空标记 */
     public boolean drainPlanChanged() {
-        if (!planChanged) return false;
-        planChanged = false;
+        if (runContext != null) {
+            return runContext.drainPlanChanged();
+        }
+        if (!localPlanChanged) return false;
+        localPlanChanged = false;
         return true;
     }
 
@@ -171,6 +199,11 @@ public class WorkspaceContext {
 
     public static void set(Long userId, Long projectId) {
         set(userId, projectId, null);
+    }
+
+    /** R1：以 RunContext 为权威状态绑定当前线程（runId / plan / 取消标记同源） */
+    public static void set(RunContext runContext) {
+        HOLDER.set(new WorkspaceContext(runContext));
     }
 
     public static void set(Long userId, Long projectId, AtomicBoolean cancelled) {

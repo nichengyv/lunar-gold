@@ -58,7 +58,7 @@ class CrossTenantAccessTest {
         run.setUserId(1L);
         when(runRepo.findById(77L)).thenReturn(Optional.of(run));
 
-        AgentRunService runService = new AgentRunService(runRepo, eventRepo, new ObjectMapper());
+        AgentRunService runService = new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper()));
 
         // SSE 续传接口先做 findByIdAndUserId，查不到直接 400，不会走到读取事件表
         assertTrue(runService.findByIdAndUserId(77L, 2L).isEmpty());

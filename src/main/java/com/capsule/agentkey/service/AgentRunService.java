@@ -38,6 +38,8 @@ public class AgentRunService {
     private final AgentRunRepository runRepo;
     private final AgentRunEventRepository eventRepo;
     private final ObjectMapper objectMapper;
+    /** R1：事件与计划快照的唯一写入入口；状态迁移的审计事件也统一走它 */
+    private final com.capsule.agentkey.agent.run.RunEventStore runEventStore;
 
     /**
      * 合法状态转移表。key = 当前状态；value = 允许迁移到的目标状态集合。
@@ -420,23 +422,17 @@ public class AgentRunService {
     }
 
     private void appendInternal(Long runId, EventType type, Map<String, Object> payload) {
-        Integer maxSeq = eventRepo.findMaxSeqByRunId(runId);
-        int nextSeq = (maxSeq == null ? 0 : maxSeq) + 1;
-        AgentRunEvent ev = new AgentRunEvent();
-        ev.setRunId(runId);
-        ev.setSeq(nextSeq);
-        ev.setEventType(type);
-        ev.setPayload(payload == null ? null : writeJson(payload));
-        eventRepo.save(ev);
+        // R1：seq 分配与事件插入都收敛到 RunEventStore（行锁 + 唯一约束兜底），
+        // 避免并发追加读到同一个 max(seq)
+        runEventStore.append(runId, type, payload);
     }
 
-    private String writeJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            // 事件写 JSON 失败不应该影响主流程——降级为 toString，避免 DB 写入失败
-            log.warn("事件 payload 序列化失败，降级为 toString: {}", e.getMessage());
-            return String.valueOf(value);
-        }
+    /**
+     * R1：读取 Run 已持久化的任务计划快照。
+     * 续跑、断线重放和前端恢复都从这里取权威版本；没有计划时返回空列表。
+     */
+    @Transactional(readOnly = true)
+    public List<com.capsule.agentkey.agent.run.PlanStep> loadPlan(Long runId) {
+        return runEventStore.loadPlan(runId);
     }
 }

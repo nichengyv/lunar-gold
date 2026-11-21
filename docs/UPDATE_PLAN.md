@@ -847,8 +847,8 @@ views/        ChatView（只负责布局与挂载）
 
 | 批次 | 内容 | 出口（必须同时满足） | 回滚方式 |
 |---|---|---|---|
-| **R0 安全网** | `ScriptedAgentLoopTest`（固定模型响应驱动主循环）；`RunContext` 契约测试；seq 并发测试 | 覆盖 plan/停滞/审批/取消/恢复；全量测试绿 | 只增测试 |
-| **R1 状态地基** | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
+| **R0 安全网** ✅ 2026-11-21 | `ScriptedAgentLoopTest`（固定模型响应驱动主循环）；`RunContext` 契约测试；seq 并发测试 | 覆盖 plan/停滞/审批/取消/恢复；全量测试绿 | 只增测试 |
+| **R1 状态地基** ✅ 2026-11-21 | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
 | **R2 Context 瘦身** | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
 | **R3 工具接缝** | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
 | **R4 编排接缝** | `AgentOrchestrator` + `LoopGuard` + `StreamPublisher`；落地 P7-08 渐进 nudge | `ReActAgentService` 行数显著下降；L1 停滞恢复达标 | 保留旧 execute |
@@ -908,4 +908,27 @@ views/        ChatView（只负责布局与挂载）
 4. `V22__add_agent_run_plan.sql`：`agent_run` 增加 `plan_json TEXT`（投影）。
 5. `UpdatePlanTool` 写 `RunContext` + `RunEventStore`；`buildMessages` 读取快照并作为 user-role 消息注入（保护 system 前缀缓存）。
 6. 先不改 `WorkspaceContext` 字段，只加迁移适配层，保证 R1 可独立回滚。
+
+### 14.11 落地记录
+
+#### R0 安全网（2026-11-21）
+
+| 测试 | 覆盖 |
+|---|---|
+| `ScriptedAgentLoopTest`（4） | update_plan 推进 + 收尾把未完成步骤标 aborted；连续相同调用触发 `REPEATED_TOOL_CALL`；取消标记置位后不再请求模型并清理 ThreadLocal；续跑从 `plan_json` 恢复计划并以 user 消息注入 |
+| `RunContextTest`（5） | 计划快照不可变、drain 一次即清空、持久化回调失败降级 |
+| `RunEventStoreTest`（6） | 先锁 Run 行再分配 seq、空事件流从 1 开始、run 不存在拒绝追加、计划只更新 `plan_json` 列、计划读写与 JSON 损坏降级 |
+
+#### R1 状态地基（2026-11-21）
+
+- 新增 `agent/run/PlanStep`、`RunContext`、`RunEventStore`；`AgentRunEvent` 增加 `PLAN_UPDATED`。
+- `V22__add_agent_run_plan.sql`：`agent_run.plan_json TEXT`。
+- `AgentRunRepository`：`lockForEventAppend`（`PESSIMISTIC_WRITE`）+ `updatePlanJson`（只改投影列，禁止整行 save 覆盖并发状态）。
+- `AgentRunService`：事件追加统一委托 `RunEventStore`，新增 `loadPlan`。
+- `WorkspaceContext`：新增 RunContext 迁移适配层——有 RunContext 时 runId / plan / 取消标记同源，否则保留本地快照，R1 可独立回滚。
+- `ReActAgentService`：执行前构建 RunContext、恢复持久化计划；`buildMessages` 以 user 消息注入计划快照，system 前缀不变，保护 provider 前缀缓存。
+- 全量测试通过：**417 tests / 0 failures / 0 errors / 17 skipped**（含 `AgentRunServiceTest` / `UpdatePlanToolTest` / `ReActAgentServiceTest` / 断流与重启验收）。
+
+**下一刀（R2）**：`WorkspaceContext` 只保留传输参数，把 scope / diagnostics / verify 等字段迁入 RunContext；
+计划推进的“下一步由谁执行”仍由 ReAct 主循环决定，R2 不动编排。
 

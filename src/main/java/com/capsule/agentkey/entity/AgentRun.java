@@ -1,6 +1,7 @@
 package com.capsule.agentkey.entity;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -61,6 +62,17 @@ public class AgentRun {
     /** 成功/失败结果 JSON（可选） */
     @Column(columnDefinition = "TEXT")
     private String resultJson;
+
+    /**
+     * R1：任务计划快照 JSON（List&lt;PlanStep&gt;）。
+     *
+     * <p>计划不再只活在工具线程的 ThreadLocal 里：update_plan / finalizePlan 都会写这里，
+     * 断线重放、续跑与审计可以从数据库恢复同一份计划。
+     * 不参与默认 JSON 序列化，避免 Run 列表接口被计划正文撑大；前端通过事件流获取。
+     */
+    @JsonIgnore
+    @Column(columnDefinition = "TEXT")
+    private String planJson;
 
     /** 失败时的标准化错误码，与 P3-06 诊断卡片共用枚举 */
     @Column(length = 40)

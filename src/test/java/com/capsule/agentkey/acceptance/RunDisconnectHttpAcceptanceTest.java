@@ -498,6 +498,9 @@ class RunDisconnectHttpAcceptanceTest {
         });
         when(runRepo.findById(any())).thenAnswer(invocation ->
                 Optional.ofNullable(runs.get(invocation.<Long>getArgument(0))));
+        // R1：追加事件前会先锁 Run 行；mock 必须模拟“行存在”
+        when(runRepo.lockForEventAppend(any())).thenAnswer(invocation ->
+                Optional.ofNullable(runs.get(invocation.<Long>getArgument(0))));
         when(eventRepo.findMaxSeqByRunId(any())).thenAnswer(invocation -> {
             Long runId = invocation.getArgument(0);
             return eventsOf(runId).stream().map(AgentRunEvent::getSeq)
@@ -542,7 +545,7 @@ class RunDisconnectHttpAcceptanceTest {
                 projectService, new GenerationRegistry(), mock(VisionService.class),
                 contextSummaryService, policyResolver, approvals,
                 mock(SessionMemoryExtractionService.class),
-                new AgentRunService(runRepo, eventRepo, new ObjectMapper()),
+                new AgentRunService(runRepo, eventRepo, new ObjectMapper(), new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, new ObjectMapper())),
                 new com.capsule.agentkey.tool.AskUserQuestionTool(),
                 new PromptCatalog(new MockEnvironment()), agentExecutor);
         CONTROLLER.set(controller);

@@ -1,5 +1,7 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.agent.run.PlanStep;
+import com.capsule.agentkey.agent.run.RunContext;
 import com.capsule.agentkey.client.AgentClient;
 import com.capsule.agentkey.client.AgentStreamCallback;
 import com.capsule.agentkey.entity.AgentRule;
@@ -56,6 +58,9 @@ public class ReActAgentService {
     /** P7-06：询问超时/中断后把 Run 从 WAITING_USER_INPUT 拉回 RUNNING；测试手动 new 时为 null，走 null check */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AgentRunService agentRunService;
+    /** R1：计划快照落库 + 事件追加；测试手动 new 时为 null，计划只保留内存快照 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.capsule.agentkey.agent.run.RunEventStore runEventStore;
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
@@ -291,7 +296,7 @@ public class ReActAgentService {
         //工作区文件被工具改动时推送（write_file/edit_file/run_command），前端据此展示变更文件与 diff
         default void onFileChange(com.capsule.agentkey.tool.FileChange change) {}
         //第六十八批 A1：update_plan 提交/更新任务计划后推送，前端实时刷新计划面板
-        default void onPlan(java.util.List<WorkspaceContext.PlanStep> steps) {}
+        default void onPlan(java.util.List<PlanStep> steps) {}
         //P4-07：本轮模型调用消耗的 token，上层按 run 累加并在终态落库
         default void onUsage(long promptTokens, long completionTokens) {}
         //第六十八批 A2：危险工具执行前请求用户审批，approvalId 用于前端回传决策
@@ -344,12 +349,12 @@ public class ReActAgentService {
                         Long userId, Long projectId, Long runId, Long sessionId, String turnId,
                         boolean useRag, String fileContext, String imageContext, String contextSummary,
                         String sessionReferenceContext, AtomicBoolean cancelRequested, StreamCallback callback) {
-        //工作区工具需要 userId/projectId 上下文，用 ThreadLocal 透传（dispatch 签名不变）；
-        //cancelRequested 让 run_command 这类长耗时工具能在用户停止生成时杀掉子进程
-        WorkspaceContext.set(userId, projectId, cancelRequested);
-        if (runId != null) WorkspaceContext.get().setRunId(runId);
-        WorkspaceContext.get().setSessionId(sessionId);
-        WorkspaceContext.get().setTurnId(turnId);
+        // R1：runId / plan / 取消标记等 Run 级状态收敛到 RunContext，
+        // WorkspaceContext 只作为工具线程视图（dispatch 签名不变）。
+        // 计划变更会通过回调同步落 agent_run.plan_json 并追加 PLAN_UPDATED 事件。
+        RunContext runContext = createRunContext(runId, userId, projectId, sessionId,
+                turnId, cancelRequested);
+        WorkspaceContext.set(runContext);
         // 记录本轮起始权限；运行中用户在会话里改档位会覆盖这里，下一次工具调用即刻生效
         permissionTracker.put(sessionId, policy.permission());
         //D1: 解析用户消息里的 scope 声明，进 WorkspaceContext；文件类工具执行前会拦截
@@ -403,7 +408,8 @@ public class ReActAgentService {
             List<ObjectNode> messages = buildMessages(userId, projectId, sessionId,
                     history, userPrompt, ragContext, fileContext,
                     imageContext, sessionReferenceContext,
-                    projectInstruction, repoMap, workspacePath, policy);
+                    projectInstruction, repoMap, workspacePath, policy,
+                    runContext.plan());
             if (!ragContext.isEmpty()) {
                 log.info("知识库上下文已注入 system 消息（{} 字符），大模型可见", ragContext.length());
             }
@@ -932,6 +938,33 @@ public class ReActAgentService {
         }
     }
 
+    /**
+     * R1：构建本次 Run 的权威上下文。
+     *
+     * <p>新 Run 的初始计划为空；同一 runId 续跑/重放时从 {@code agent_run.plan_json}
+     * 恢复快照，保证模型看到的计划不是线程内存里的临时值。
+     * 计划变更回调负责落库并写 {@code PLAN_UPDATED} 事件；持久化失败由
+     * {@link RunContext#updatePlan} 内部降级，不影响主循环。
+     */
+    private RunContext createRunContext(Long runId, Long userId, Long projectId, Long sessionId,
+                                        String turnId, AtomicBoolean cancelRequested) {
+        List<PlanStep> persistedPlan = List.of();
+        if (runId != null && agentRunService != null) {
+            try {
+                persistedPlan = agentRunService.loadPlan(runId);
+            } catch (Exception e) {
+                log.warn("读取 Run 计划快照失败，按空计划继续：{}", e.getMessage());
+            }
+        }
+        return RunContext.create(runId, userId, projectId, sessionId, turnId, cancelRequested,
+                persistedPlan,
+                steps -> {
+                    if (runEventStore != null && runId != null) {
+                        runEventStore.savePlan(runId, steps);
+                    }
+                });
+    }
+
     private Completion candidateCompletion(boolean workspaceChanged, boolean unresolvedWriteFailure,
                                            boolean unresolvedApprovalRejection) {
         if (hasUnfinishedPlan()) {
@@ -1206,7 +1239,7 @@ public class ReActAgentService {
 
             var finalized = plan.stream()
                     .map(s -> "completed".equals(s.status())
-                            ? s : new WorkspaceContext.PlanStep(s.title(), "aborted"))
+                            ? s : new PlanStep(s.title(), "aborted"))
                     .toList();
             ctx.setPlan(finalized);
             callback.onPlan(finalized);
@@ -1223,7 +1256,8 @@ public class ReActAgentService {
                                            String ragContext, String fileContext, String imageContext,
                                            String sessionReferenceContext,
                                            String projectInstruction, String repoMap, String workspacePath,
-                                           AgentPolicy policy) {
+                                           AgentPolicy policy,
+                                           List<PlanStep> planSnapshot) {
         List<ObjectNode> messages = new ArrayList<>();
 
         //第六十五批：三层 AgentRule 注入——在固定骨架之前拼，权重最高
@@ -1332,6 +1366,12 @@ public class ReActAgentService {
             }
         }
 
+        // R1：计划快照以 user 消息注入（续跑/重放时恢复），不改 system 前缀，
+        // 避免 provider 的前缀缓存因计划变化整段失效。
+        if (planSnapshot != null && !planSnapshot.isEmpty()) {
+            messages.add(buildPlanSnapshotMessage(planSnapshot));
+        }
+
         //创建消息头，创建一个json节点，指定角色为user
         ObjectNode userMsg = mapper.createObjectNode();
         userMsg.put("role", "user");
@@ -1356,6 +1396,22 @@ public class ReActAgentService {
         messages.add(userMsg);
 
         return messages;
+    }
+
+    /** R1：把持久化的计划快照格式化为一条 user 消息，供续跑时对齐步骤状态 */
+    private ObjectNode buildPlanSnapshotMessage(List<PlanStep> plan) {
+        StringBuilder sb = new StringBuilder("【本轮任务计划（来自 Run 的持久化快照）】\n");
+        for (int i = 0; i < plan.size(); i++) {
+            PlanStep step = plan.get(i);
+            sb.append(i + 1).append(". [").append(step.status()).append("] ")
+                    .append(step.title()).append('\n');
+        }
+        sb.append("继续执行时保持与这份计划一致；完成某步后调用 update_plan 更新状态。");
+
+        ObjectNode msg = mapper.createObjectNode();
+        msg.put("role", "user");
+        msg.put("content", sb.toString());
+        return msg;
     }
 
     /** 从工具入参中取出命令原文，供权限档位判断是否为破坏性命令；解析失败按空串处理（不额外要求审批） */

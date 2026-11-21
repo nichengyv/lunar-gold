@@ -2,7 +2,10 @@ package com.capsule.agentkey.repository;
 
 import com.capsule.agentkey.entity.AgentRun;
 import com.capsule.agentkey.entity.AgentRun.RunState;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,6 +28,30 @@ public interface AgentRunRepository extends JpaRepository<AgentRun, Long> {
 
     /** 启动时扫描所有未完成 run，清理已随旧进程消失的执行线程 */
     List<AgentRun> findByStateIn(List<RunState> states);
+
+    // ---- R1：事件序号与计划快照 ----
+
+    /**
+     * 追加事件前锁住 Run 行。
+     *
+     * <p>事件 seq 仍是「当前最大值 + 1」，但必须在同一事务里先拿到行级排他锁，
+     * 否则两个并发追加会读到同一个 max(seq)，后写入者触发 uk_run_event_seq 唯一约束。
+     * 锁持有到事务提交，并发追加自然串行；唯一约束保留为兜底不变量。
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("SELECT r FROM AgentRun r WHERE r.id = :runId")
+    Optional<AgentRun> lockForEventAppend(@Param("runId") Long runId);
+
+    /**
+     * 只更新计划快照列。
+     *
+     * <p>不能用实体 save()：Hibernate 默认整行 UPDATE，会把并发状态迁移刚写入的 state 覆盖回旧值。
+     */
+    @Modifying(flushAutomatically = true)
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE AgentRun r SET r.planJson = :planJson WHERE r.id = :runId")
+    int updatePlanJson(@Param("runId") Long runId, @Param("planJson") String planJson);
 
     /** 桌面重启后扫描未完成的 run，恢复 WAITING_APPROVAL / RUNNING */
     List<AgentRun> findByUserIdAndStateIn(Long userId, List<RunState> states);
