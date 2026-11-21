@@ -724,7 +724,7 @@ P7-09 长会话上下文压缩 ──────────── ⏸ 排在 P
 | L2 | 计划跟踪 | 计划偏离 / scope 变化后 2 轮内发现并重规划，不再出现 STEP_OMISSION | 🟡 依赖 P7-07 |
 | L3 | 错误恢复 | 工具失败 / 停滞 2 轮内恢复；无法恢复时转 ask_user，而非硬停 | 🟡 依赖 P7-08 |
 | L4 | 成本可控 | 上下文占用随 turn 近似线性，prompt 峰值不超窗口 70% | 🟡 依赖 P7-09 |
-| L5 | 完成可信 | 完成状态必须通过 Verify / 诊断确认，不接受模型自报 | ⚠️ 有 `finalizePlan` / Verify，但仍有 `planCompletion` 边界 |
+| L5 | 完成可信 | 完成状态必须通过 Verify / 诊断确认，不接受模型自报 | 🟡 R7c 已加验证命令自动探测（pom/gradle/npm/go/cargo/tsc），无 verify.json 也能工具级验证；裸源码目录仍需显式配置 |
 | L6 | 中断续跑 | 进程重启 / 断线后从最近 checkpoint 续跑，不从头再来 | ⚠️ P7-01 只处理重启残局 |
 | L7 | 大任务分解 | 超出单次 ReAct 窗口的任务可拆成子任务并分别验收 | ❌ 未规划 |
 | L8 | 评测可信 | 每层 n≥10 重复 + 真实任务集，结论有统计置信度 | ❌ 当前 n=3 合成数据集 |
@@ -856,7 +856,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分（含 messages）+ 发送编排 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
-| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃，真实 kill→重启→resume E2E 通过）；R7b-live 真实模型续跑完成率 🔲 待跑：runner + 预注册门禁已落地，Key 冒烟 n=1 通过，L1 全量 20 对（约 3-4h）与 L2/L3（10h+）待执行；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测、构建与真实崩溃续跑 E2E 均通过 | 按项开关 |
+| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃，真实 kill→重启→resume E2E 通过）；R7b-live 真实模型续跑完成率 🔲 待跑：runner + 预注册门禁已落地，Key 冒烟 n=1 通过，L1 全量 20 对（约 3-4h）与 L2/L3（10h+）待执行；R7c 进行中：L5 完成强校验（验证命令自动探测）✅ 2026-11-21，大任务分解（L7）、检索型记忆待定 | L1～L8 验收标准达标；R7b 单测、构建与真实崩溃续跑 E2E 均通过；R7c L5 自动探测单测覆盖 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
 
@@ -1070,6 +1070,16 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **L3 错误恢复的直接证据（本次复验）**：`toolFailures=1`、`recoveredTools=1`，即真实发生一次工具调用失败并在后续轮次自行恢复，未中断任务、未触发停滞。
 - **L3 仍存在的真实短板（归入 R7c L5）**：12 个 turn 的 `completionReasons` 全部为 `UNVERIFIED:VERIFY_NOT_CONFIGURED`——评测工作区未配置验证命令，模型只能依据「变更后文件诊断未发现编译错误」自称完成，多次在回答里明确声明「未做整体编译或测试，不能声称验证通过」。这正是「完成强校验」要解决的问题：完成状态目前仍依赖模型自报，缺工具级验证闭环。
 - **结论口径**：L3/L4 以 n=1 冒烟给出方向性结论（L4 达标、L3 机制可用），**不构成层完成率**；层完成率需 n≥10 全量，仍待批准。
+
+#### R7c L5 完成强校验：验证命令自动探测（2026-11-21）
+
+- **要解决的问题**：L3 冒烟暴露「无 verify.json → `NOT_CONFIGURED` → `UNVERIFIED` → 模型自报完成」。真实工作区大多自带构建文件，不该因为少写一个配置文件就失去工具级完成证据。
+- **实现**：新增 `VerifyCommandDetector`，在显式配置缺失时按工作区根目录构建文件探测**一条**验证命令，按固定优先级：`pom.xml` → `mvn -B -q -DskipTests compile`；`build.gradle(.kts)` → `gradle -q compileJava`；`package.json` → `npm run typecheck` / `build` / `test`（依序取第一个存在的脚本）；`go.mod` → `go build ./...`；`Cargo.toml` → `cargo check --quiet`；`tsconfig.json` → `tsc --noEmit`。
+- **安全边界**：命令文本固定、不含任何工作区内容；只探测根目录、不递归、不读脚本；不使用 `./mvnw` 这类工作区相对脚本（`CommandService` 明确禁止）；探测命令全部落在既有命令白名单内，仍走同一套超时/输出截断。
+- **配置**：`agent.verify.auto-detect`（默认 `true`）、`agent.verify.auto-detect-timeout-seconds`（默认 300）；显式 `verify.json` 始终优先。
+- **诚实性**：自动探测不改变状态语义——探测不到构建文件仍是 `NOT_CONFIGURED`/`UNVERIFIED`，不会把未验证包装成成功；结论文案标注「自动探测自 pom.xml」，避免冒充用户配置。
+- **验证**：新增 `VerifyCommandDetectorTest` 6 例 + `VerifyServiceTest` 3 例（自动探测生效、可关闭、显式配置优先）；后端全量 `mvn clean test` 通过。
+- **未覆盖**：裸源码目录（无构建文件，如 L3 评测工作区的 `src/l3/*.java`）仍无法自动验证，需显式配置 `verify.json`；这是有意的边界，不做「猜 javac 文件列表」这类不可靠探测。
 
 
 
