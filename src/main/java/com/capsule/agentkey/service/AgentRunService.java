@@ -462,6 +462,22 @@ public class AgentRunService {
     }
 
     /**
+     * R7b：会话最近一次 Run 若可续跑则返回它。
+     *
+     * <p>只看最近一条：用户已经继续对话后，不再提示续跑更早的中断任务，
+     * 避免把用户拉回陈旧的执行上下文。
+     */
+    @Transactional(readOnly = true)
+    public Optional<AgentRun> findLatestResumable(Long userId, Long sessionId) {
+        List<AgentRun> runs = runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId);
+        if (runs.isEmpty()) {
+            return Optional.empty();
+        }
+        AgentRun latest = runs.get(0);
+        return isResumable(latest) ? Optional.of(latest) : Optional.empty();
+    }
+
+    /**
      * FAILED(PROCESS_RESTARTED) → RUNNING：用户显式点击「继续执行」时调用。
      *
      * <p>终态不迁移是常规不变量；这里是唯一的显式例外，且有双重前置条件：

@@ -209,6 +209,90 @@ class ScriptedAgentLoopTest {
     }
 
     // ------------------------------------------------------------------
+    // R7b：断点写入与续跑
+    // ------------------------------------------------------------------
+
+    @Test
+    void 每轮工具批落地后写入可续跑断点() {
+        ScriptedAgentClient client = new ScriptedAgentClient(List.of(
+                ScriptedAgentClient.ScriptedTurn.ofTools(List.of(
+                        new ScriptedAgentClient.ToolCallSpec("read_file", "{\"path\":\"a.txt\"}"))),
+                ScriptedAgentClient.ScriptedTurn.ofText("完成")));
+        Capture capture = new Capture();
+        ReActAgentService agent = newAgent(client, capture,
+                List.of(tool("read_file", ToolResult.ok("file content"))));
+
+        AgentRunService runService = mock(AgentRunService.class);
+        ReflectionTestUtils.setField(agent, "agentRunService", runService);
+        List<com.capsule.agentkey.agent.run.RunCheckpoint> checkpoints = new ArrayList<>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            checkpoints.add(inv.getArgument(1));
+            return null;
+        }).when(runService).saveCheckpoint(eq(555L), any());
+
+        try {
+            agent.execute("test-key",
+                    new AgentPolicy("scripted", AgentPolicy.Reasoning.FAST, AgentPolicy.Permission.AUTO),
+                    "修复登录", List.of(), USER_ID, PROJECT_ID, 555L, SESSION_ID,
+                    "turn-checkpoint", false, "", "", "", "", new AtomicBoolean(false), capture);
+        } finally {
+            agent.shutdownReadOnlyToolPool();
+        }
+
+        assertEquals(1, checkpoints.size(), "一个完成的工具批对应一份断点");
+        com.capsule.agentkey.agent.run.RunCheckpoint checkpoint = checkpoints.get(0);
+        assertEquals(1, checkpoint.getRound());
+        assertTrue(checkpoint.getMessages().stream()
+                        .anyMatch(m -> "assistant".equals(m.path("role").asText()) && m.has("tool_calls")),
+                "断点必须包含 assistant(tool_calls)");
+        assertTrue(checkpoint.getMessages().stream()
+                        .anyMatch(m -> "tool".equals(m.path("role").asText())),
+                "断点必须包含工具结果，续跑才不会重放工具");
+        assertTrue(checkpoint.getPromptTokens() > 0, "断点必须带上已累计 token");
+    }
+
+    @Test
+    void 从断点续跑直接使用快照消息且不重建历史() {
+        ScriptedAgentClient client = new ScriptedAgentClient(List.of(
+                ScriptedAgentClient.ScriptedTurn.ofText("已继续")));
+        Capture capture = new Capture();
+        ReActAgentService agent = newAgent(client, capture, List.of());
+        AgentRunService runService = mock(AgentRunService.class);
+        ReflectionTestUtils.setField(agent, "agentRunService", runService);
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        com.fasterxml.jackson.databind.node.ObjectNode user =
+                mapper.createObjectNode().put("role", "user").put("content", "原始任务：修复登录");
+        com.fasterxml.jackson.databind.node.ObjectNode assistant =
+                mapper.createObjectNode().put("role", "assistant").putNull("content");
+        com.fasterxml.jackson.databind.node.ObjectNode toolMsg =
+                mapper.createObjectNode().put("role", "tool").put("content", "file content");
+        com.capsule.agentkey.agent.run.RunCheckpoint checkpoint =
+                new com.capsule.agentkey.agent.run.RunCheckpoint();
+        checkpoint.setRound(1);
+        checkpoint.setPromptTokens(50);
+        checkpoint.setCompletionTokens(10);
+        checkpoint.setMessages(List.of(user, assistant, toolMsg));
+
+        try {
+            agent.resume("test-key",
+                    new AgentPolicy("scripted", AgentPolicy.Reasoning.FAST, AgentPolicy.Permission.AUTO),
+                    556L, USER_ID, PROJECT_ID, SESSION_ID, "turn-resume-loop",
+                    "原始任务：修复登录", checkpoint, new AtomicBoolean(false), capture);
+        } finally {
+            agent.shutdownReadOnlyToolPool();
+        }
+
+        assertEquals(1, client.modelCalls());
+        List<com.fasterxml.jackson.databind.node.ObjectNode> sent = client.messageSnapshots().get(0);
+        assertTrue(sent.stream().anyMatch(m -> "原始任务：修复登录".equals(m.path("content").asText())),
+                "续跑必须直接使用断点里的用户消息");
+        assertTrue(sent.stream().anyMatch(m -> "tool".equals(m.path("role").asText())),
+                "续跑必须保留断点里的工具结果");
+        assertEquals(3, sent.size(), "不得重新拼历史消息或重复注入上下文");
+    }
+
+    // ------------------------------------------------------------------
     // 脚手架
     // ------------------------------------------------------------------
 

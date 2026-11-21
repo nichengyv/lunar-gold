@@ -526,7 +526,8 @@ public class ReActAgentService {
                     apiKey, policy, messages, tools, advisorSummary, workspacePath,
                     userId, projectId, sessionId, cancelRequested, callback,
                     approvalUi(callback, userId, projectId),
-                    buildContextAssembler(apiKey, policy.model(), runId)));
+                    buildContextAssembler(apiKey, policy.model(), runId),
+                    runId, null, checkpointSink(runId)));
 
         } catch (Exception e) {
             log.error("ReAct 执行异常", e);
@@ -569,6 +570,75 @@ public class ReActAgentService {
                         runEventStore.savePlan(runId, steps);
                     }
                 });
+    }
+
+    /**
+     * R7b：从断点续跑一次 Run。
+     *
+     * <p>与 {@link #execute} 的区别：不重新检索知识库、不重建历史消息，直接把断点里的
+     * 模型消息快照作为初始上下文；工具清单、工作区路径、scope 与计划快照仍按当前项目
+     * 与会话策略重新解析，避免沿用崩溃前的陈旧配置。
+     *
+     * <p>只用于用户显式续跑（进程重启后 Run 已被标为 FAILED/PROCESS_RESTARTED）。
+     */
+    public void resume(String apiKey, AgentPolicy policy, Long runId, Long userId, Long projectId,
+                       Long sessionId, String turnId, String prompt,
+                       com.capsule.agentkey.agent.run.RunCheckpoint checkpoint,
+                       AtomicBoolean cancelRequested, StreamCallback callback) {
+        if (checkpoint == null || checkpoint.getMessages() == null || checkpoint.getMessages().isEmpty()) {
+            throw new IllegalArgumentException("断点消息为空，无法续跑");
+        }
+        RunContext runContext = createRunContext(runId, userId, projectId, sessionId, turnId, cancelRequested);
+        WorkspaceContext.set(runContext);
+        permissionTracker.put(sessionId, policy.permission());
+        String safePrompt = prompt == null ? "" : prompt;
+        scopeConstraintService.parseAndApply(safePrompt);
+        toolRegistry.resetSessionStats();
+        try {
+            String workspacePath = null;
+            try {
+                Long resolvedId = projectService.resolveProjectId(userId, projectId);
+                workspacePath = projectService.getOwned(userId, resolvedId).getWorkspacePath();
+            } catch (Exception e) {
+                log.warn("续跑读取项目工作区失败，按无工作区继续: {}", e.getMessage());
+            }
+            List<ObjectNode> messages = new ArrayList<>(checkpoint.getMessages());
+            List<ToolCallback> tools = toolRegistry.buildRankedToolCallbacks(safePrompt, policy.permission());
+            log.info("续跑策略: model={}, reasoning={}, permission={}, tools={}, round={}",
+                    policy.model(), policy.reasoning().name(), policy.permission().name(),
+                    tools.size(), checkpoint.getRound());
+            try {
+                if (workspacePath != null && !workspacePath.isBlank()) {
+                    mcpToolBridge.bindWorkspacePath(workspacePath);
+                }
+            } catch (Exception e) {
+                log.warn("MCP Root 注入失败，降级为不注入: {}", e.getMessage());
+            }
+            orchestrator().run(new AgentOrchestrator.Invocation(
+                    apiKey, policy, messages, tools, "", workspacePath,
+                    userId, projectId, sessionId, cancelRequested, callback,
+                    approvalUi(callback, userId, projectId),
+                    buildContextAssembler(apiKey, policy.model(), runId),
+                    runId, checkpoint, checkpointSink(runId)));
+        } catch (Exception e) {
+            log.error("ReAct 续跑异常", e);
+            orchestrator().finalizePlan(callback);
+            callback.onError(e);
+        } finally {
+            if (askUserQuestionTool != null && WorkspaceContext.get() != null) {
+                Long pendingRunId = WorkspaceContext.get().runId();
+                if (pendingRunId != null) askUserQuestionTool.cleanup(pendingRunId);
+            }
+            WorkspaceContext.clear();
+        }
+    }
+
+    /** R7b：轮末断点写入回调；无 runId 或测试环境未注入 Run 服务时关闭断点 */
+    private java.util.function.Consumer<com.capsule.agentkey.agent.run.RunCheckpoint> checkpointSink(Long runId) {
+        if (runId == null || agentRunService == null) {
+            return null;
+        }
+        return checkpoint -> agentRunService.saveCheckpoint(runId, checkpoint);
     }
 
     /** P5-10-3：时间预算是否已耗尽；maxSeconds <= 0 表示不限制。 */

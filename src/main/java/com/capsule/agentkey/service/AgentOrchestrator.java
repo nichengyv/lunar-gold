@@ -3,6 +3,7 @@ package com.capsule.agentkey.service;
 import com.capsule.agentkey.agent.context.ContextAssembler;
 import com.capsule.agentkey.agent.run.FileChangeService;
 import com.capsule.agentkey.agent.run.LoopGuard;
+import com.capsule.agentkey.agent.run.RunCheckpoint;
 import com.capsule.agentkey.agent.stream.StreamPublisher;
 import com.capsule.agentkey.agent.tool.ToolExecutor;
 import com.capsule.agentkey.client.AgentClient;
@@ -60,7 +61,13 @@ public class AgentOrchestrator {
                              AtomicBoolean cancelRequested,
                              StreamCallback callback,
                              ToolExecutor.ApprovalUi approvalUi,
-                             ContextAssembler contextAssembler) {
+                             ContextAssembler contextAssembler,
+                             /** R7b：当前 Run id；为 null 时不写断点（测试/无持久化场景） */
+                             Long runId,
+                             /** R7b：续跑起点；为 null 表示一次普通的新执行 */
+                             RunCheckpoint resumeFrom,
+                             /** R7b：轮末断点写入回调；为 null 表示关闭断点 */
+                             java.util.function.Consumer<RunCheckpoint> checkpointSink) {
     }
 
     private final AgentClient springAiClient;
@@ -132,6 +139,24 @@ public class AgentOrchestrator {
         long changeEpoch = 0;
         long verifiedEpoch = -1;
         boolean verifyUnavailableNotified = false;
+        // R7b：从断点续跑时恢复轮次、预算与停滞状态；消息列表由调用方从快照装配
+        RunCheckpoint resume = invocation.resumeFrom();
+        if (resume != null) {
+            round = Math.max(0, resume.getRound());
+            runStartedAt = System.currentTimeMillis() - Math.max(0, resume.getElapsedMs());
+            promptTokensTotal.set(Math.max(0, resume.getPromptTokens()));
+            completionTokensTotal.set(Math.max(0, resume.getCompletionTokens()));
+            budgetHintSent = resume.isBudgetHintSent();
+            workspaceChanged = resume.isWorkspaceChanged();
+            unresolvedWriteFailure = resume.isUnresolvedWriteFailure();
+            unresolvedApprovalRejection = resume.isUnresolvedApprovalRejection();
+            verifyAttempts = Math.max(0, resume.getVerifyAttempts());
+            changeEpoch = Math.max(0, resume.getChangeEpoch());
+            verifiedEpoch = resume.getVerifiedEpoch();
+            verifyUnavailableNotified = resume.isVerifyUnavailableNotified();
+            log.info("从断点续跑：已完成 {} 轮，累计 token={}", round,
+                    resume.getPromptTokens() + resume.getCompletionTokens());
+        }
         while (round < policy.reasoning().maxToolRounds()) {
             //P6-06：只有用户显式停止才中止；客户端断流不会进入这里，Run 继续执行
             if (cancelRequested != null && cancelRequested.get()) {
@@ -450,6 +475,11 @@ public class AgentOrchestrator {
                 termination.stopForNoProgress(callback, workspaceChanged, termination.toNoProgress(roundSignal));
                 return;
             }
+            // R7b：本轮工具批、诊断与验证回灌已全部落地，写一份可续跑断点
+            persistCheckpoint(invocation, round + 1, System.currentTimeMillis() - runStartedAt,
+                    messages, workspaceChanged, changeEpoch, verifiedEpoch, verifyAttempts,
+                    budgetHintSent, unresolvedWriteFailure, unresolvedApprovalRejection,
+                    verifyUnavailableNotified, promptTokensTotal.get(), completionTokensTotal.get());
             round++;
         }
 
@@ -516,6 +546,44 @@ public class AgentOrchestrator {
     /** R5：未启用上下文接缝时原样返回权威消息列表，保证默认行为零改动 */
     private List<ObjectNode> assembleContext(ContextAssembler assembler, List<ObjectNode> messages) {
         return assembler == null ? messages : assembler.assemble(messages);
+    }
+
+    /**
+     * R7b：写入一份可续跑断点。
+     *
+     * <p>只在轮末调用：此时 assistant(tool_calls) 与全部 tool 响应、诊断/验证回灌
+     * 都已进入消息列表，续跑从下一轮开始即可，不会重放已经落地的工具副作用。
+     * 写入失败只降级为日志——断点不是主流程的必要条件。
+     */
+    private void persistCheckpoint(Invocation invocation, int completedRounds, long elapsedMs,
+                                   List<ObjectNode> messages, boolean workspaceChanged,
+                                   long changeEpoch, long verifiedEpoch, int verifyAttempts,
+                                   boolean budgetHintSent, boolean unresolvedWriteFailure,
+                                   boolean unresolvedApprovalRejection, boolean verifyUnavailableNotified,
+                                   long promptTokens, long completionTokens) {
+        java.util.function.Consumer<RunCheckpoint> sink = invocation.checkpointSink();
+        if (sink == null) {
+            return;
+        }
+        try {
+            RunCheckpoint checkpoint = new RunCheckpoint();
+            checkpoint.setRound(completedRounds);
+            checkpoint.setElapsedMs(Math.max(0, elapsedMs));
+            checkpoint.setMessages(new ArrayList<>(messages));
+            checkpoint.setWorkspaceChanged(workspaceChanged);
+            checkpoint.setChangeEpoch(changeEpoch);
+            checkpoint.setVerifiedEpoch(verifiedEpoch);
+            checkpoint.setVerifyAttempts(verifyAttempts);
+            checkpoint.setBudgetHintSent(budgetHintSent);
+            checkpoint.setUnresolvedWriteFailure(unresolvedWriteFailure);
+            checkpoint.setUnresolvedApprovalRejection(unresolvedApprovalRejection);
+            checkpoint.setVerifyUnavailableNotified(verifyUnavailableNotified);
+            checkpoint.setPromptTokens(promptTokens);
+            checkpoint.setCompletionTokens(completionTokens);
+            sink.accept(checkpoint);
+        } catch (Exception e) {
+            log.warn("断点写入失败，保留上一份断点：{}", e.getMessage());
+        }
     }
 
     /** P5-06：把验证结果作为 user 消息注入下一轮模型上下文 */

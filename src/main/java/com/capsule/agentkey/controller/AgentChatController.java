@@ -17,6 +17,7 @@ import com.capsule.agentkey.entity.ChatSession;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.service.AgentPolicy;
 import com.capsule.agentkey.service.AgentPolicyResolver;
+import com.capsule.agentkey.service.AgentRunService;
 import com.capsule.agentkey.service.ApiKeyService;
 import com.capsule.agentkey.service.ChatAttachmentService;
 import com.capsule.agentkey.service.ChatService;
@@ -346,6 +347,111 @@ public class AgentChatController {
     }
 
     /**
+     * R7b（P8-01）：从最近断点显式续跑一次被进程重启中断的 Run。
+     *
+     * <p>只接受 FAILED/PROCESS_RESTARTED 且留有断点的 Run；正常失败仍然保持终态。
+     * 续跑不重建历史消息，直接把断点里的模型上下文作为起点，避免从头再来；
+     * 工具、工作区、权限与计划快照按当前会话与项目重新解析。
+     */
+    @PostMapping(value = "/runs/{runId}/resume")
+    @RequiresCapability(Capability.CHAT)
+    @PublicApi(scope = "chat:write", group = PublicApiCatalog.GROUP_TASK)
+    public SseEmitter resumeRun(@PathVariable Long runId, HttpServletResponse response) {
+        Long userId = CurrentUser.requireId();
+        AgentRun run = agentRunService.findByIdAndUserId(runId, userId)
+                .orElseThrow(() -> new BusinessException("运行不存在或不属于当前用户"));
+        if (!AgentRunService.isResumable(run)) {
+            throw new BusinessException("该运行不可续跑：仅支持进程重启中断且已留下断点的任务");
+        }
+        Long sessionId = run.getSessionId();
+        if (sessionId == null) {
+            throw new BusinessException("该运行没有关联会话，无法续跑");
+        }
+        ChatSession session = chatService.getOwnedSession(sessionId, userId);
+        Long projectId = session.getProjectId();
+        com.capsule.agentkey.agent.run.RunCheckpoint checkpoint = agentRunService.loadCheckpoint(runId)
+                .orElseThrow(() -> new BusinessException("断点快照已失效，无法续跑"));
+
+        String prompt = "";
+        String turnId = null;
+        try {
+            var request = mapper.readTree(run.getRequestJson() == null ? "{}" : run.getRequestJson());
+            prompt = request.path("prompt").asText("");
+            turnId = request.path("turnId").isMissingNode() ? null : request.path("turnId").asText(null);
+        } catch (Exception e) {
+            log.warn("续跑解析请求快照失败，按空提示继续: runId={}, {}", runId, e.getMessage());
+        }
+        final String finalPrompt = prompt == null ? "" : prompt;
+        final String finalTurnId = (turnId == null || turnId.isBlank())
+                ? "turn-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12)
+                : turnId;
+
+        String basePermission = session.getPermission();
+        if (basePermission == null) {
+            basePermission = projectService.getOwned(userId, projectId).getDefaultPermission();
+        }
+        final AgentPolicy policy = policyResolver.resolve(
+                session.getModel(), session.getReasoning(), basePermission);
+        final String apiKey;
+        try {
+            apiKey = apiKeyService.getDecryptedKey(userId, "DEEPSEEK");
+        } catch (Exception e) {
+            throw new BusinessException("模型密钥不可用，无法续跑");
+        }
+
+        response.setHeader("X-Accel-Buffering", "no");
+        ChatSseChannel channel = ChatSseChannel.open(userId);
+        ChatStreamBridge bridge = new ChatStreamBridge(
+                channel, runId, finalTurnId, sessionId, userId, policy, apiKey,
+                chatService, memoryService, agentRunService, mapper,
+                maxTokensPerRun, maxSecondsPerRun);
+        final com.capsule.agentkey.agent.run.RunCheckpoint finalCheckpoint = checkpoint;
+        final Long finalSessionId = sessionId;
+        final Long finalProjectId = projectId;
+        generationRegistry.register(sessionId, channel.cancelFlag());
+
+        agentStreamExecutor.execute(() -> {
+            bridge.beginTurn();
+            try {
+                // FAILED(PROCESS_RESTARTED) → RUNNING；并发重复点击时第二次会在这里被拒绝
+                agentRunService.resumeInterrupted(runId);
+                channel.send("session_id", String.valueOf(finalSessionId));
+                channel.sendQuietly("run_id", String.valueOf(runId));
+                channel.sendQuietly("turn_id", finalTurnId);
+                agentService.resume(apiKey, policy, runId, userId, finalProjectId, finalSessionId,
+                        finalTurnId, finalPrompt, finalCheckpoint, channel.cancelFlag(), bridge);
+            } catch (Exception e) {
+                bridge.fail(e, "续跑执行异常");
+            } finally {
+                generationRegistry.unregister(finalSessionId, channel.cancelFlag());
+            }
+        });
+
+        return channel.emitter();
+    }
+
+    /**
+     * R7b：当前会话最近一次运行若可续跑，返回它的 runId 与断点轮次，供前端展示「继续执行」。
+     * 只看最近一条 Run：用户已经继续对话后，不再提示续跑更早的中断任务。
+     */
+    @GetMapping("/sessions/{sessionId}/resumable-run")
+    @PublicApi(scope = "run:read", group = PublicApiCatalog.GROUP_TASK)
+    public ApiResponse<Map<String, Object>> resumableRun(@PathVariable Long sessionId) {
+        Long userId = CurrentUser.requireId();
+        chatService.getOwnedSession(sessionId, userId);
+        AgentRun run = agentRunService.findLatestResumable(userId, sessionId).orElse(null);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("resumable", run != null);
+        if (run != null) {
+            data.put("runId", run.getId());
+            data.put("errorCode", run.getErrorCode());
+            data.put("round", agentRunService.loadCheckpoint(run.getId())
+                    .map(com.capsule.agentkey.agent.run.RunCheckpoint::getRound).orElse(0));
+        }
+        return ApiResponse.success(data);
+    }
+
+    /**
      * P4-04：断线续传入口。
      * 客户端带着最后收到的 seq 重连，只取增量事件；同时拿到运行终态，
      * 若运行已结束，可直接用现有消息接口拉取完整回答。
@@ -375,6 +481,7 @@ public class AgentChatController {
         result.put("promptTokens", run.getPromptTokens());
         result.put("completionTokens", run.getCompletionTokens());
         result.put("totalTokens", run.getTotalTokens());
+        result.put("resumable", AgentRunService.isResumable(run));
         result.put("events", events);
         return ApiResponse.success(result);
     }
