@@ -1058,6 +1058,15 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **真实模型冒烟（2026-11-21，`P7_02_MAX_CASES=1`，仅链路诊断）**：`L1 / l1-single-module-refactor#r01` 直接执行 success=true（35 次模型调用、174,565 tokens、173s）；续跑臂 success=true、`resumeInjected=true`（196,954 tokens、173s），`FAILED/PROCESS_RESTARTED → resumeInterrupted → resume` 全链路通过。按预注册门禁 cases=1 判为样本不足，**不构成完成率结论**。Key 仅经环境变量注入，未写入仓库。
 - **待办**：L1 全量 20 对（约 3-4 小时）→ 产出 L1 层可引用完成率；L2/L3 全量（预计 10 小时以上、token 成本最高）需另行确认后执行。两者都必须沿用当前预注册阈值，不得事后调整。
 
+#### L3/L4 门禁冒烟（2026-11-21，真实模型 n=1，仅诊断）
+
+- **运行**：Key 经 `.secrets/live-eval.ps1` 注入（已 gitignore）；`P7_02_LEVELS=L3`、`P7_02_MAX_CASES=1`、`P7_02_CONDENSE=off`。
+- **结果**：`l3-cumulative-history-memory#r01` 12 turn 全部 SUCCEEDED，60/60 工件完成，memoryProbe 通过；182 次模型调用、193 次工具调用、总 tokens 1,154,751、墙钟 579s；重复调用 19 次、noProgress=0、toolFailures=0、incompleteTurns=1。
+- **L4 成本可控：达标（n=1，待全量确认）**。`contextPeakPromptTokens=8,829`，远低于 64k 窗口 70%（44,800）；该数据集每 turn 独立 Run，上下文不跨 turn 累积，因此不再跑 condense=on A/B。
+- **L3 初判 STEP_OMISSION 是评测口径问题，不是错误恢复失败**：第 4 turn `INCOMPLETE:PLAN_INCOMPLETE`（计划 5/6 步），其余 turn 均 `UNVERIFIED:VERIFY_NOT_CONFIGURED`；模型在后续 turn 自行完成全部 60 文件。根因：`RunTermination.candidateCompletion` 对任何 pending/in_progress 计划步判 INCOMPLETE，而多 turn 数据集的计划本就跨 turn；runner 又以 `incompleteTurns==0` 作为覆盖门禁，把正常的中间态误判为步骤遗漏。
+- **口径调整（单独提交，先于后续数据）**：新增 `LongSessionLiveRunner.incompleteFailures`——多 turn 数据集中间 turn 仅 PLAN_INCOMPLETE 不计失败；其余 INCOMPLETE（写失败 / 审批拒绝 / 预算耗尽等）任何 turn 仍计失败；末 turn 必须收口；单 turn 数据集口径不变。理由：多 turn 计划允许跨 turn，原口径与数据集设计矛盾。这不是放宽成功标准：工件、coverage、memoryProbe、末 turn 收口要求全部保留。新增 `LongSessionLiveRunnerTest` 2 例。
+- **缩样决策（用户确认）**：不再跑 L3 全量 10 case 与 condense A/B；L3/L4 先以本次冒烟 + 口径修正记录，全量真实模型运行只在用户再次明确批准时执行。
+
 
 
 

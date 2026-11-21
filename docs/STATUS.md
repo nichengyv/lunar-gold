@@ -2,7 +2,7 @@
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
 > 更新日期：2026-11-21；基线提交 `f825fc4`（Gitee `origin/master`）。
-> 后端 **490 tests / 0 failures / 17 skipped**（`mvn clean test`）；前端 **112 tests** 通过，`vue-tsc + vite build` 通过。
+> 后端 **492 tests / 0 failures / 17 skipped**（`mvn clean test`）；前端 **112 tests** 通过，`vue-tsc + vite build` 通过。
 
 ## 一句话定位
 
@@ -15,6 +15,7 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 | R7a 评测扩容 | 已完成 | 每层 n≥10（L1/L2 各 20、L3 10）；`LongSessionStatsGate` 预注册阈值（Wilson 95% 下限、memoryProbe、provider 失败率、基线退化） | 真实模型 n≥10 正式基线待跑 |
 | R7b Run 级断点续跑 | 已完成 | 轮末写 `agent_run.checkpoint_json` + `CHECKPOINT` 事件；重启后 `FAILED/PROCESS_RESTARTED` 并保留断点；`POST /api/agent/runs/{runId}/resume` + 前端「继续执行」；真实 `taskkill`→重启→resume E2E 通过 | 审批中/等待用户输入仍终止；仅支持手动触发 |
 | R7b-live 续跑完成率 | 部分完成 | `P7_02_RESUME=on` A/B runner + `LongSessionResumeGate` 已落地；Key 冒烟 n=1 通过（直接执行与续跑均 success，`resumeInjected=true`） | L1 全量 20 对（约 3-4h）、L2/L3（10h+）待确认后执行；尚无完成率结论 |
+| L1～L4 门禁验证 | 部分完成 | L3/L4 真实模型冒烟 n=1：12 turn 全部 SUCCEEDED、60/60 工件、memoryProbe 通过；L4 prompt 峰值 8,829 tokens 达标；初判 STEP_OMISSION 确认为评测口径问题并已修（多 turn 中间 PLAN_INCOMPLETE 不计失败） | L1 缺 ≥30 turn 数据集；L2/L3 全量待批准 |
 | R7c 长任务剩余项 | 未开始 | — | 完成强校验（L5）、大任务分解（L7）、检索型记忆；需按 L1～L8 门禁评估 |
 | P3-08 干净机器验收 | 未开始 | — | Windows 干净机器完整任务 + 所有者确认 |
 
