@@ -856,7 +856,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** ✅ 2026-11-21 | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** ✅ 2026-11-21 | `SSEService` + store 拆分（含 messages）+ 发送编排 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
-| **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
+| **R7 长任务能力**（进行中） | R7a 评测扩容 ✅ 2026-11-21；R7b Run 级断点续跑 ✅ 2026-11-21（手动触发、仅覆盖 RUNNING 崩溃）；R7c 未定：完成强校验、大任务分解、检索型记忆 | L1～L8 验收标准达标；R7b 单测与构建全绿，真实进程崩溃续跑 E2E 尚未执行 | 按项开关 |
 
 ### 14.6 与既有 P7/P8 的映射
 
@@ -865,7 +865,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | P7-07 计划持久化软回注 | R1（持久化）+ R5（注入） | 不再单独排期 |
 | P7-08 停滞渐进恢复 | R4（LoopGuard） | 不再单独排期 |
 | P7-09 上下文压缩 | R5（ContextCondenser） | 不再单独排期 |
-| P8-01 Run 级续跑 | R7 | 复用 `agent_run_event` |
+| P8-01 Run 级续跑 | R7 | R7b 已落地：`checkpoint_json` 快照 + `CHECKPOINT` 事件 + 显式 resume；仍复用 `agent_run_event` |
 | P8-02 完成强校验 | R7 | 复用 diagnostics/verify |
 | P8-03 大任务分解 | R7 | 参考 DSH 子智能体 |
 | P8-04 评测扩容 | R0 + R7 | R0 先建 scripted，R7 扩 n≥10 |
@@ -1034,6 +1034,17 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - 基线：`eval/baselines/long-session-baseline.json`（可用 `P7_02_BASELINE` 覆盖）；不存在时退化比较标记 `missing`，不伪造对比。
 - 验证：新增 `LongSessionStatsGateTest` 8 例；数据集、离线 Runner、实时报告单测同步更新。后端全量 **477 tests / 0 failures / 17 skipped**。
 - **未验证项**：本轮未配置 `LUNARGOLD_LIVE_API_KEY`，未执行真实模型 n≥10 评测，也没有生成新基线；`repo-*` 为工程形态快照，不等同于线上仓库任务采样。
+
+#### R7b Run 级断点续跑（2026-11-21，对应 P8-01）
+
+- **范围（先定后做）**：只覆盖 `RUNNING` 崩溃——即「一轮工具批已全部落地、下一轮模型调用前」；审批中/等待用户输入仍按 P7-01 语义终止。续跑必须由用户显式点击，不在启动时自动消耗 token。
+- **checkpoint 粒度与归属**：`agent_run` 新增 `checkpoint_json`（V23），保存最近一份完整模型消息快照 + 轮次、累计 token、耗时、文件变更轮次、验证尝试数、预算提示与未解决写失败/审批拒绝等循环状态；只保留最新一份，超过 4,000,000 字符时跳过本次写入并保留上一份，避免把表撑爆。事件流追加轻量 `CHECKPOINT` 事件（round / 消息条数 / 字节数）作为审计与 seq 边界；快照是可重建投影，事实源仍是事件流 + `AgentRun`。
+- **写入位置**：`AgentOrchestrator` 每轮工具批、诊断与验证回灌全部落地后写一次；写失败只记日志降级，不中断主循环。
+- **续跑语义**：`POST /api/agent/runs/{runId}/resume` 只接受 `FAILED / PROCESS_RESTARTED` 且带断点的 Run；`ReActAgentService.resume` 直接用快照消息作为初始上下文，不重新检索 RAG、不重建历史；工具清单、工作区、scope 与权限按当前项目/会话重新解析；审批、决策询问、SSE 事件与 `recoverRun` 复用普通发送链路。正常失败（执行异常、预算超限、工具错误）仍保持终态，不可续跑。
+- **前端**：会话重新加载时若最近一条 Run 可续跑，失败气泡给出「继续执行」；`GET /api/agent/sessions/{sessionId}/resumable-run` 提供入口，`runEvents` 响应新增 `resumable`。发送与续跑共用 `sendMessageService.runStream`，避免两套事件映射漂移。
+- **可见限制**：工具副作用按 at-least-once 处理——若崩溃发生在工具批中途，续跑会从上一份断点重放该轮模型决策，可能重复执行同一工具；验证重试轮不单独落断点，崩溃后回退到上一个工具批断点。两者都只会导致重做，不会跳过未完成工作。
+- **验证**：新增 `RunEventStoreTest` 4 例（写入/读回/缺失损坏/超限）、`AgentRunServiceTest` 3 例（可续跑判定、续跑清错、普通失败拒绝）、`ScriptedAgentLoopTest` 2 例（轮末断点内容、续跑不重建历史）；前端新增「继续执行」按钮用例。后端全量 **484 tests / 0 failures / 17 skipped**；前端 **112 tests / 0 failures**；`vue-tsc + vite build` 通过。
+- **未验证项**：未执行真实进程 kill → 重启 → 点击续跑的端到端验收；未用真实模型验证续跑后的任务完成率；未补 Playwright 真机用例。
 
 
 
