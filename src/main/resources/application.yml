@@ -161,6 +161,14 @@ agent:
       summarize-ratio: ${AGENT_CONTEXT_CONDENSE_SUMMARIZE_RATIO:0.7}
       # 末尾保留的消息条数；工具调用组会向前扩展，避免切开 tool_calls 与 tool 响应
       keep-recent-messages: ${AGENT_CONTEXT_CONDENSE_KEEP_RECENT_MESSAGES:6}
+    # 【R7c / P8-05】压缩后的本地检索型记忆：只从当前 Run 被省略的消息中召回，
+    # 不接向量库、不调用 embedding；开启 retrieve 前需先开启 condense，否则没有省略候选。
+    retrieval:
+      enabled: ${AGENT_CONTEXT_RETRIEVAL_ENABLED:false}
+      top-k: ${AGENT_CONTEXT_RETRIEVAL_TOP_K:6}
+      max-fragment-chars: ${AGENT_CONTEXT_RETRIEVAL_MAX_FRAGMENT_CHARS:1500}
+      max-total-chars: ${AGENT_CONTEXT_RETRIEVAL_MAX_TOTAL_CHARS:6000}
+      min-score: ${AGENT_CONTEXT_RETRIEVAL_MIN_SCORE:6}
   # 【P5-05】变更文件诊断：默认进程内 javac；provider=lsp 时走外部 language server，
   # 未配置 lsp.command 或启动失败会自动降级，不阻塞工具调用
   diagnostics:

@@ -100,6 +100,80 @@ class ContextAssemblerTest {
         assertEquals("继续", result.get(1).path("content").asText());
     }
 
+    // —— R7c / P8-05：压缩后本地检索型记忆 ——
+
+    private RunHistoryRetriever retriever() {
+        return new RunHistoryRetriever(RunHistoryRetriever.Settings.defaults());
+    }
+
+    /** 只保留末尾 1 条、窗口 20 字符，强制滑窗淘汰较早消息 */
+    private ContextCondenser evictingCondenser() {
+        return new ContextCondenser(new ContextCondenser.Settings(20, 20, 1), null);
+    }
+
+    @Test
+    void 压缩省略后可召回旧消息并注入合成user记忆() {
+        ContextAssembler assembler = new ContextAssembler(false, null,
+                evictingCondenser(), retriever());
+        List<ObjectNode> base = List.of(
+                system("你是助手"),
+                user("请记住 apiKey alpha-secret 这个配置"),
+                user("现在继续实现 alpha 功能"));
+
+        List<ObjectNode> result = assembler.assemble(base);
+
+        assertEquals("system", result.get(0).path("role").asText());
+        assertEquals("user", result.get(1).path("role").asText());
+        String memory = result.get(1).path("content").asText();
+        assertTrue(memory.contains("【历史检索记忆】"), memory);
+        assertTrue(memory.contains("apiKey"), memory);
+        assertTrue(memory.startsWith("【历史检索记忆】"));
+        assertEquals(3, base.size(), "权威消息列表不能被修改");
+    }
+
+    @Test
+    void 没有省略消息时不注入检索记忆() {
+        ContextAssembler assembler = new ContextAssembler(false, null,
+                new ContextCondenser(new ContextCondenser.Settings(10000, 10000, 6), null),
+                retriever());
+        List<ObjectNode> base = List.of(system("你是助手"), user("alpha 任务"));
+
+        List<ObjectNode> result = assembler.assemble(base);
+
+        assertEquals(2, result.size());
+        assertEquals("alpha 任务", result.get(1).path("content").asText());
+    }
+
+    @Test
+    void 检索无命中时不注入占位消息() {
+        RunHistoryRetriever noHit = new RunHistoryRetriever(
+                new RunHistoryRetriever.Settings(6, 1500, 6000, Integer.MAX_VALUE));
+        ContextAssembler assembler = new ContextAssembler(false, null,
+                evictingCondenser(), noHit);
+        List<ObjectNode> base = List.of(
+                system("你是助手"),
+                user("请记住 apiKey alpha-secret 这个配置"),
+                user("现在继续实现 alpha 功能"));
+
+        List<ObjectNode> result = assembler.assemble(base);
+
+        assertEquals(2, result.size());
+    }
+
+    @Test
+    void 检索开关关闭时压缩后不注入记忆() {
+        ContextAssembler assembler = new ContextAssembler(false, null, evictingCondenser());
+        List<ObjectNode> base = List.of(
+                system("你是助手"),
+                user("请记住 apiKey alpha-secret 这个配置"),
+                user("现在继续实现 alpha 功能"));
+
+        List<ObjectNode> result = assembler.assemble(base);
+
+        assertFalse(result.stream().anyMatch(m -> m.path("content").asText("")
+                .contains("【历史检索记忆】")));
+    }
+
     private ObjectNode system(String content) {
         ObjectNode message = mapper.createObjectNode();
         message.put("role", "system");

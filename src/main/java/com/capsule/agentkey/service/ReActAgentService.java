@@ -134,6 +134,22 @@ public class ReActAgentService {
     @org.springframework.beans.factory.annotation.Value("${agent.context.condense.keep-recent-messages:6}")
     private int condenseKeepRecentMessages = 6;
 
+    /** R7c / P8-05：对被压缩省略的历史做本地检索型记忆；默认关闭 */
+    @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.enabled:false}")
+    private boolean retrievalEnabled = false;
+
+    @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.top-k:6}")
+    private int retrievalTopK = 6;
+
+    @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.max-fragment-chars:1500}")
+    private int retrievalMaxFragmentChars = 1500;
+
+    @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.max-total-chars:6000}")
+    private int retrievalMaxTotalChars = 6000;
+
+    @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.min-score:6}")
+    private int retrievalMinScore = 6;
+
     private static final int SPILL_PREVIEW_CHARS = 1500;
 
     /**
@@ -651,15 +667,16 @@ public class ReActAgentService {
     }
 
     /**
-     * R5：构建本轮上下文装配器。
+     * R5 / R7c：构建本轮上下文装配器。
      *
-     * <p>两个开关都关闭时返回 null，主循环原样使用权威消息列表，默认行为零改动。
+     * <p>三个开关都关闭时返回 null，主循环原样使用权威消息列表，默认行为零改动。
      * 计划注入每轮通过 {@link #latestPlan(Long)} 从持久化快照重读；
-     * 压缩的摘要调用走非流式同步接口，失败由 {@code ContextCondenser} 内部降级为滑窗。
+     * 压缩的摘要调用走非流式同步接口，失败由 {@code ContextCondenser} 内部降级为滑窗；
+     * 检索只读取本地消息与计划，不调用摘要模型或 embedding。
      */
     private com.capsule.agentkey.agent.context.ContextAssembler buildContextAssembler(
             String apiKey, String model, Long runId) {
-        if (!planInjectionEnabled && !condenseEnabled) {
+        if (!planInjectionEnabled && !condenseEnabled && !retrievalEnabled) {
             return null;
         }
         com.capsule.agentkey.agent.context.ContextCondenser condenser = null;
@@ -670,8 +687,15 @@ public class ReActAgentService {
                             condenseWindowChars, summarizeAt, condenseKeepRecentMessages),
                     transcript -> summarizeWithModel(apiKey, model, transcript));
         }
+        com.capsule.agentkey.agent.context.RunHistoryRetriever retriever = null;
+        if (retrievalEnabled) {
+            retriever = new com.capsule.agentkey.agent.context.RunHistoryRetriever(
+                    new com.capsule.agentkey.agent.context.RunHistoryRetriever.Settings(
+                            retrievalTopK, retrievalMaxFragmentChars,
+                            retrievalMaxTotalChars, retrievalMinScore));
+        }
         return new com.capsule.agentkey.agent.context.ContextAssembler(
-                planInjectionEnabled, () -> latestPlan(runId), condenser);
+                planInjectionEnabled, () -> latestPlan(runId), condenser, retriever);
     }
 
     /**
