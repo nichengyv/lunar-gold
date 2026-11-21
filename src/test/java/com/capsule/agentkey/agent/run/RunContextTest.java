@@ -111,4 +111,44 @@ class RunContextTest {
         assertEquals(9L, ctx.sessionId());
         assertEquals("turn-9", ctx.turnId());
     }
+
+    // —— R7c：文件变更版本与验证覆盖版本 ——
+
+    @Test
+    void 初始状态没有覆盖任何变更() {
+        RunContext ctx = context(null, new ArrayList<>());
+
+        assertEquals(0, ctx.changeEpoch());
+        assertEquals(-1, ctx.verifiedEpoch());
+        assertFalse(ctx.verifyCoversLatestChange());
+    }
+
+    @Test
+    void 验证追平最新变更后才算覆盖() {
+        RunContext ctx = context(null, new ArrayList<>());
+
+        ctx.bumpChangeEpoch();
+        assertFalse(ctx.verifyCoversLatestChange(), "只变更未验证时不能算覆盖");
+
+        ctx.markVerified();
+        assertEquals(ctx.changeEpoch(), ctx.verifiedEpoch());
+        assertTrue(ctx.verifyCoversLatestChange());
+
+        ctx.bumpChangeEpoch();
+        assertFalse(ctx.verifyCoversLatestChange(), "验证后又有变更时必须重新验证");
+    }
+
+    @Test
+    void 续跑恢复两个版本() {
+        RunContext ctx = context(null, new ArrayList<>());
+
+        ctx.restoreEpochs(4, 3);
+
+        assertEquals(4, ctx.changeEpoch());
+        assertEquals(3, ctx.verifiedEpoch());
+        assertFalse(ctx.verifyCoversLatestChange());
+
+        ctx.restoreEpochs(4, 4);
+        assertTrue(ctx.verifyCoversLatestChange());
+    }
 }

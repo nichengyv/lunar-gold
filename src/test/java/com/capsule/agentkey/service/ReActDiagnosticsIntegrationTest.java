@@ -169,9 +169,7 @@ class ReActDiagnosticsIntegrationTest {
                     projectService, fileService, mock(McpToolBridge.class), ruleRepo, approvals,
                     new ScopeConstraintService(), new SessionPermissionTracker(),
                     new PromptCatalog(new MockEnvironment()), diagnostics,
-                    new com.capsule.agentkey.verify.VerifyService(
-                            new com.capsule.agentkey.config.AgentVerifyProperties(),
-                            mock(CommandService.class)),
+                    verifyServiceWithoutAutoDetect(),
                     new RepoMapService(new com.capsule.agentkey.config.AgentRepoMapProperties(),
                             new com.capsule.agentkey.service.index.CodeIndexService(
                                     new com.capsule.agentkey.service.index.LightweightCodeIndexer())));
@@ -230,6 +228,17 @@ class ReActDiagnosticsIntegrationTest {
         node.put("path", path);
         node.put("content", content);
         return node.toString();
+    }
+
+    /**
+     * 本类验证的是编译诊断闭环（诊断回灌、重复诊断停止、协议顺序），
+     * 关闭裸 Java 源码自动验证，避免 Verify 抢先占走完成证据。
+     */
+    private static com.capsule.agentkey.verify.VerifyService verifyServiceWithoutAutoDetect() {
+        com.capsule.agentkey.config.AgentVerifyProperties properties =
+                new com.capsule.agentkey.config.AgentVerifyProperties();
+        properties.setAutoDetect(false);
+        return new com.capsule.agentkey.verify.VerifyService(properties, mock(CommandService.class));
     }
 
     private static WorkspaceFileService workspaceFileService() {

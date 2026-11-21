@@ -59,6 +59,9 @@ public class ReActAgentService {
     /** R1：计划快照落库 + 事件追加；测试手动 new 时为 null，计划只保留内存快照 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.capsule.agentkey.agent.run.RunEventStore runEventStore;
+    /** R7c：计划完成证据核对；测试手动装配时为 null，契约步骤按「无工作区」处理 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.capsule.agentkey.agent.run.PlanEvidenceService planEvidenceService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
@@ -340,7 +343,8 @@ public class ReActAgentService {
                             askUserQuestionTool, agentRunService,
                             this::truncateForContext,
                             new AgentOrchestrator.Limits(maxRepeatedToolCalls, maxStagnantRounds,
-                                    maxTokensPerRun, maxSecondsPerRun));
+                                    maxTokensPerRun, maxSecondsPerRun),
+                            planEvidenceService);
                     orchestrator = value;
                 }
             }

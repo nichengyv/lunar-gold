@@ -3,7 +3,9 @@ package com.capsule.agentkey.service;
 import com.capsule.agentkey.agent.context.ContextAssembler;
 import com.capsule.agentkey.agent.run.FileChangeService;
 import com.capsule.agentkey.agent.run.LoopGuard;
+import com.capsule.agentkey.agent.run.PlanEvidenceService;
 import com.capsule.agentkey.agent.run.RunCheckpoint;
+import com.capsule.agentkey.agent.run.RunContext;
 import com.capsule.agentkey.agent.stream.StreamPublisher;
 import com.capsule.agentkey.agent.tool.ToolExecutor;
 import com.capsule.agentkey.client.AgentClient;
@@ -79,7 +81,7 @@ public class AgentOrchestrator {
     private final ToolContentFormatter toolContentFormatter;
     private final Limits limits;
     /** R4b：终态判定与计划收口；循环只决定何时结束 */
-    private final RunTermination termination = new RunTermination();
+    private final RunTermination termination;
     private final StreamPublisher streamPublisher = new StreamPublisher();
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -90,7 +92,8 @@ public class AgentOrchestrator {
                              AskUserQuestionTool askUserQuestionTool,
                              AgentRunService agentRunService,
                              ToolContentFormatter toolContentFormatter,
-                             Limits limits) {
+                             Limits limits,
+                             PlanEvidenceService planEvidenceService) {
         this.springAiClient = springAiClient;
         this.toolExecutor = toolExecutor;
         this.fileChangeService = fileChangeService;
@@ -98,6 +101,7 @@ public class AgentOrchestrator {
         this.askUserQuestionHandler = new AskUserQuestionHandler(askUserQuestionTool, agentRunService);
         this.toolContentFormatter = toolContentFormatter;
         this.limits = limits;
+        this.termination = new RunTermination(planEvidenceService);
     }
 
     /**
@@ -120,6 +124,13 @@ public class AgentOrchestrator {
         ToolExecutor.ApprovalUi approvalUi = invocation.approvalUi();
         // R5：计划软注入与三层压缩只作用于本轮发给模型的副本，权威消息列表保持原样
         ContextAssembler contextAssembler = invocation.contextAssembler();
+        // R7c：文件变更版本与验证覆盖版本以 RunContext 为唯一权威来源；
+        // 没有绑定上下文时使用合成实例，保持手动装配/测试的旧行为。
+        WorkspaceContext boundContext = WorkspaceContext.get();
+        RunContext runContext = boundContext == null
+                ? RunContext.create(invocation.runId(), userId, projectId, sessionId, null,
+                        cancelRequested, List.of(), null)
+                : boundContext.runContext();
 
         int round = 0;
         // P5-10-3：本轮开始时间，用于时间预算检查和前端耗时展示的对账
@@ -134,10 +145,8 @@ public class AgentOrchestrator {
         boolean unresolvedApprovalRejection = false;
         // R4/P7-08：重复调用、失败、诊断、验证与停滞轮次统一由 LoopGuard 计数并分级 nudge
         LoopGuard loopGuard = new LoopGuard(limits.maxRepeatedToolCalls(), limits.maxStagnantRounds());
-        //P5-06：验证次数、文件变更轮次与最近一次验证覆盖的轮次，避免重复执行验证
+        //P5-06：验证次数与验证不可用提示，避免重复执行验证
         int verifyAttempts = 0;
-        long changeEpoch = 0;
-        long verifiedEpoch = -1;
         boolean verifyUnavailableNotified = false;
         // R7b：从断点续跑时恢复轮次、预算与停滞状态；消息列表由调用方从快照装配
         RunCheckpoint resume = invocation.resumeFrom();
@@ -151,8 +160,7 @@ public class AgentOrchestrator {
             unresolvedWriteFailure = resume.isUnresolvedWriteFailure();
             unresolvedApprovalRejection = resume.isUnresolvedApprovalRejection();
             verifyAttempts = Math.max(0, resume.getVerifyAttempts());
-            changeEpoch = Math.max(0, resume.getChangeEpoch());
-            verifiedEpoch = resume.getVerifiedEpoch();
+            runContext.restoreEpochs(resume.getChangeEpoch(), resume.getVerifiedEpoch());
             verifyUnavailableNotified = resume.isVerifyUnavailableNotified();
             log.info("从断点续跑：已完成 {} 轮，累计 token={}", round,
                     resume.getPromptTokens() + resume.getCompletionTokens());
@@ -204,10 +212,10 @@ public class AgentOrchestrator {
             if (streamedToolCalls.isEmpty()) {//模型没要求调工具 → 只表示候选完成，不能代替验证证据
                 //P5-06：候选完成时若最近一次验证没有覆盖最新文件变更，先补一次验证；
                 //失败且仍有预算时把输出回灌，继续修复，而不是直接收尾。
-                if (workspaceChanged && verifiedEpoch < changeEpoch) {
+                if (workspaceChanged && !runContext.verifyCoversLatestChange()) {
                     com.capsule.agentkey.verify.VerifyResult verify =
                             runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
-                    verifiedEpoch = changeEpoch;
+                    runContext.markVerified();
                     if (verify.failed()) {
                         LoopGuard.Signal verifySignal = loopGuard.onVerifyFailure(
                                 verify.failureFingerprint(), verify.message());
@@ -354,6 +362,9 @@ public class AgentOrchestrator {
                     workspaceChanged = true;
                     roundProgress = true;
                     roundFileChanged = true;
+                    // R7c：文件一落地就递增变更版本，同一工具批里后续的 update_plan
+                    // 立刻能看出旧验证不再覆盖最新文件
+                    runContext.bumpChangeEpoch();
                 }
                 for (com.capsule.agentkey.tool.FileChange change : fileChanges) {
                     callback.onFileChange(change);
@@ -434,10 +445,9 @@ public class AgentOrchestrator {
             //P5-06：一轮写操作结束 → 执行一次项目验证。通过则告诉模型不要重复验证；
             //失败则在预算内回灌输出，让模型修复；超过重试或重复指纹阈值立即停止。
             if (roundFileChanged) {
-                changeEpoch++;
                 com.capsule.agentkey.verify.VerifyResult verify =
                         runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
-                verifiedEpoch = changeEpoch;
+                runContext.markVerified();
                 if (verify.failed()) {
                     LoopGuard.Signal verifySignal = loopGuard.onVerifyFailure(
                             verify.failureFingerprint(), verify.message());
@@ -477,8 +487,8 @@ public class AgentOrchestrator {
             }
             // R7b：本轮工具批、诊断与验证回灌已全部落地，写一份可续跑断点
             persistCheckpoint(invocation, round + 1, System.currentTimeMillis() - runStartedAt,
-                    messages, workspaceChanged, changeEpoch, verifiedEpoch, verifyAttempts,
-                    budgetHintSent, unresolvedWriteFailure, unresolvedApprovalRejection,
+                    messages, workspaceChanged, runContext.changeEpoch(), runContext.verifiedEpoch(),
+                    verifyAttempts, budgetHintSent, unresolvedWriteFailure, unresolvedApprovalRejection,
                     verifyUnavailableNotified, promptTokensTotal.get(), completionTokensTotal.get());
             round++;
         }

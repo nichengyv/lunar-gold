@@ -74,6 +74,20 @@ class ReActAgentServiceTest {
         assertTrue(aborted.stream().allMatch(s -> "aborted".equals(s.status())));
     }
 
+    @Test
+    void 契约步骤收口时保留验收契约() {
+        PlanStep step = new PlanStep("实现接口", "in_progress", "s1",
+                new PlanStep.Acceptance(
+                        List.of(new PlanStep.Artifact("src/App.java", List.of("class App"))), true));
+
+        PlanStep aborted = new PlanStep(step.title(), "aborted", step.id(), step.acceptance());
+
+        assertEquals("aborted", aborted.status());
+        assertEquals("s1", aborted.id());
+        assertEquals(step.acceptance(), aborted.acceptance());
+        assertTrue(aborted.hasContract());
+    }
+
     // —— P5-10-3：时间预算 ——
 
     @Test
