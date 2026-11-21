@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { reactive } from 'vue';
 import type { PendingApproval, UiMessage } from '../types/api';
 import * as agentApi from '../api/agent';
-import { streamChat } from '../api/sse';
+import { streamChat } from '../services/streamService';
 import { getExperienceDiagnostics } from '../utils/experienceDiagnostics';
 import {
   buildStageTimeline,
@@ -42,7 +42,7 @@ vi.mock('../api/fileChanges', () => ({
   fetchChangeSet: vi.fn(async () => null)
 }));
 
-vi.mock('../api/sse', () => ({
+vi.mock('../services/streamService', () => ({
   streamChat: vi.fn()
 }));
 

@@ -3,7 +3,8 @@ import { reactive } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as agentApi from '../api/agent';
 import * as settingsApi from '../api/settings';
-import { streamChat } from '../api/sse';
+import { streamChat } from '../services/streamService';
+import { streamSession } from '../services/streamSession';
 import * as fileChangesApi from '../api/fileChanges';
 import { replayRunEvents } from '../services/runRecovery';
 import { createFrameThrottle } from '../utils/frameThrottle';
@@ -50,11 +51,10 @@ let seq = 0;
 const nextId = () => ++seq;
 
 /**
- * P5-10：断点恢复的代际标记。
- * 切换会话 / 重新发送 / 主动停止时自增，让上一轮还在跑的恢复轮询自行退出，
+ * P5-10：断点恢复的代际标记由 `services/streamSession` 统一管理。
+ * 切换会话 / 重新发送 / 主动停止时作废代际，让上一轮还在跑的恢复轮询自行退出，
  * 避免它把旧轮次的内容写到新会话的气泡上。
  */
-let recoveryToken = 0;
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -76,9 +76,9 @@ function applyRunEvents(events: agentApi.RunEventItem[], target: UiMessage) {
   return recovered;
 }
 
-// 当前流式请求的中断句柄：用户点「停止」时直接 abort，
-// 浏览器断开后后端写 SSE 会失败并置 cancelled，从而停止继续消耗 token。
-let currentAbort: AbortController | null = null;
+// 当前流式请求的中断句柄与恢复代际统一由 streamSession 管理：
+// 用户点「停止」时直接 abort，浏览器断开后后端写 SSE 会失败并置 cancelled，
+// 从而停止继续消耗 token。
 
 // ——— P5-10-3：阶段时间线、预算与失败分级 ———
 
@@ -520,7 +520,7 @@ export const useChatStore = defineStore('chat', {
     },
     startNewSession() {
       // 新会话：作废上一会话可能还在跑的断点恢复
-      recoveryToken++;
+      streamSession.cancelRecovery();
       this.streamStatus = 'idle';
       this.activeRunId = null;
       this.currentSessionId = null;
@@ -566,7 +566,7 @@ export const useChatStore = defineStore('chat', {
     async switchSession(sessionId: number) {
       if (this.isProcessing || sessionId === this.currentSessionId) return;
       // 切走时作废旧会话还在跑的恢复轮询，避免内容写到新会话
-      recoveryToken++;
+      streamSession.cancelRecovery();
       this.streamStatus = 'idle';
       this.activeRunId = null;
       this.currentSessionId = sessionId;
@@ -657,13 +657,13 @@ export const useChatStore = defineStore('chat', {
      * 运行中就一直跟着（1.5s 一次），网络抖动时退避重试，终态或重试耗尽后收尾。
      */
     async recoverRun(runId: number, target: UiMessage, maxAttempts = 5) {
-      const token = ++recoveryToken;
+      const token = streamSession.newRecoveryToken();
       beginExperienceRecovery(runId, this.currentSessionId, token);
       this.streamStatus = 'reconnecting';
       let failedAttempts = 0;
       let pollAttempts = 0;
       let firstPoll = true;
-      while (token === recoveryToken) {
+      while (streamSession.isRecoveryCurrent(token)) {
         // 首次很快接上；正常跟随时 1.5s 一次；连续失败按 1s→2s→4s 退避
         const wait = firstPoll
           ? 600
@@ -672,14 +672,14 @@ export const useChatStore = defineStore('chat', {
             : 1500;
         firstPoll = false;
         await delay(wait);
-        if (token !== recoveryToken) {
+        if (!streamSession.isRecoveryCurrent(token)) {
           discardExperienceRecovery(token);
           return;
         }
         pollAttempts += 1;
         try {
           const result = await agentApi.getRunEvents(runId);
-          if (token !== recoveryToken) {
+          if (!streamSession.isRecoveryCurrent(token)) {
             discardExperienceRecovery(token);
             return;
           }
@@ -874,14 +874,13 @@ export const useChatStore = defineStore('chat', {
     stopGenerating() {
       const sessionId = this.currentSessionId;
       // P5-10：同时停掉断点恢复轮询，用户已经明确不要这一轮了
-      recoveryToken++;
+      streamSession.cancelRecovery();
       this.streamStatus = 'idle';
       this.activeRunId = null;
       if (sessionId != null) {
         agentApi.stopGeneration(sessionId).catch(() => undefined);
       }
-      currentAbort?.abort();
-      currentAbort = null;
+      streamSession.abort();
       // 停止生成时后端会拒绝该会话所有审批，前端同步清空卡片
       if (sessionId != null) {
         this.pendingApprovals = this.pendingApprovals.filter((a) => a.sessionId !== sessionId);
@@ -1135,10 +1134,9 @@ export const useChatStore = defineStore('chat', {
       this.runStartedAt = startedAt;
       this.markLiveStage('understand');
 
-      const controller = new AbortController();
-      currentAbort = controller;
+      const controller = streamSession.begin();
       // 新一轮开始：清掉上一轮的恢复状态
-      recoveryToken++;
+      streamSession.cancelRecovery();
       this.activeRunId = null;
       this.recoveredTruncated = false;
       this.streamStatus = 'streaming';
@@ -1329,7 +1327,7 @@ export const useChatStore = defineStore('chat', {
         flushStreamedText();
         // 成功、失败、主动停止都记一次耗时；完成后的折叠摘要和执行轨迹共用这个值
         aiMsg.durationMs = Date.now() - startedAt;
-        if (currentAbort === controller) currentAbort = null;
+        if (streamSession.isActive(controller)) streamSession.release(controller);
         this.isProcessing = false;
         // P5-12-2：本轮收尾，侧栏状态点落到终态（失败 / 停止 / 完成）
         this.markSessionRunState(
