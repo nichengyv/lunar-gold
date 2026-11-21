@@ -1,7 +1,7 @@
 # Lunar Gold（金月）· 项目状态速查
 
-> 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `HANDOFF.md`。
-> 当前基线：Phase 5、Phase 6 已收口，Phase 7 进行中；P7-01、P7-02 统计切片、P7-05 浏览器层 E2E 与 P7-06 已完成。P7-02 两轮真实基线均已执行且结论无效：首轮暴露 prompt 占位符与摘要路径绕过工具分发，第二轮（L2 1/3、L3 0/3）暴露并行写调用时诊断消息插入 tool 响应之间导致 provider 400。三处缺陷均已修复并有回归测试，全量 398 tests 通过；第三轮重跑待授权，记忆摘要路径仍未被真实模型验证。历史批次与双端改造完成证据见 `COMPLETED_WORK.md`。
+> 进入项目先读这一页。`design.md` 看架构，`operations.md` 看启动/运维。交接文档（给新 Agent）→ `handover-20261121.md`。
+> 当前基线：Phase 5、Phase 6、Phase 7 均已收口（Phase 7 于 2026-11-20 收口）。P7-01 重启残局、P7-02 统计切片与 L1～L3×3 真实模型正式基线（三层均 2/3 成功率、工具链 0 error）、P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3、成功率 0/3→2/3）、P7-04b 工具输出分档、P7-05 SSE 真机链路、P7-06 ask_user_question 均已完成；P7-03 plan-first 评估后不立项，P7-04c plan 注入尝试失败已回滚。全量 402 tests 通过。下一步为 Phase 7 收尾改进 P7-07～P7-09（计划持久化软回注 / 停滞渐进恢复 / 上下文压缩）与 P3-08 干净机器验收，详见 `UPDATE_PLAN.md` 第 13 节。历史批次与双端改造完成证据见 `COMPLETED_WORK.md`。
 
 ---
 
@@ -111,7 +111,7 @@ IDE Copilot 交互（Web 定位，不做行内补全 / Terminal 解读）
 | 设置中心产品化 | ✅ | 默认值持久化、7 tab；MCP 与账号安全按部署模式动态显示 |
 | 长期记忆 | 🟡 | 会话级自动提炼已有（每 8 轮）；"主动记住"指令可加 |
 | 环境隔离 | ❌ | run_command 直接拿宿主进程权限（但有四道安全防线）|
-| 测试覆盖 | ⚠️ | 2026-11-19 验收：后端 358 项 / 0 失败 / 0 错误 / 16 跳过，前端 Vitest 92/92，Playwright 30 通过 + 1 性能跳过；P7-05 四条桌面模式浏览器 E2E 通过。浏览器 E2E 使用 API 仿真，真实 Electron + Java SSE 与真实 PG 定向复跑单独跟踪，不外推为真链路通过 |
+| 测试覆盖 | ⚠️ | 2026-11-21 验收：后端 402 项 / 0 失败 / BUILD SUCCESS，前端 Vitest 92/92，Playwright 30 通过 + 1 性能跳过；P7-05 四条桌面模式浏览器 E2E 通过。浏览器 E2E 使用 API 仿真，真实 Electron + Java SSE 与真实 PG 定向复跑单独跟踪，不外推为真链路通过 |
 | 生产化缺口 | 🟡 | V13/V14 全新库迁移顺序缺陷已由 PR-06 预检关闭，desktop 内嵌 DB、本地令牌认证、单用户初始化与 pgvector 运行时构建（Windows x64）已可用；Electron 壳与侧车生命周期已有（P3-01/P3-02），jlink 裁剪 JRE 已有（P3-03，约 49 MiB）；macOS/Linux 运行时与安装包暂缓，Windows 签名、干净机器与真实桌面窗口链路冒烟未收口 |
 
 ### Level 5 🟡 Windows 桌面发布收尾

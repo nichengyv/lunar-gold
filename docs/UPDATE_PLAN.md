@@ -1,6 +1,6 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿# Lunar Gold（金月）未完成更新规划（v1.4 · 免费版）
 
-> 更新日期：2026-11-19
+> 更新日期：2026-11-21
 > 本文只记录未完成工作、当前阻塞、后续任务和验收标准。
 > 已完成任务与历史验收见 [COMPLETED_WORK.md](COMPLETED_WORK.md)；当前代码快照见 [STATUS.md](STATUS.md)。
 > Windows 安装排障见 [troubleshooting/windows-nsis.md](troubleshooting/windows-nsis.md)。
@@ -14,13 +14,13 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 **最终产品形态：Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面端是首个完整客户端。** Agent Runtime 只是内部的基础执行层之一，不是独立产品类型，也不是差异化本身；现有 ReAct 循环继续保留，差异化由任务成功率、可控性、验证、恢复与使用体验共同证明。
 
-**当前产品主线：Phase 5（2026-11-16）与 Phase 6（2026-11-17）均已收口；Phase 7 进行中，P7-02 首轮正式基线暴露出两处缺陷并已修复，下一步待授权重跑以形成有效架构结论。**
+**当前产品主线：Phase 5（2026-11-16）、Phase 6（2026-11-17）、Phase 7（2026-11-20）均已收口；下一步是 Phase 7 收尾改进 P7-07～P7-09（计划持久化软回注 / 停滞渐进恢复 / 上下文压缩），以及 P3-08 干净机器验收。**
 
 1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与检索质量量化、P5-08 并行只读工具均已完成；P5-07-2 用 24 切片 / 22 查询的标注语料实测 hybrid Recall@5 100% vs vector 68.42%（exact 类 0%→100%），按预写规则判定不启用模型 reranker。P5-04 已于 2026-11-16 用 deepseek-chat 完成 96 run A/B：repo map 开成功率 100% vs 关 62.5%，prompt tokens 4,126 vs 25,072，耗时 1.76s vs 10.17s，B1～B5 全过，判定保持默认开启；持久缓存按 C2 判定不建。**Phase 5 出口条件四条已全部满足，本阶段收口。**
 2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率、P5-10-4 键盘与无障碍与 P5-09 视觉体系已落地；剩余未勾选项（三态覆盖、长回答折叠、三档宽度、断网实测、J/K 与批量审批、axe 校验、500 会话性能）为打磨与合规加固，不阻塞 Phase 5 出口，转入后续批次。
 3. **并行 Windows 发布收尾**：签名、诊断 ZIP 导出人工复核、干净机器完整任务验收和 P3-08 所有者确认项单独跟踪，不阻塞 Phase 5。
 4. **Phase 6（已收口，2026-11-17）**：本地 API 子集与客户端凭证 → CLI → VS Code 薄插件，复用同一后端能力；不 fork VS Code。收尾完成 CLI 令牌解析修复、diagnostics E2E、P6-04 布局评估（结论保留）与出口检查；计划与证据见 [docs/phases/phase6/plan.md](phases/phase6/plan.md)，完成档案见 [COMPLETED_WORK.md](COMPLETED_WORK.md)。
-5. **P7 稳定性与长会话（进行中，2026-11-19）**：P7-01 已收口重启后未完成 Run 与残留审批；P7-02 的统计成本切片已完成——1000 条助手消息 / 15.6MB trace 聚合 p95 27～31ms，未触发 500ms 缓存阈值，**统计慢不再是已知边界**。P7-05 的 4 条桌面模式浏览器 E2E 已通过，且 SSE 真机链路已验证畅通。P7-06 ask_user_question 已落地并通过真实模型冒烟。P7-02 Runner 与离线判定已完成，L1×1 真实冒烟的工件与 coverage 全通过；L1～L3×3 正式基线待再次授权，真实 Electron + Java SSE 冒烟仍单独跟踪，详见第 13 节。
+5. **P7 稳定性与长会话（已收口，2026-11-20）**：P7-01 已收口重启后未完成 Run 与残留审批；P7-02 统计成本切片未触发 500ms 缓存阈值，**统计慢不再是已知边界**；L1～L3×3 真实模型正式基线均 2/3 成功率、工具链 0 error，三次失败均为 LLM 固有表现；P7-04 记忆摘要升级使 L3 memoryProbe 0/3→3/3、成功率 0/3→2/3；P7-04b 工具输出按档位截断已完成；P7-05 SSE 真机链路已验证畅通；P7-06 ask_user_question 已落地并通过真实模型冒烟。P7-03 plan-first 评估后不立项，P7-04c plan 注入尝试失败已回滚。收口后转入 P7-07～P7-09 三项收尾改进，详见第 13 节。
 
 ---
 
@@ -47,7 +47,9 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 | Phase 4 剩余风险 | 双实例审批互斥、完整安全链、真实预算与并发验证（P7-01 已收口重启时未完成 Run 与残留审批） | 剩余场景行为明确且有对应验收，不用已完成单测代替端到端结论 |
 | Phase 5 | 智能体能力增强 + 工作台体验增强 | 真实 ReAct 可评测，修改有诊断与验证，任务可审查/恢复/撤回，既有功能增强有量化收益 |
 | Phase 6 | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | **已收口（2026-11-17）**：不同入口复用同一后端；P6-04 结论为保留现有三栏布局；详见 [phase6/plan.md](phases/phase6/plan.md) |
-| Phase 7 | 长会话：三数据集正式基线 ×3 + 记忆摘要 + 工具输出分档 + ask_user_question + SSE 真机链路 | **已收口（2026-11-20）**：P7-01 重启残局 ✅ / P7-02 统计切片 + 三数据集 ×3 正式基线（L1/L2/L3 均 2/3 成功率，LLM 固有表现）✅ / P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3）✅ / P7-04b 工具输出分档（FAST=500 / STANDARD=1000 / DEEP=2000）✅ / P7-05 SSE 真机 ✅ / P7-06 ask_user_question ✅ / P7-04c plan 注入尝试失败已回滚；详见 COMPLETED_WORK.md Phase 7 章节 |
+| Phase 7 | 长会话：三数据集正式基线 ×3 + 记忆摘要 + 工具输出分档 + ask_user_question + SSE 真机链路 | **已收口（2026-11-20）**：P7-01 重启残局 ✅ / P7-02 统计切片 + 三数据集 ×3 正式基线（L1/L2/L3 均 2/3 成功率，LLM 固有表现）✅ / P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3）✅ / P7-04b 工具输出分档（FAST=500 / STANDARD=1000 / DEEP=2000）✅ / P7-05 SSE 真机 ✅ / P7-06 ask_user_question ✅ / P7-04c plan 注入尝试失败已回滚；P7-03 plan-first 不立项；详见 COMPLETED_WORK.md Phase 7 章节 |
+| Phase 7 收尾改进 | P7-07 计划持久化与软回注、P7-08 停滞渐进式恢复、P7-09 长会话上下文压缩 | 三项均按 L1～L3 数据集 A/B + 预注册阈值验证；完成率不降、token/耗时退化 <15% 才保留；不引入 plan-first 控制流 |
+| Phase 8（候选） | 长任务能力建设：Run 级持久化续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | **未立项**；P7-07～P7-09 收口且 L1～L4 达标后启动；8 条验收标准（L1～L8）与排期见 13.12 |
 
 ---
 
@@ -413,6 +415,8 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 | B3 | 体验指标与长会话性能 | P5-11-2 已完成本地异常、Web Vitals、Run/恢复采样和当前用户后端聚合；P5-11-3 已用真实长会话剖析落地流式合帧、Markdown 增量渲染与超过 200 条的虚拟滚动（500 条首屏 108ms、DOM 216、60 秒流式 0 长任务）；后续视觉与无障碍剩余项归入 B2 |
 | 发布收尾 | Windows 签名、干净机器完整任务、诊断导出与合规确认 | 不阻塞 Phase 5；macOS/Linux 暂缓 |
 | Phase 6（已收口） | 本地 API 子集、CLI、IDE 薄插件与工作区布局再评估 | 已完成（2026-11-17）；不 fork VS Code，P6-04 结论为保留现有布局 |
+| P7 收尾改进（2026-11-21 排定） | P7-07 计划持久化与软回注 → P7-08 停滞渐进式恢复（可并行）→ P7-09 长会话上下文压缩 | 保留 ReAct 循环，不引入 plan-first 控制流；三项均按 L1～L3 A/B + 预注册阈值验证，退化即回滚 |
+| Phase 8（候选，未立项） | P8-01 Run 级持久化续跑、P8-02 完成强校验、P8-03 大任务分解、P8-04 评测扩容、P8-05 检索型记忆 | 以 L1～L8 八条长任务验收标准为门禁；P7 三项收口后才启动，详见 13.12 |
 
 ---
 
@@ -422,16 +426,21 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 
 ### 13.1 问题拆分
 
-| 长会话问题 | 与循环架构关系 | 对应工作 |
-|---|---|---|
-| 追踪统计慢（`aggregateStats` 全量解析 trace JSON） | 无关 | P7-02a（已判定不立项） |
-| **上下文膨胀、历史成本高、记忆丢失** | 部分相关 | **P7-04（已立项，2026-11-20）** |
-| 长任务跑偏、无进展、计划漂移 | 直接相关 | P7-03（**延后**：P7-04 修复后重新评估，很多"跑偏"表象可能是记忆缺失的后果） |
-| 重启后状态残局 | 无关 | P7-01（已完成） |
-| 桌面 SSE 自动化缺口 | 无关 | P7-05 链路已通；Electron 壳冒烟可后补 |
-| **agent 不会停下来问用户**（缺决策分支交互原语） | 直接相关 | **P7-06（已完成）** |
+| 长会话问题 | 与循环架构关系 | 对应工作 | 状态 |
+|---|---|---|---|
+| 上下文膨胀、历史成本高、记忆丢失 | 部分相关 | P7-04 记忆摘要升级 / P7-04b 工具输出分档 | ✅ 已完成（2026-11-20） |
+| **计划漏项**（scope 变化后漏改文件，STEP_OMISSION） | 直接相关（计划状态跨 turn 陈旧） | **P7-07 计划持久化与软回注** | 拟立项（2026-11-21） |
+| **无进展 / 重复循环**（陷入 search_files 循环被截断，STAGNANT_ROUNDS） | 直接相关（检测到即硬 stop） | **P7-08 停滞渐进式恢复** | 拟立项（2026-11-21） |
+| **长会话 transcript 线性膨胀**（缺整体压缩，仅单条截断） | 直接相关 | **P7-09 长会话上下文压缩** | 拟立项（2026-11-21） |
+| 长任务跑偏、计划漂移（架构层 P&E） | 直接相关 | P7-03 plan-first | ❌ **不立项**（2026-11-21） |
+| 追踪统计慢（`aggregateStats` 全量解析 trace JSON） | 无关 | P7-02a 统计缓存 | ❌ 已否决（p95 未达 500ms） |
+| 重启后状态残局 | 无关 | P7-01 | ✅ 已完成 |
+| 桌面 SSE 自动化缺口 | 无关 | P7-05 链路 + Electron 壳冒烟 | ✅ 链路已通 |
+| **agent 不会停下来问用户**（缺决策分支交互原语） | 直接相关 | P7-06 ask_user_question | ✅ 已完成 |
 
-现状：并非纯 ReAct——已有 `update_plan` 工具、计划面板、`finalizePlan`、`PLAN_INCOMPLETE` 完成校验与 `AgentPolicy` 三档；有审批（工具风险拦截）但没有**决策询问**（执行中遇到分叉停下来让用户选方向）。**P7-06 补上 ask_user_question 之后，P7-03 plan-first 的触发门槛可以调高**——因为很多"执行中需要方向确认"的场景已被 ask_user_question 覆盖，plan-first 只在**任务起始**就需要"先完整规划给用户看"时才有价值。
+现状：并非纯 ReAct——已有 `update_plan` 工具、计划面板、`finalizePlan`、`PLAN_INCOMPLETE` 完成校验与 `AgentPolicy` 三档；有审批（工具风险拦截）但没有**决策询问**，P7-06 已补上 ask_user_question。
+
+**2026-11-21 方向调整**：P7-06 落地后 P7-03 plan-first 的触发门槛进一步抬高，最终判定**不立项**（决策记录见 13.5）。替代路线是"轻量规划"——把已有的 `update_plan`、停滞检测、记忆摘要三个零件串成闭环：计划跨 turn 持久化后每轮软回注（P7-07）、停滞检测改渐进式 nudge 而非硬停（P7-08）、transcript 整体压缩（P7-09）。三项都不改循环形状，符合行业主流（ReAct 为默认，plan 以软提示形式存在）。
 
 对比业界：DeepSeek Harness 的 `@deepseek-ai/dsh-tool-ask-user`（每周 72 万下载）把决策询问做成了模型可调用的一等 tool（`ask_user_question({ questions: [{ id, question, options, multi_select }] })`），Trae 则作为系统级能力提供。金月当前只有审批（风险门禁），缺决策询问（方向分支），这是"用户在环"的第二环缺口。
 
@@ -567,15 +576,16 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 
 **阻塞**：已解除——第三轮 L3×3（`long-session-20261120-140053-771.json`）确认协议修复 + 摘要路径均通，可用样本已足够。
 
-### 13.5 P7-03 plan-first 档位（延后，等 P7-04 后重新评估）
+### 13.5 P7-03 plan-first（不立项，2026-11-21 决策）
 
-- **原触发条件**：P7-02 规则 2 命中（长任务失败 ≥ 50% 归因计划漂移/无进展/步骤遗漏），且 P7-06 ask_user_question 不足以覆盖问题。
-- **当前判定**：P7-02 规则 2 边缘命中但不触发——4 个失败样本中计划类占 2 个（L1 的 MAX_ROUNDS + L3 run #1 的 NO_PROGRESS），但两个"计划类"失败均发生在**记忆缺失背景下**；且 P7-06 ask_user_question 已覆盖大部分"执行中需要方向确认"的场景。
-- **形态**：`AgentPolicy` 新增 `PLAN_FIRST`，默认关闭、可开关 A/B；先独立规划产出计划，再进入 ReAct 执行；偏差、工具失败或 scope 变更时触发重规划。
-- **保留**：ReAct 兜底、现有审批/回溯/审查流语义不变。
-- **非目标**：不改为多智能体，不引入复杂状态图，不替换 ReAct。
-- **出口**：同一 L1～L3 数据集 A/B，完成率提升与 token/耗时退化需同时满足预注册阈值，才讨论是否设为默认。
-- **重新评估时机**：P7-04 完成后用同一数据集重跑基线——很多"长任务跑偏"表象可能是"记不住早期决定"的后果，不一定需要 plan-first 档位就能解决。
+**结论：不引入 `AgentPolicy.PLAN_FIRST` 控制流档位。** 理由：
+
+1. P7-02 规则 2 仅边缘命中（2/4 失败样本），且两个"计划类"失败均发生在记忆缺失背景下；P7-04 修复后 L3 成功率 0/3→2/3，佐证"跑偏"表象主要是记忆问题，不是计划能力本身。
+2. P7-06 ask_user_question 已覆盖大部分"执行中需要方向确认"的场景。
+3. 行业主流（OpenAI Agents SDK、LangGraph、Claude Code、Cursor）均以 ReAct 循环为默认；plan 以软提示/上下文形式存在，先出完整计划的纯 P&E 仅用于可预测分解的高步数场景，不适用于探索性编码任务。
+4. 剩余 `planCompletion` 边界（最后一步被标 INCOMPLETE）本质是计划状态跨 turn 丢失，由 P7-07 计划持久化解决，不需要 plan-first。
+
+原 plan-first 计划内容已移除，替代工作见 13.9（P7-07）～13.11（P7-09）。
 
 ### 13.6 P7-04 上下文预算与记忆（已完成，2026-11-20）
 
@@ -595,7 +605,7 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 | maxSummaryChars | 104 | 245 | +136 字符 |
 | promptTokens 中位数 | 1.02M | 1.05M | **+3.06%**（远低于 15% 阈值） |
 
-**剩余边界**：第三个 run 失败于 `planCompletion=80, required=100; incompleteTurns=1`——计划面板把最后一步标记为 INCOMPLETE 而非 COMPLETED，与记忆无关，归入 P7-03 plan-first 延后时一起处理。
+**剩余边界**：第三个 run 失败于 `planCompletion=80, required=100; incompleteTurns=1`——计划面板把最后一步标记为 INCOMPLETE 而非 COMPLETED，与记忆无关，本质是计划状态跨 turn 丢失，归入 **P7-07 计划持久化**一起处理。
 
 **不在本次范围**：生产代码的摘要路径（生产 `memorySummary` 参数始终为空，无摘要逻辑）、工具输出截断（prompt 峰值 1.44M tokens 的预算问题，单独列为 P7-04b）。
 
@@ -607,35 +617,159 @@ P5-04 衍生升级（5.2：tree-sitter 抽取 → repo map 排序 → 预算动�
 
 **验收边界**：浏览器层测试运行在 Vite + Chromium 内核浏览器（本机使用 Edge 通道），后端 API 与 SSE 由 `page.route` 仿真，不是真实 Electron + Java + 内嵌 PostgreSQL 链路。真实桌面窗口与侧车冒烟继续单独验收，不能以本结果代替安装包或真实模型验收。
 
-### 13.8 排期（顺序 + 门禁，2026-11-20 决策更新）
+### 13.8 排期（顺序 + 门禁，2026-11-21 决策更新）
 
 ```text
+─── Phase 7 已收口（2026-11-20）──────────────────────────────
 P7-01 重启残局收口 ──────────────── ✅ 已完成
 P7-02 统计成本切片 ──────────────── ✅ 已完成（规则 1 未命中）
 P7-02 L1～L3 离线验证 ───────────── ✅ 已完成（schema + fixture + 门禁全过）
+P7-02 L1～L3×3 真实模型正式基线 ─── ✅ 已完成（三层均 2/3，工具链 0 error）
+P7-04 记忆摘要升级 ──────────────── ✅ 已完成（memoryProbe 0/3→3/3）
+P7-04b 工具输出按档位截断 ────────── ✅ 已完成（FAST=500 / STANDARD=1000 / DEEP=2000）
+P7-04c 框架级 plan 注入 ──────────── ❌ 已尝试并回滚（L2 2/3→1/3，ThreadLocal 跨 turn 陈旧）
 P7-05 SSE 真机链路 ──────────────── ✅ 已完成
-
 P7-06 ask_user_question ─────────── ✅ 已完成（含真实模型冒烟）
-  ├─ 后端 RunState + 控制流 + tool schema
-  ├─ SSE event:user_question + /answer 端点
-  └─ 前端 AskUserCard.vue + ChatView 集成
+P7-03 plan-first ────────────────── ❌ 不立项（2026-11-21，见 13.5）
 
-P7-02 真实模型 Runner + 缺陷清理 ── ✅ 已完成（三轮清理：占位符 → 协议 → 摘要路径）
-P7-02 L1×1 冒烟 ────────────────── ✅ 工件/coverage 通过
-P7-02 L3×3 ─────────────────────── ✅ 干净样本：0/3 全 MEMORY_MISSING，摘要真实注入
-P7-02 决策 ──────────────────────── ✅ 规则 3 命中 → P7-04 优先
-  └─ 规则 2 边缘命中但不触发（记忆缺失是根因，ask_user_question 已覆盖方向确认）
-
-P7-04 记忆摘要升级 ──────────────── ✅ 已完成（2026-11-20）
-  ├─ 检查点摘要三层结构：锚点 + 已完成区间 + 进度 + 约束
-  ├─ L3×3 验证：memoryProbe 0/3 → 3/3，成功率 0/3 → 2/3
-  └─ promptTokens +3.06%（远低于 15% 阈值）
-
-P7-04b 工具输出截断阈值 ──────────── ⏸ 未立项（prompt 峰值 1.44M tokens 的预算问题）
-
-P7-03 plan-first ────────────────── ⏸ 延后（剩余 planCompletion 边界与记忆无关；等 P7-04b 后重新评估）
+─── Phase 7 收尾改进（待执行，2026-11-21 排定）──────────────────
+P7-07 计划持久化与软回注 ────────── ⏭ 第一个（杠杆最大，先做 L2 A/B）
+P7-08 停滞渐进式恢复 ────────────── ⏭ 可与 P7-07 并行（低风险、独立）
+P7-09 长会话上下文压缩 ──────────── ⏸ 排在 P7-07/08 之后（依赖 L3 基线与 token 指标）
 ```
+
+**排期理由**：
+- **P7-07 优先**：直接对应 L2 的 STEP_OMISSION 漏项，杠杆最大；但它和已回滚的 P7-04c 形似，必须先证明"持久化权威源"与"ThreadLocal 陈旧注入"效果不同，否则不上。
+- **P7-08 可并行**：完全独立于 plan 状态，只改停滞检测的恢复策略，风险最低，可与 P7-07 同时开发。
+- **P7-09 最后**：依赖 P7-07/08 落地后的 token 与记忆指标做对照，且可能与 `SessionMemoryAdvisor` 摘要路径交互，放最后避免混淆归因。
+
+**统一门禁**：每项都以 L1～L3 数据集 A/B 验证，预注册「完成率不降、prompt/耗时退化 < 15%」（沿用 P7-04 口径）；不满足即回滚，不进入默认路径。
+
+### 13.9 P7-07 计划持久化与软回注（拟立项，2026-11-21）
+
+**触发原因**：P7-04c 证明"把计划摘要硬注入每轮"在 ThreadLocal 陈旧时会误导模型。但问题不在注入本身，而在**计划状态的存储与生命周期**。当前 `update_plan` 只写 [WorkspaceContext](file:///d:/test-code/agent-gateway-v3/src/main/java/com/capsule/agentkey/tool/WorkspaceContext.java) 的 ThreadLocal，跨 turn 不共享、不持久化、也不回注模型，只推前端。
+
+**方案（plan-as-context，非 control-flow）**：
+1. 新增会话级 `PlanStore`（key = runId/sessionId），`update_plan` 成功时写库（复用 `agent_run` 存储或轻量 plan 列/表，不做 Controller→Service→DB 三层大重构）。
+2. 每轮 `streamChat` 前从 `PlanStore` 读**最新快照**，渲染成 `Current plan:` 文本，作为软提示注入 system prompt 末尾或 user message 末尾；**不拦截工具调用、不做控制流**。
+3. `update_plan` 成功后额外追加一条"plan updated"事件到聊天历史，作为双保险（即使主动注入遗漏，历史里也有最新快照）。
+
+**与 P7-04c 的关键差异**：注入源从"ThreadLocal 陈旧对象"改为"持久化存储的单一事实源，每轮重读"，从根本上消除陈旧错位。
+
+**参考实现（已核实源码）**：
+- OpenHands TaskTrackerTool：`TASKS.json` 落盘 + 会话局部工具按需重载（[definition.py L140-178](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-tools/openhands/tools/task_tracker/definition.py)）；事件日志每轮 `View.from_events()` 重建（[state.py](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/conversation/state.py)）。
+- Cline plan 模式软提示：`planModeInstructions()` 追加到 system prompt（[responses.ts L223-226](https://github.com/cline/cline/blob/main/apps/vscode/src/core/prompts/responses.ts)）。
+
+**非目标**：不做 `PLAN_FIRST` 控制流；不做多智能体/状态图；不改现有审批、回溯、审查流语义。
+
+**验证与出口**：先只在 L2（scope 变化场景）跑 A/B，预注册"成功率 ≥ 2/3 且无回退、token 退化 < 15%"；同时确认不再出现"aborted 步骤被误判 completed"。L2 通过后推到 L1/L3。
+
+**改动范围**：`UpdatePlanTool`、`WorkspaceContext`（或新增 `PlanStore`）、`ReActAgentService`（注入点）、`AgentRun` 持久化与对应迁移；测试 `UpdatePlanToolTest` + 新增 L2 回注回归。
+
+### 13.10 P7-08 停滞渐进式恢复（拟立项，2026-11-21）
+
+**触发原因**：L1 出现 STAGNANT_ROUNDS——模型陷入重复 `search_files` 循环，当前 `ReActAgentService` 在 `maxRepeatedToolCalls=3` 或 `maxStagnantRounds=4` 时**直接 stop 收尾**（[ReActAgentService.java](file:///d:/test-code/agent-gateway-v3/src/main/java/com/capsule/agentkey/service/ReActAgentService.java#L93-L98)），把一次本来可恢复的失败变成硬失败。
+
+**方案（渐进式 nudge，而非直接 stop）**：
+1. 按 `(工具名, 失败类型)` 维度维护 `consecutiveFailureCount`。
+2. 分级注入软提示：第 1 次→提示可能原因；第 2 次→强烈建议换方案；第 3 次→CRITICAL 禁止再重试该工具，要求换策略或调用 `ask_user_question`；给 1 轮自救窗口。
+3. 出现任何进展（工具成功且产出变化、plan 推进、新 diff）时计数清零；仍无进展才 stop 或转 ask_user_question。
+
+**参考实现（已核实源码）**：
+- Cline 三档分级 nudge：`writeToFileMissingContentError(consecutiveFailures, ...)`（[responses.ts L37-79](https://github.com/cline/cline/blob/main/apps/vscode/src/core/prompts/responses.ts)）。
+- OpenHands 阈值化检测 + 显式 `STUCK` 状态交还用户（[state.py L53](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/conversation/state.py)）；四维阈值 `StuckDetectionThresholds`（[types.py](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/conversation/types.py)）。
+
+> 未核实项：OpenHands 在置 `STUCK` 前是否先注入 nudge（`local_conversation.py` 过大未取完整上下文）。P7-08 以 Cline 已核实的渐进式方案为主。
+
+**非目标**：不改变既有阈值语义（保留硬 stop 作为最后兜底），只在其前增加恢复窗口。
+
+**验证与出口**：L1 A/B（重复循环场景），预注册"成功率 ≥ 2/3、轮次/token 退化 < 15%"；确认 nudge 不会引发新的重复循环。
+
+**改动范围**：`ReActAgentService` 停滞检测分支（阈值前插 nudge）；`AgentPolicy` 可选新增 nudge 档位；测试补 nudge 分级与计数清零回归。
+
+### 13.11 P7-09 长会话上下文压缩（拟立项，2026-11-21）
+
+**触发原因**：P7-04b 只做了**单条**工具输出截断，transcript 整体仍随 turn 线性增长（L3 prompt 峰值曾达 1.44M tokens），长会话成本与"早期约束被淹没"问题仍在。
+
+**方案（语义裁剪 → token 滑窗 → LLM 摘要，三层）**：
+1. **语义裁剪（先行，成本最低）**：旧文件窗口 / 旧 diff 折叠成一行占位（`"Outdated window with N lines omitted..."`），只保留最近一次。
+2. **token 滑窗兜底**：保留首条 SystemMessage，从 index 1 起 FIFO 淘汰；淘汰带 tool_calls 的 AiMessage 时**连带清理孤儿 ToolExecutionResult**（否则 provider 报错）。
+3. **LLM 摘要压缩**：上下文占用达阈值（如 70%）时，保留 system + 最后 user + 最后 tool 结果，中间历史摘要成一条 user message 插到前部；摘要结果持久化，避免每轮重复摘要。
+
+**参考实现（已核实源码）**：
+- OpenHands RollingCondenser：70% 触发、保留集、摘要插 index 2、`Condensation` 事件持久化（[condenser/base.py](https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/context/condenser/base.py) + [架构文档](https://docs.openhands.dev/sdk/arch/condenser.md)）。
+- LangChain4j `TokenWindowChatMemory`：保留首条 SystemMessage + 孤儿 tool result 清理（[L162-188](https://github.com/langchain4j/langchain4j/blob/main/langchain4j/src/main/java/dev/langchain4j/memory/chat/TokenWindowChatMemory.java)）。
+- SWE-agent `history_processors.py`：`LastNObservations` / `ClosedWindowHistoryProcessor` 语义裁剪（[history_processors.py](https://github.com/SWE-agent/SWE-agent/blob/main/sweagent/agent/history_processors.py)）。
+
+**非目标**：不替换 `SessionMemoryAdvisor`；不做跨会话记忆迁移。
+
+**验证与出口**：L3 A/B，预注册"prompt tokens 峰值下降、memoryProbe 不退化、成功率不降"；摘要持久化需验证不重复压缩、不丢关键早期决策。
+
+**改动范围**：新增 `ContextCondenser`（或等价服务）；`ReActAgentService` 的 `streamChat` 前调用；摘要持久化到会话存储；测试补压缩正确性 + 孤儿 tool result 清理回归。
+
+**依赖**：排在 P7-07/P7-08 之后，避免与 plan 回注、停滞 nudge 的归因混淆。
+
+### 13.12 Phase 8 候选：长任务能力验收标准与建设（2026-11-21 提出，未立项）
+
+**定位**：P7-07～P7-09 解决的是当前数据集上的三个具体失效点，属于长任务的**必要条件**，不等于已经具备长任务能力。本节把"长任务能力"拆成可验收标准并列出建设项；Phase 8 是否立项取决于 P7-07～P7-09 的实测结果。
+
+#### 13.12.1 验收标准（Definition of Long-Task Capability）
+
+| # | 维度 | 验收指标 | 当前状态 |
+|---|---|---|---|
+| L1 | 目标保持 | 连续 ≥30 turn 不丢关键决策与约束，memoryProbe ≥ 95% | 🟡 P7-04 后 L3 memoryProbe 3/3，但仅 12 turn |
+| L2 | 计划跟踪 | 计划偏离 / scope 变化后 2 轮内发现并重规划，不再出现 STEP_OMISSION | 🟡 依赖 P7-07 |
+| L3 | 错误恢复 | 工具失败 / 停滞 2 轮内恢复；无法恢复时转 ask_user，而非硬停 | 🟡 依赖 P7-08 |
+| L4 | 成本可控 | 上下文占用随 turn 近似线性，prompt 峰值不超窗口 70% | 🟡 依赖 P7-09 |
+| L5 | 完成可信 | 完成状态必须通过 Verify / 诊断确认，不接受模型自报 | ⚠️ 有 `finalizePlan` / Verify，但仍有 `planCompletion` 边界 |
+| L6 | 中断续跑 | 进程重启 / 断线后从最近 checkpoint 续跑，不从头再来 | ⚠️ P7-01 只处理重启残局 |
+| L7 | 大任务分解 | 超出单次 ReAct 窗口的任务可拆成子任务并分别验收 | ❌ 未规划 |
+| L8 | 评测可信 | 每层 n≥10 重复 + 真实任务集，结论有统计置信度 | ❌ 当前 n=3 合成数据集 |
+
+**判定规则**：L1～L8 同时达标才可对外宣称"具备长任务能力"；缺任一项只能宣称"中等长度任务稳定"。
+
+#### 13.12.2 建设项（P8 候选）
+
+| 编号 | 工作 | 对应缺口 | 依赖 | 优先级 |
+|---|---|---|---|---|
+| P8-01 | Run 级状态持久化与断点续跑（事件日志 + checkpoint + resume） | L6 | P7-07 | P0 |
+| P8-02 | 完成判定强校验（Verify / 诊断作为完成门禁，禁止自报） | L5 | P7-07 | P0 |
+| P8-03 | 大任务分解（子任务 / 分段执行 + 分层验收） | L7 | P8-01 | P1 |
+| P8-04 | 评测集扩容（每层 n≥10 + 真实仓库任务集 + 统计门禁） | L8 | P7-07～P7-09 | P0 |
+| P8-05 | 长历史检索型记忆（压缩之外的按需召回） | L1 / L4 | P7-09 | P2 |
+
+#### 13.12.3 排期（候选）
+
+```text
+P7-07 → P7-08 → P7-09 收口并出报告
+        ↓
+P8-04 评测扩容 ─────────── 先建立可信测量（可与 P8-01 并行）
+P8-01 Run 级持久化 + 续跑 ─ P0
+P8-02 完成判定强校验 ───── 可与 P8-01 并行
+P8-03 大任务分解 ───────── 依赖 P8-01，P1
+P8-05 检索型记忆 ───────── P2，按实测瓶颈决定是否做
+```
+
+**立项门禁**：P7-07～P7-09 全部收口且 L1～L4 达标后才启动 Phase 8；即使 P7 三项使当前数据集稳定 3/3，也**不得**据此宣称长任务能力，必须走完 L5～L8。
+
+#### 13.12.4 可借鉴的成熟实现（2026-11-21 核实）
+
+- **DeepSeek Harness（DSH）**
+  - 事件溯源会话日志是唯一事实源，`surface` 投影 + `session resume` 对账（[Context System](https://deepseekdocs.com/en/docs/learn/core/context)）。
+  - **折叠而非截断**：`compaction/start → summary → end`，全量日志保留、模型只见摘要后的 surface；`tool-result-pruner` 把超预算结果改写为"有界头 + 省略标记 + 有界尾"（同上）。
+  - `token-meter` 用可重放计量 + `projectedTokens` 驱动压缩决策（同上）。
+  - 计划 / 团队策略作为 system prompt 固定 section（order 500 / 600），保持前缀字节稳定以复用 KV cache（同上）。
+  - **子智能体隔离**：协调者工具面收窄为只读 + 委派 + 汇总，过程数据留在 Subagent 上下文，主会话只保留高价值信息（[dsh-multitask](https://www.npmjs.com/package/dsh-multitask)）。
+- **Trae SOLO**
+  - 自动拆解任务、确认计划后自动推进；多任务并行管理；对话流节点自动折叠生成摘要（[SOLO 模式概览](https://docs.trae.cn/ide/solo-mode)）。
+  - 长任务有边界：工具调用、用量、权限、错误、完成均有上限，不是无限后台进程（[第三方评测](https://diyai.io/ai-tools/code-generation/reviews/trae-ai-review/)）。
+- **OpenHands**：EventLog 为单一事实源 + Condenser 折叠，与 DSH 同构。
+
+**对金月的直接启示**：
+1. P7-07 的 plan 持久化应直接建在"事件日志 / 单一事实源"上，而不是再引入一个旁路存储——否则 P8-01 的续跑还要二次迁移。
+2. P7-09 应采用"折叠 + 原始事件保留"而非真删，为 P8-05 的按需召回留数据。
+3. P8-03 的大任务分解可参考 DSH 的"协调者收窄工具面 + 子智能体执行"，而不是让主循环无限延长。
 
 - 每个批次以「出口」为界，不以日历工期承诺；结论必须来自落盘报告，而不是单测通过。
 - **P7-06 不依赖 P7-02 结论**——它解决的是交互原语缺口，不是 ReAct 循环内部问题，已并行落地。
-- P7-03 / P7-04 未立项前不排入执行队列，避免架构先行；P7-03 触发门槛在 P7-06 落地后调高，**P7-04 的记忆修复可能直接消解 P7-03 的触发理由**。
+- **P7-03 plan-first 已不立项（2026-11-21）**；P7-07～P7-09 均保持 ReAct 循环不变，只做计划持久化、停滞恢复与上下文压缩，避免架构先行。
