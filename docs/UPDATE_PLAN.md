@@ -852,7 +852,7 @@ views/        ChatView（只负责布局与挂载）
 | **R2 Context 瘦身** ✅ 2026-11-21 | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
 | **R3 工具接缝** ✅ 2026-11-21 | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
 | **R4a 循环与流接缝** ✅ 2026-11-21 | `LoopGuard` 统一五组无进展计数与分级 nudge（P7-08）；`StreamPublisher` 统一流式调用与预算 | 全量测试绿；重复调用先 nudge、超过自救窗口才停止（有测试） | 保留旧 streamChat 调用 |
-| **R4b 编排壳** | `AgentOrchestrator` 抽离 `execute` 主循环 | `ReActAgentService` 只留入口与协作者装配；行为等价 | 保留旧 execute |
+| **R4b 编排壳** ✅ 2026-11-21 | `AgentOrchestrator` 抽离 `execute` 主循环；`RunTermination` 收口终态；`AskUserQuestionHandler` 接管挂起询问 | `ReActAgentService` 只留入口与协作者装配；行为等价；`AgentOrchestrator` 535 行 | 保留旧 execute |
 | **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
 | **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
@@ -959,6 +959,14 @@ views/        ChatView（只负责布局与挂载）
 - 新增测试：`LoopGuardTest`（9 例：分级 nudge、参数顺序归一、签名切换重置、失败恢复、诊断/验证/停滞、阈值关闭）；`StreamPublisherTest`（3 例：分片与用量转发、超预算异常、流错误传播）。
 - 全量测试通过：**450 tests / 0 failures / 0 errors / 17 skipped**。
 
-**下一刀（R4b）**：编排接缝——把 `execute` 主循环抽到 `AgentOrchestrator`，
-让 `ReActAgentService` 退化为入口与协作者装配；完成后继续 R5 上下文接缝（P7-07 / P7-09）。
+#### R4b 编排壳（2026-11-21）
+
+- 新增 `AgentOrchestrator`（535 行）：承接 `execute` 内的 ReAct 主循环——模型流式调用、工具批（只读并行 / 串行审批）、诊断、验证、计划推送、预算与无进展停止；`StreamPublisher` / `LoopGuard` 的调用顺序与终态载荷保持原样。
+- 新增 `RunTermination`（148 行）：候选完成判定、诊断/验证证据选择、`NoProgress` 载荷、未完成计划标记 aborted；主循环只决定“何时结束”，终态由它决定。
+- 新增 `AskUserQuestionHandler`（119 行）：解析 `ask_user_question` 参数、挂起等待、超时/取消后把 Run 从 `WAITING_USER_INPUT` 拉回 RUNNING；保持串行特判，不进只读批。
+- `ReActAgentService` 从 1330 行降到 726 行：保留 public `execute` 重载、RunContext / 权限 / scope 初始化、RAG、消息装配、审批 UI 适配与线程池关闭；`truncateForContext` 以函数式接口注入编排器，配置仍留在 Service。
+- 行为等价：轮次上限、时间 / token 预算、回调顺序、tool 消息插入位置、停止原因字符串与 SSE 载荷均未改变；异常仍由 Service 统一收口计划后 `onError`。
+- 全量测试通过：**450 tests / 0 failures / 0 errors / 17 skipped**。
+
+**下一刀（R5）**：上下文接缝——`ContextAssembler` + `ContextCondenser`，落地 P7-07 软回注与 P7-09 三层压缩。
 
