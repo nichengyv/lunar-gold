@@ -79,14 +79,14 @@ class ScriptedAgentLoopTest {
     }
 
     // ------------------------------------------------------------------
-    // 无进展：连续相同工具调用触发安全停止
+    // 无进展：连续相同工具调用先 nudge，超过自救窗口后停止（P7-08）
     // ------------------------------------------------------------------
 
     @Test
-    void 连续相同工具调用达到阈值时安全停止() {
+    void 连续相同工具调用先nudge_超过自救窗口后安全停止() {
         BaseTool readTool = tool("read_file", ToolResult.ok("same content"));
         List<ScriptedAgentClient.ScriptedTurn> turns = new ArrayList<>();
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             turns.add(ScriptedAgentClient.ScriptedTurn.ofTools(List.of(
                     new ScriptedAgentClient.ToolCallSpec("read_file", "{\"path\":\"a.txt\"}"))));
         }
@@ -95,8 +95,13 @@ class ScriptedAgentLoopTest {
 
         run(client, capture, readTool);
 
-        assertNotNull(capture.noProgress, "第三次相同调用必须触发无进展停止");
+        assertNotNull(capture.noProgress, "超过一轮自救窗口后必须触发无进展停止");
         assertEquals("REPEATED_TOOL_CALL", capture.noProgress.reason());
+        assertTrue(client.messageSnapshots().stream()
+                        .flatMap(List::stream)
+                        .anyMatch(m -> "user".equals(m.path("role").asText())
+                                && m.path("content").asText().contains("【重要】")),
+                "停止前必须先向模型注入 CRITICAL nudge");
         assertNotNull(capture.completion);
         assertEquals(ReActAgentService.CompletionStatus.INCOMPLETE, capture.completion.status());
     }

@@ -851,7 +851,8 @@ views/        ChatView（只负责布局与挂载）
 | **R1 状态地基** ✅ 2026-11-21 | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
 | **R2 Context 瘦身** ✅ 2026-11-21 | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
 | **R3 工具接缝** ✅ 2026-11-21 | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
-| **R4 编排接缝** | `AgentOrchestrator` + `LoopGuard` + `StreamPublisher`；落地 P7-08 渐进 nudge | `ReActAgentService` 行数显著下降；L1 停滞恢复达标 | 保留旧 execute |
+| **R4a 循环与流接缝** ✅ 2026-11-21 | `LoopGuard` 统一五组无进展计数与分级 nudge（P7-08）；`StreamPublisher` 统一流式调用与预算 | 全量测试绿；重复调用先 nudge、超过自救窗口才停止（有测试） | 保留旧 streamChat 调用 |
+| **R4b 编排壳** | `AgentOrchestrator` 抽离 `execute` 主循环 | `ReActAgentService` 只留入口与协作者装配；行为等价 | 保留旧 execute |
 | **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
 | **R7 长任务能力** | Phase 8：续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | L1～L8 验收标准达标 | 按项开关 |
@@ -946,6 +947,18 @@ views/        ChatView（只负责布局与挂载）
 - 新增测试：`ApprovalGateTest`（11 例：只读免审、MANUAL/AUTO/FULL、递归删除、MCP/fallback 强制、会话允许、scope 拦截与放行、非法 JSON、拒绝文案）；`ToolExecutorTest`（6 例：审批通过顺序、拒绝不执行、免审直达 gate、只读批经 gate 且下标对齐、单调用不并行、`ask_user_question`/写/fallback 不可并行）。
 - 全量测试通过：**438 tests / 0 failures / 0 errors / 17 skipped**。
 
-**下一刀（R4）**：编排接缝——`AgentOrchestrator` + `LoopGuard` + `StreamPublisher`，落地 P7-08 渐进 nudge，
-目标是把 `ReActAgentService` 从 1498 行降到职责单一的编排壳。
+#### R4a 循环与流接缝（2026-11-21）
+
+- 新增 `agent/run/LoopGuard`：把重复调用、重复失败、重复诊断、重复验证失败、停滞轮次五组计数器收敛为纯状态机，并落地 P7-08 渐进恢复：
+  - 重复调用 / 失败：第 N-1 次软提示 → 第 N 次 CRITICAL → 第 N+1 次才停止（保留一轮自救窗口，默认 N=3）；
+  - 诊断 / 验证 / 停滞：在既有停止阈值前一轮插入 nudge，阈值语义不变；
+  - 任何真实进展（新签名调用成功、计划推进、文件变化）清零对应计数。
+- 新增 `agent/stream/StreamPublisher`：一轮流式模型的唯一发布器，统一 chunk/usage 转发、tool_calls 聚合、错误传播与 token 超预算判定；主循环两处重复的 `streamChat` 收回一处。
+- `ReActAgentService`：删除 `lastToolSignature`/`repeatedToolCalls`/`lastFailureFingerprint`/`repeatedFailures`/`seenToolSignatures`/`lastDiagnosticsFingerprint`/`repeatedDiagnostics`/`lastVerifyFingerprint`/`repeatedVerifyFailures`/`stagnantRounds`、`normalizeToolCall`/`normalizeFailure` 与两段匿名 `AgentStreamCallback`；新增 `toNoProgress` / `userMessage` 两个小工具。
+- 行为变化（有意）：连续相同工具调用 / 相同失败由「第 3 次直接停止」调整为「第 3 次 CRITICAL + 第 4 次停止」，`ScriptedAgentLoopTest` 已同步并断言 CRITICAL nudge 确实进入模型上下文。
+- 新增测试：`LoopGuardTest`（9 例：分级 nudge、参数顺序归一、签名切换重置、失败恢复、诊断/验证/停滞、阈值关闭）；`StreamPublisherTest`（3 例：分片与用量转发、超预算异常、流错误传播）。
+- 全量测试通过：**450 tests / 0 failures / 0 errors / 17 skipped**。
+
+**下一刀（R4b）**：编排接缝——把 `execute` 主循环抽到 `AgentOrchestrator`，
+让 `ReActAgentService` 退化为入口与协作者装配；完成后继续 R5 上下文接缝（P7-07 / P7-09）。
 

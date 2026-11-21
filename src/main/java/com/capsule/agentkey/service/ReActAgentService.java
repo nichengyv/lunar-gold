@@ -1,9 +1,10 @@
 package com.capsule.agentkey.service;
 
+import com.capsule.agentkey.agent.run.LoopGuard;
 import com.capsule.agentkey.agent.run.PlanStep;
 import com.capsule.agentkey.agent.run.RunContext;
+import com.capsule.agentkey.agent.stream.StreamPublisher;
 import com.capsule.agentkey.client.AgentClient;
-import com.capsule.agentkey.client.AgentStreamCallback;
 import com.capsule.agentkey.entity.AgentRule;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.tool.ToolRegistry;
@@ -17,7 +18,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 
 
@@ -80,6 +80,8 @@ public class ReActAgentService {
     private final com.capsule.agentkey.agent.tool.ApprovalGate approvalGate;
     /** R3：文件变更收集与诊断 */
     private final com.capsule.agentkey.agent.run.FileChangeService fileChangeService;
+    /** R4：一轮模型流式调用与 token 预算的统一发布器 */
+    private final StreamPublisher streamPublisher = new StreamPublisher();
 
     //B2 已移至 AgentPolicy.Reasoning.toolContentLimit()，按档位动态收紧（FAST=500, STANDARD=1000, DEEP=2000）
 
@@ -480,30 +482,20 @@ public class ReActAgentService {
             int round = 0;
             // P5-10-3：本轮开始时间，用于时间预算检查和前端耗时展示的对账
             long runStartedAt = System.currentTimeMillis();
-            // P4-07：本 run 的 token 累计；overBudgetTokens > 0 表示已超预算，需立即中断
+            // P4-07：本 run 的 token 累计；超预算判定由 StreamPublisher 统一处理
             java.util.concurrent.atomic.AtomicLong promptTokensTotal = new java.util.concurrent.atomic.AtomicLong(0);
             java.util.concurrent.atomic.AtomicLong completionTokensTotal = new java.util.concurrent.atomic.AtomicLong(0);
-            java.util.concurrent.atomic.AtomicLong overBudgetTokens = new java.util.concurrent.atomic.AtomicLong(0);
             //开始 ReAct 循环（轮次上限由推理档位决定：快速 10 / 标准 30 / 深度 60）
             boolean budgetHintSent = false;
             boolean workspaceChanged = false;
             boolean unresolvedWriteFailure = false;
             boolean unresolvedApprovalRejection = false;
-            String lastToolSignature = null;
-            int repeatedToolCalls = 0;
-            String lastFailureFingerprint = null;
-            int repeatedFailures = 0;
-            Set<String> seenToolSignatures = new HashSet<>();
-            int stagnantRounds = 0;
-            //P5-05：连续相同诊断计数，达到阈值后与重复调用共用无进展停止
-            String lastDiagnosticsFingerprint = null;
-            int repeatedDiagnostics = 0;
+            // R4/P7-08：重复调用、失败、诊断、验证与停滞轮次统一由 LoopGuard 计数并分级 nudge
+            LoopGuard loopGuard = new LoopGuard(maxRepeatedToolCalls, maxStagnantRounds);
             //P5-06：验证次数、文件变更轮次与最近一次验证覆盖的轮次，避免重复执行验证
             int verifyAttempts = 0;
             long changeEpoch = 0;
             long verifiedEpoch = -1;
-            String lastVerifyFingerprint = null;
-            int repeatedVerifyFailures = 0;
             boolean verifyUnavailableNotified = false;
             while (round < policy.reasoning().maxToolRounds()) {
                 //P6-06：只有用户显式停止才中止；客户端断流不会进入这里，Run 继续执行
@@ -528,9 +520,7 @@ public class ReActAgentService {
                 // 决策 + 作答合并成一次「流式」调用：
                 // 模型只输出文本 → 边生成边推给前端（真正的打字机效果）；
                 // 模型要调工具 → 先把分片参数累积成完整 tool_calls，再执行工具进入下一轮。
-                StringBuilder streamedText = new StringBuilder();
-                List<ObjectNode> streamedToolCalls = new ArrayList<>();
-                AtomicReference<Throwable> streamError = new AtomicReference<>();
+                // R4：流式调用、chunk/usage 转发、tool_calls 聚合与 token 预算统一由 StreamPublisher 处理。
 
                 // 预算告警：剩余 3 轮时提醒模型收口，避免把轮次浪费在无谓探索上
                 int remainingRounds = policy.reasoning().maxToolRounds() - round;
@@ -543,48 +533,12 @@ public class ReActAgentService {
                     messages.add(hint);
                 }
 
-                springAiClient.streamChat(apiKey, policy.model(), messages, tools, advisorSummary,
-                        new AgentStreamCallback() {
-                    @Override
-                    public void onChunk(String chunk) {
-                        streamedText.append(chunk);
-                        callback.onChunk(chunk);
-                    }
-
-                    @Override
-                    public void onToolCalls(List<ObjectNode> toolCalls) {
-                        streamedToolCalls.addAll(toolCalls);
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        // 一轮结束由外层决定：继续工具循环还是收尾
-                    }
-
-                    @Override
-                    public void onUsage(long promptTokens, long completionTokens) {
-                        // P4-07：先累加并透传给上层落库，再判断是否超预算
-                        long total = promptTokensTotal.addAndGet(promptTokens)
-                                + completionTokensTotal.addAndGet(completionTokens);
-                        callback.onUsage(promptTokens, completionTokens);
-                        if (maxTokensPerRun > 0 && total > maxTokensPerRun) {
-                            overBudgetTokens.set(total);
-                        }
-                    }
-
-                    @Override
-                    public void onError(Throwable t) {
-                        streamError.set(t);
-                    }
-                });
-
-                if (streamError.get() != null) {
-                    throw new RuntimeException(streamError.get());
-                }
-                if (overBudgetTokens.get() > 0) {
-                    throw new com.capsule.agentkey.exception.TokenBudgetExceededException(
-                            overBudgetTokens.get(), maxTokensPerRun);
-                }
+                StreamPublisher.Turn turn = streamPublisher.stream(
+                        springAiClient, apiKey, policy.model(), messages, tools, advisorSummary,
+                        callback::onChunk, callback::onUsage,
+                        promptTokensTotal, completionTokensTotal, maxTokensPerRun);
+                String streamedText = turn.text();
+                List<ObjectNode> streamedToolCalls = turn.toolCalls();
 
                 if (streamedToolCalls.isEmpty()) {//模型没要求调工具 → 只表示候选完成，不能代替验证证据
                     //P5-06：候选完成时若最近一次验证没有覆盖最新文件变更，先补一次验证；
@@ -594,28 +548,23 @@ public class ReActAgentService {
                                 runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
                         verifiedEpoch = changeEpoch;
                         if (verify.failed()) {
-                            String fingerprint = verify.failureFingerprint();
-                            repeatedVerifyFailures = fingerprint.equals(lastVerifyFingerprint)
-                                    ? repeatedVerifyFailures + 1 : 1;
-                            lastVerifyFingerprint = fingerprint;
-                            if (maxRepeatedToolCalls > 0
-                                    && repeatedVerifyFailures >= maxRepeatedToolCalls) {
-                                String message = "连续 " + repeatedVerifyFailures
-                                        + " 次得到相同验证失败（" + verify.message()
-                                        + "），已停止以避免无进展循环。";
-                                stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                                        "REPEATED_VERIFY_FAILURE", "verify",
-                                        repeatedVerifyFailures, stagnantRounds, message));
+                            LoopGuard.Signal verifySignal = loopGuard.onVerifyFailure(
+                                    verify.failureFingerprint(), verify.message());
+                            if (verifySignal.isStop()) {
+                                stopForNoProgress(callback, workspaceChanged,
+                                        toNoProgress(verifySignal));
                                 return;
                             }
                             if (verify.attempt() < verify.maxAttempts()) {
                                 addUserMessage(messages, verify.formatForPrompt());
+                                if (verifySignal.isNudge()) {
+                                    addUserMessage(messages, verifySignal.message());
+                                }
                                 round++;
                                 continue;
                             }
                         } else {
-                            repeatedVerifyFailures = 0;
-                            lastVerifyFingerprint = null;
+                            loopGuard.onVerifyFailure(null, null);
                         }
                     }
                     Completion completion = candidateCompletion(
@@ -631,8 +580,8 @@ public class ReActAgentService {
                 //把模型这一轮「调用工具」的意图写回上下文，后续 tool 消息才能对应上
                 ObjectNode assistantMsg = mapper.createObjectNode();
                 assistantMsg.put("role", "assistant");
-                if (streamedText.length() > 0) {
-                    assistantMsg.put("content", streamedText.toString());
+                if (!streamedText.isEmpty()) {
+                    assistantMsg.put("content", streamedText);
                 } else {
                     assistantMsg.putNull("content");
                 }
@@ -663,16 +612,12 @@ public class ReActAgentService {
                     callback.onToolCall(toolName, arguments);
                     log.info("调用工具: {} 参数: {}", toolName, arguments);
 
-                    String toolSignature = normalizeToolCall(toolName, arguments);
-                    boolean newToolSignature = seenToolSignatures.add(toolSignature);
-                    repeatedToolCalls = toolSignature.equals(lastToolSignature) ? repeatedToolCalls + 1 : 1;
-                    lastToolSignature = toolSignature;
-                    if (maxRepeatedToolCalls > 0 && repeatedToolCalls >= maxRepeatedToolCalls) {
-                        String message = "检测到连续 " + repeatedToolCalls + " 次相同工具调用（"
-                                + toolName + "），已停止以避免无进展循环。";
-                        callback.onToolResult(toolName, ToolResult.fail(message));
-                        stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                                "REPEATED_TOOL_CALL", toolName, repeatedToolCalls, stagnantRounds, message));
+                    // R4/P7-08：重复调用先 nudge，超过自救窗口才停止
+                    LoopGuard.Signal callSignal = loopGuard.onToolCall(toolName, arguments);
+                    boolean newToolSignature = callSignal.firstOccurrence();
+                    if (callSignal.isStop()) {
+                        callback.onToolResult(toolName, ToolResult.fail(callSignal.message()));
+                        stopForNoProgress(callback, workspaceChanged, toNoProgress(callSignal));
                         return;
                     }
 
@@ -725,6 +670,11 @@ public class ReActAgentService {
 
                     messages.add(toolMsg);//把组装完毕的tool消息存入全局消息数组
 
+                    // nudge 同样只能排在本组 tool 响应之后
+                    if (callSignal.isNudge()) {
+                        deferredUserMessages.add(userMessage(callSignal.message()));
+                    }
+
 
                     if (newToolSignature && result.isSuccess()) roundProgress = true;
                     if (result.isSuccess() && risk != null) {
@@ -764,23 +714,20 @@ public class ReActAgentService {
                             diagMsg.put("content", diagnostics.formatForPrompt());
                             deferredUserMessages.add(diagMsg);
                             if (diagnostics.hasDiagnostics()) {
-                                repeatedDiagnostics = fingerprint.equals(lastDiagnosticsFingerprint)
-                                        ? repeatedDiagnostics + 1 : 1;
-                                lastDiagnosticsFingerprint = fingerprint;
-                                if (maxRepeatedToolCalls > 0 && repeatedDiagnostics >= maxRepeatedToolCalls) {
-                                    com.capsule.agentkey.diagnostics.Diagnostic first =
-                                            diagnostics.diagnostics().get(0);
-                                    String message = "连续 " + repeatedDiagnostics + " 次得到相同诊断（"
-                                            + first.file() + ":" + first.line()
-                                            + "），已停止以避免在同一个编译错误上循环。";
-                                    stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                                            "REPEATED_DIAGNOSTICS", "diagnostics",
-                                            repeatedDiagnostics, stagnantRounds, message));
+                                com.capsule.agentkey.diagnostics.Diagnostic first =
+                                        diagnostics.diagnostics().get(0);
+                                LoopGuard.Signal diagSignal = loopGuard.onDiagnostics(
+                                        fingerprint, first.file() + ":" + first.line());
+                                if (diagSignal.isNudge()) {
+                                    deferredUserMessages.add(userMessage(diagSignal.message()));
+                                }
+                                if (diagSignal.isStop()) {
+                                    stopForNoProgress(callback, workspaceChanged,
+                                            toNoProgress(diagSignal));
                                     return;
                                 }
                             } else {
-                                repeatedDiagnostics = 0;
-                                lastDiagnosticsFingerprint = null;
+                                loopGuard.onDiagnostics(null, null);
                             }
                         }
                     }
@@ -793,19 +740,18 @@ public class ReActAgentService {
                     }
 
                     if (!result.isSuccess()) {
-                        String failureFingerprint = normalizeFailure(toolName, result);
-                        repeatedFailures = failureFingerprint.equals(lastFailureFingerprint) ? repeatedFailures + 1 : 1;
-                        lastFailureFingerprint = failureFingerprint;
-                        if (maxRepeatedToolCalls > 0 && repeatedFailures >= maxRepeatedToolCalls) {
-                            String message = "检测到连续 " + repeatedFailures + " 次相同失败（"
-                                    + toolName + "），已停止以避免无效重试。";
-                            stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                                    "REPEATED_FAILURE", toolName, repeatedFailures, stagnantRounds, message));
+                        LoopGuard.Signal failSignal = loopGuard.onFailure(toolName,
+                                result.getError() != null ? result.getError() : result.getContent());
+                        if (failSignal.isNudge()) {
+                            deferredUserMessages.add(userMessage(failSignal.message()));
+                        }
+                        if (failSignal.isStop()) {
+                            stopForNoProgress(callback, workspaceChanged,
+                                    toNoProgress(failSignal));
                             return;
                         }
                     } else {
-                        repeatedFailures = 0;
-                        lastFailureFingerprint = null;
+                        loopGuard.onToolSuccess();
                     }
 
                     //P5-08：停止生成后不再执行本轮剩余调用（含已入池但未开始的只读任务），
@@ -831,18 +777,11 @@ public class ReActAgentService {
                             runVerification(workspacePath, cancelRequested, ++verifyAttempts, callback);
                     verifiedEpoch = changeEpoch;
                     if (verify.failed()) {
-                        String fingerprint = verify.failureFingerprint();
-                        repeatedVerifyFailures = fingerprint.equals(lastVerifyFingerprint)
-                                ? repeatedVerifyFailures + 1 : 1;
-                        lastVerifyFingerprint = fingerprint;
-                        if (maxRepeatedToolCalls > 0
-                                && repeatedVerifyFailures >= maxRepeatedToolCalls) {
-                            String message = "连续 " + repeatedVerifyFailures
-                                    + " 次得到相同验证失败（" + verify.message()
-                                    + "），已停止以避免无进展循环。";
-                            stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                                    "REPEATED_VERIFY_FAILURE", "verify",
-                                    repeatedVerifyFailures, stagnantRounds, message));
+                        LoopGuard.Signal verifySignal = loopGuard.onVerifyFailure(
+                                verify.failureFingerprint(), verify.message());
+                        if (verifySignal.isStop()) {
+                            stopForNoProgress(callback, workspaceChanged,
+                                    toNoProgress(verifySignal));
                             return;
                         }
                         if (verify.attempt() >= verify.maxAttempts()) {
@@ -851,9 +790,11 @@ public class ReActAgentService {
                             return;
                         }
                         addUserMessage(messages, verify.formatForPrompt());
+                        if (verifySignal.isNudge()) {
+                            addUserMessage(messages, verifySignal.message());
+                        }
                     } else {
-                        repeatedVerifyFailures = 0;
-                        lastVerifyFingerprint = null;
+                        loopGuard.onVerifyFailure(null, null);
                         if (verify.passed()) {
                             addUserMessage(messages, verify.formatForPrompt());
                         } else if (!verifyUnavailableNotified) {
@@ -864,11 +805,12 @@ public class ReActAgentService {
                     }
                 }
 
-                stagnantRounds = roundProgress ? 0 : stagnantRounds + 1;
-                if (maxStagnantRounds > 0 && stagnantRounds >= maxStagnantRounds) {
-                    String message = "连续 " + stagnantRounds + " 轮没有新的有效结果、计划或文件变化，已安全停止。";
-                    stopForNoProgress(callback, workspaceChanged, new NoProgress(
-                            "STAGNANT_ROUNDS", null, 0, stagnantRounds, message));
+                LoopGuard.Signal roundSignal = loopGuard.onRoundEnd(roundProgress);
+                if (roundSignal.isNudge()) {
+                    addUserMessage(messages, roundSignal.message());
+                }
+                if (roundSignal.isStop()) {
+                    stopForNoProgress(callback, workspaceChanged, toNoProgress(roundSignal));
                     return;
                 }
                 round++;
@@ -897,41 +839,10 @@ public class ReActAgentService {
                     + "只输出面向用户的最终回答文本。");
             messages.add(finalInstruction);
             //第三个参数传空工具列表：收尾这一次调用模型不能再发起 tool_calls，只能输出文本答案
-            AtomicReference<Throwable> finalError = new AtomicReference<>();
-            springAiClient.streamChat(apiKey, policy.model(), messages, List.of(), advisorSummary,
-                    new AgentStreamCallback() {
-                @Override
-                public void onChunk(String chunk) {
-                    callback.onChunk(chunk);
-                }
-
-                @Override
-                public void onComplete() {
-                    //收尾由下面统一触发
-                }
-
-                @Override
-                public void onUsage(long promptTokens, long completionTokens) {
-                    long total = promptTokensTotal.addAndGet(promptTokens)
-                            + completionTokensTotal.addAndGet(completionTokens);
-                    callback.onUsage(promptTokens, completionTokens);
-                    if (maxTokensPerRun > 0 && total > maxTokensPerRun) {
-                        overBudgetTokens.set(total);
-                    }
-                }
-
-                @Override
-                public void onError(Throwable t) {
-                    finalError.set(t);
-                }
-            });
-            if (finalError.get() != null) {
-                throw new RuntimeException(finalError.get());
-            }
-            if (overBudgetTokens.get() > 0) {
-                throw new com.capsule.agentkey.exception.TokenBudgetExceededException(
-                        overBudgetTokens.get(), maxTokensPerRun);
-            }
+            //R4：统一走 StreamPublisher，chunk/usage/预算判定与主循环一致
+            streamPublisher.stream(springAiClient, apiKey, policy.model(), messages, List.of(),
+                    advisorSummary, callback::onChunk, callback::onUsage,
+                    promptTokensTotal, completionTokensTotal, maxTokensPerRun);
             // 批次 B 修复：finalizePlan 必须在 onComplete 之前推 plan 事件，
             // 因为 onComplete 发 SSE done 后前端就停止处理后续事件了
             finalizePlan(callback);
@@ -1082,10 +993,21 @@ public class ReActAgentService {
         if (content == null || content.isBlank()) {
             return;
         }
+        messages.add(userMessage(content));
+    }
+
+    /** R4：统一的 user 消息节点，供 nudge / 诊断 / 计划快照复用 */
+    private ObjectNode userMessage(String content) {
         ObjectNode message = mapper.createObjectNode();
         message.put("role", "user");
         message.put("content", content);
-        messages.add(message);
+        return message;
+    }
+
+    /** R4：LoopGuard 停止信号转换成既有的 NoProgress 载荷，保持 SSE/落库格式不变 */
+    private NoProgress toNoProgress(LoopGuard.Signal signal) {
+        return new NoProgress(signal.reason(), signal.toolName(), signal.count(),
+                signal.stagnantRounds(), signal.message());
     }
 
     /** P5-10-3：时间预算是否已耗尽；maxSeconds <= 0 表示不限制。 */
@@ -1202,24 +1124,6 @@ public class ReActAgentService {
         callback.onCompletion(new Completion(
                 CompletionStatus.INCOMPLETE, event.reason(), event.message(), workspaceChanged));
         callback.onComplete();
-    }
-
-    /** 参数 JSON 按 key 排序，避免语义相同的调用因字段顺序不同绕过重复检测。 */
-    private String normalizeToolCall(String toolName, String arguments) {
-        try {
-            Object value = mapper.readValue(arguments == null || arguments.isBlank() ? "{}" : arguments, Object.class);
-            String canonical = mapper.writer()
-                    .with(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
-                    .writeValueAsString(value);
-            return toolName + ":" + canonical;
-        } catch (Exception e) {
-            return toolName + ":" + (arguments == null ? "" : arguments.trim());
-        }
-    }
-
-    private String normalizeFailure(String toolName, ToolResult result) {
-        String error = result.getError() != null ? result.getError() : result.getContent();
-        return toolName + ":" + (error == null ? "" : error.trim().replaceAll("\\s+", " "));
     }
 
     /**
