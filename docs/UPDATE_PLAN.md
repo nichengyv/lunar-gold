@@ -850,7 +850,7 @@ views/        ChatView（只负责布局与挂载）
 | **R0 安全网** ✅ 2026-11-21 | `ScriptedAgentLoopTest`（固定模型响应驱动主循环）；`RunContext` 契约测试；seq 并发测试 | 覆盖 plan/停滞/审批/取消/恢复；全量测试绿 | 只增测试 |
 | **R1 状态地基** ✅ 2026-11-21 | `RunContext` + `RunEventStore`；seq 原子化；`plan_json` 持久化；`PLAN_UPDATED` 事件 | 并发写无冲突；L2 计划可见；A/B 成功率不降 | 旧 ThreadLocal 路径开关 |
 | **R2 Context 瘦身** ✅ 2026-11-21 | `WorkspaceContext` 只留传输参数；领域状态迁 `RunContext` | 全量测试绿；跨 turn 计划/scope 可见 | 保留兼容访问器 |
-| **R3 工具接缝** | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
+| **R3 工具接缝** ✅ 2026-11-21 | `ToolExecutor` + `ApprovalGate` + `FileChangeService`；只读批与 `ask_user_question` 纳入统一路径 | 审批/scope 无绕过（有测试证明） | 双执行器开关 |
 | **R4 编排接缝** | `AgentOrchestrator` + `LoopGuard` + `StreamPublisher`；落地 P7-08 渐进 nudge | `ReActAgentService` 行数显著下降；L1 停滞恢复达标 | 保留旧 execute |
 | **R5 上下文接缝** | `ContextAssembler` + `ContextCondenser`；落地 P7-07 软回注、P7-09 三层压缩 | L2/L3 A/B 达标；token 峰值下降；原始事件保留 | 压缩可关 |
 | **R6 前端拆分** | `SSEService` + store 拆分 + 恢复补全 | 前端测试绿；断线恢复覆盖 plan/file_change/approval/question | 逐 store 迁移 |
@@ -937,6 +937,15 @@ views/        ChatView（只负责布局与挂载）
 - 子上下文共享 RunContext，仅文件变更缓冲独立；`RunContextTest` 增至 8 例，新增 `WorkspaceContextTest`（2 例）锁定门面语义。
 - 全量测试通过：**421 tests / 0 failures / 0 errors / 17 skipped**。
 
-**下一刀（R3）**：工具执行链路拆分——`ToolExecutor` 统一串行/并行与统计，`ApprovalGate` 收敛审批与 scope 检查，
-`FileChangeService` 接管变更登记；目标是让只读批与 `ask_user_question` 也走同一套审批/scope 判定。
+#### R3 工具接缝（2026-11-21）
+
+- 新增 `agent/tool/ApprovalGate`：`assess` 纯判定风险与是否需要审批（档位 + MCP/fallback 强制 + 会话白名单），`dispatch` 是工具执行的唯一出口（先 scope 再 `ToolRegistry`），`rejection` 统一拒绝文案。
+- 新增 `agent/tool/ToolExecutor`：串行路径完成「最新权限 → 审批 → dispatch」；`executeReadOnlyBatch` 只并连续只读调用，子线程同样经 `gate.dispatch`，不再存在绕过 scope 的旁路；`isParallelizable` 显式排除 `ask_user_question`、写工具与 fallback。
+- 新增 `agent/run/FileChangeService`：接管变更 drain、诊断采集、指纹与文件版本回写，主循环只保留回调推送与无进展判定。
+- `ReActAgentService`：删除 `readOnlyToolPool`、`commandOf`、`isParallelReadOnlyCall`、`executeReadOnlyBatch`、`dispatchWithScopeCheck`；只读批线程池迁入 `ToolExecutor`，`shutdownReadOnlyToolPool` 仅委托关闭。
+- 新增测试：`ApprovalGateTest`（11 例：只读免审、MANUAL/AUTO/FULL、递归删除、MCP/fallback 强制、会话允许、scope 拦截与放行、非法 JSON、拒绝文案）；`ToolExecutorTest`（6 例：审批通过顺序、拒绝不执行、免审直达 gate、只读批经 gate 且下标对齐、单调用不并行、`ask_user_question`/写/fallback 不可并行）。
+- 全量测试通过：**438 tests / 0 failures / 0 errors / 17 skipped**。
+
+**下一刀（R4）**：编排接缝——`AgentOrchestrator` + `LoopGuard` + `StreamPublisher`，落地 P7-08 渐进 nudge，
+目标是把 `ReActAgentService` 从 1498 行降到职责单一的编排壳。
 

@@ -72,8 +72,14 @@ public class ReActAgentService {
     @org.springframework.beans.factory.annotation.Value("${agent.parallel.readonly-max-concurrency:3}")
     private int readonlyMaxConcurrency = 3;
 
-    /** 只读批执行池：daemon 线程，按需初始化；关闭时中断未完成任务 */
-    private volatile java.util.concurrent.ExecutorService readOnlyToolPool;
+    /** 只读批执行池：daemon 线程，按需初始化；关闭时中断未完成任务（R3 已迁入 ToolExecutor） */
+
+    /** R3：工具执行的唯一入口（串行 + 只读并行批），持有只读批线程池 */
+    private volatile com.capsule.agentkey.agent.tool.ToolExecutor toolExecutor;
+    /** R3：审批与 scope 判定的唯一入口 */
+    private final com.capsule.agentkey.agent.tool.ApprovalGate approvalGate;
+    /** R3：文件变更收集与诊断 */
+    private final com.capsule.agentkey.agent.run.FileChangeService fileChangeService;
 
     //B2 已移至 AgentPolicy.Reasoning.toolContentLimit()，按档位动态收紧（FAST=500, STANDARD=1000, DEEP=2000）
 
@@ -276,6 +282,47 @@ public class ReActAgentService {
         this.diagnosticsService = diagnosticsService;
         this.verifyService = verifyService;
         this.repoMapService = repoMapService;
+        // R3：审批/scope 判定与文件变更处理从主循环抽出；ToolExecutor 延迟构建以读取 @Value 配置
+        this.approvalGate = new com.capsule.agentkey.agent.tool.ApprovalGate(
+                toolApprovalRegistry, toolRegistry, scopeConstraintService);
+        this.fileChangeService = new com.capsule.agentkey.agent.run.FileChangeService(diagnosticsService);
+    }
+
+    /** R3：延迟构建，保证 readonlyMaxConcurrency 已被 Spring 注入 */
+    private com.capsule.agentkey.agent.tool.ToolExecutor toolExecutor() {
+        com.capsule.agentkey.agent.tool.ToolExecutor executor = toolExecutor;
+        if (executor == null) {
+            synchronized (this) {
+                executor = toolExecutor;
+                if (executor == null) {
+                    executor = new com.capsule.agentkey.agent.tool.ToolExecutor(
+                            toolRegistry, toolApprovalRegistry, approvalGate,
+                            permissionTracker, readonlyMaxConcurrency);
+                    toolExecutor = executor;
+                }
+            }
+        }
+        return executor;
+    }
+
+    /** R3：把 SSE 回调适配成 ToolExecutor 的审批 UI */
+    private com.capsule.agentkey.agent.tool.ToolExecutor.ApprovalUi approvalUi(
+            StreamCallback callback, Long userId, Long projectId) {
+        return new com.capsule.agentkey.agent.tool.ToolExecutor.ApprovalUi() {
+            @Override
+            public void onApprovalRequired(ToolApprovalRegistry.Pending pending, String risk) {
+                var preview = buildApprovalPreview(pending.tool(), pending.arguments(), userId, projectId);
+                callback.onApprovalRequired(pending.approvalId(), pending.tool(), preview, risk,
+                        pending.expiresAt());
+            }
+
+            @Override
+            public void onApprovalResolved(ToolApprovalRegistry.Pending pending,
+                                           ToolApprovalRegistry.Resolution resolution) {
+                callback.onApprovalResolved(pending.approvalId(), resolution.decision().name(),
+                        resolution.source().name(), resolution.batchId());
+            }
+        };
     }
 
     /** P5-13：交付完成状态；与 AgentRun 的执行生命周期分开，SUCCEEDED 不代表已经验证。 */
@@ -609,8 +656,8 @@ public class ReActAgentService {
 
                     //P5-08：到达新的批首时，先把连续只读调用并发执行；结果仍按原下标顺序回放
                     if (!readOnlyBatch.containsKey(callIndex)) {
-                        readOnlyBatch = executeReadOnlyBatch(streamedToolCalls, callIndex,
-                                sessionId, policy, projectId, cancelRequested);
+                        readOnlyBatch = toolExecutor().executeReadOnlyBatch(streamedToolCalls, callIndex,
+                                sessionId, policy, cancelRequested);
                     }
 
                     callback.onToolCall(toolName, arguments);
@@ -640,42 +687,20 @@ public class ReActAgentService {
                             && WorkspaceContext.get().runId() != null) {
                         result = executeAskUserQuestion(arguments, callback, cancelRequested);
                     } else {
-                        risk = ToolApprovalRegistry.riskOf(toolName, arguments);
                     if (readOnlyBatch.containsKey(callIndex)) {
-                        //P5-08：连续只读批已并发执行完毕，按原顺序取结果；不进入审批与串行分发
+                        //P5-08：连续只读批已并发执行完毕，按原顺序取结果；
+                        //R3：批内调用在子线程中同样经过 ApprovalGate.dispatch（scope 校验），不存在旁路
                         result = readOnlyBatch.get(callIndex);
                     } else {
-                        // 每次工具调用前都读一次最新权限，用户在运行中改档位能立即生效
-                        AgentPolicy.Permission effectivePermission =
-                                permissionTracker.get(sessionId, policy.permission());
-                        // 按权限档位决定是否需要人工确认：手动=写/执行都问，自动=仅破坏性命令问，完全=不问
-                        if (risk != null
-                                && (effectivePermission.requiresApproval(risk, commandOf(arguments))
-                                    // MCP 写操作（含内置写工具的 MCP fallback）不能在自动/完全权限下绕过审批
-                                    || toolName.startsWith("mcp_")
-                                    || toolRegistry.hasFallback(toolName))
-                                && !toolApprovalRegistry.isSessionAllowed(sessionId, toolName)) {
-                            //第六十八批 A2：危险工具先挂起，等用户批准；拒绝时回一条 tool 错误让模型换方案
-                            ToolApprovalRegistry.Pending approval =
-                                    toolApprovalRegistry.create(userId, sessionId, toolName, arguments, risk);
-                            var preview = buildApprovalPreview(toolName, arguments, userId, projectId);
-                            callback.onApprovalRequired(approval.approvalId(), toolName, preview, risk, approval.expiresAt());
-                            ToolApprovalRegistry.Resolution decision = toolApprovalRegistry.await(approval, cancelRequested);
-                            // 批次 B：无论结果如何，通知前端把卡片切到"已处理"态
-                            callback.onApprovalResolved(approval.approvalId(), decision.decision().name(),
-                                    decision.source().name(), decision.batchId());
-                            if (decision.decision() == ToolApprovalRegistry.Decision.REJECT) {
-                                unresolvedApprovalRejection = true;
-                                String label = "EXECUTE".equals(risk) ? "执行命令"
-                                        : "DESTRUCTIVE".equals(risk) ? "递归删除目录" : "写入文件";
-                                result = ToolResult.fail("用户拒绝了" + label + "操作（" + toolName + "）。"
-                                        + "请改用不具破坏性的方案；如果确实需要该操作，请向用户说明理由后等待其重新批准。");
-                                log.info("用户拒绝工具调用: {}", toolName);
-                            } else {
-                                result = dispatchWithScopeCheck(toolName, arguments, effectivePermission, projectId);
-                            }
-                        } else {
-                            result = dispatchWithScopeCheck(toolName, arguments, effectivePermission, projectId);
+                        // R3：最新权限 → 风险判定 → 审批（如需）→ scope → dispatch 全在 ToolExecutor 内完成
+                        com.capsule.agentkey.agent.tool.ToolExecutor.Outcome outcome =
+                                toolExecutor().execute(toolName, arguments, userId, sessionId,
+                                        policy.permission(), cancelRequested,
+                                        approvalUi(callback, userId, projectId));
+                        result = outcome.result();
+                        risk = outcome.risk();
+                        if (outcome.approvalRejected()) {
+                            unresolvedApprovalRejection = true;
                         }
                     }
                     } // end else（非 ask_user_question 的常规审批 + dispatch 路径）
@@ -724,20 +749,12 @@ public class ReActAgentService {
 
                     //P5-05：变更文件诊断 → 注入下一轮上下文、推送前端，并参与无进展判定
                     if (!fileChanges.isEmpty()) {
-                        WorkspaceContext activeCtx = WorkspaceContext.get();
+                        // R3：诊断收集、指纹与文件版本回写由 FileChangeService 负责
+                        com.capsule.agentkey.agent.run.FileChangeService.Collected collected =
+                                fileChangeService.collect(workspacePath, fileChanges);
                         com.capsule.agentkey.diagnostics.DiagnosticsResult diagnostics =
-                                diagnosticsService.collect(
-                                        workspacePath == null || workspacePath.isBlank()
-                                                ? null : java.nio.file.Paths.get(workspacePath),
-                                        fileChanges);
-                        String fingerprint = com.capsule.agentkey.diagnostics.DiagnosticsService
-                                .fingerprint(diagnostics.diagnostics());
-                        if (activeCtx != null) {
-                            activeCtx.setDiagnostics(diagnostics);
-                            activeCtx.setDiagnosticsFingerprint(fingerprint);
-                            activeCtx.setDiagnosticsFileVersion(
-                                    diagnosticsFileVersion(workspacePath, fileChanges));
-                        }
+                                collected.diagnostics();
+                        String fingerprint = collected.fingerprint();
                         if (diagnostics.available() || diagnostics.analyzedFiles() > 0) {
                             callback.onDiagnostics(diagnostics);
                         }
@@ -1035,23 +1052,6 @@ public class ReActAgentService {
         WorkspaceContext ctx = WorkspaceContext.get();
         return ctx != null && ctx.plan().stream()
                 .anyMatch(s -> "pending".equals(s.status()) || "in_progress".equals(s.status()));
-    }
-
-    /** P5-05：把本批变更文件的版本拼成可追溯字符串，随诊断结果一起落事件 */
-    private String diagnosticsFileVersion(String workspacePath,
-                                          java.util.List<com.capsule.agentkey.tool.FileChange> changes) {
-        if (workspacePath == null || workspacePath.isBlank() || changes == null || changes.isEmpty()) {
-            return "";
-        }
-        try {
-            java.nio.file.Path root = java.nio.file.Paths.get(workspacePath);
-            return changes.stream()
-                    .filter(c -> c != null && c.path() != null)
-                    .map(c -> c.path() + "@" + diagnosticsService.fileVersion(root.resolve(c.path())))
-                    .collect(java.util.stream.Collectors.joining(","));
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     /** P5-06：执行一次项目验证；任何异常都降级为 UNAVAILABLE，并始终推送 onVerify */
@@ -1414,141 +1414,13 @@ public class ReActAgentService {
         return msg;
     }
 
-    /** 从工具入参中取出命令原文，供权限档位判断是否为破坏性命令；解析失败按空串处理（不额外要求审批） */
-    private String commandOf(String arguments) {
-        if (arguments == null || arguments.isBlank()) return "";
-        try {
-            return mapper.readTree(arguments).path("command").asText("");
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /**
-     * P5-08：从 start 开始的连续只读调用是否可进入并行批。
-     * 只并列「连续」的只读调用：中间出现写/命令必须断开，避免后置读取跑到写入之前；
-     * 需要审批（含 MCP/fallback）的调用一律走串行路径。
-     */
-    private boolean isParallelReadOnlyCall(ObjectNode toolCall) {
-        String toolName = toolCall.path("function").path("name").asText();
-        // P7-06：ask_user_question 虽然 readOnly，但必须串行走挂起/恢复拦截点；
-        // 若混入只读并行批，同轮后续工具会在用户回答之前被预执行，破坏"先问再做"的语义
-        if ("ask_user_question".equals(toolName)) return false;
-        if (toolName.isBlank() || !toolRegistry.isReadOnly(toolName)) return false;
-        if (toolRegistry.hasFallback(toolName)) return false;
-        String arguments = toolCall.path("function").path("arguments").asText();
-        return ToolApprovalRegistry.riskOf(toolName, arguments) == null;
-    }
-
-    /**
-     * P5-08：并发执行从 start 开始的连续只读批，返回下标对齐的结果。
-     * 批规模小于 2 时返回空 Map（单次调用没有并行收益，仍走串行路径）。
-     * 结果只回放不合并事件：事件与 tool 消息仍由主循环按原下标顺序发出。
-     */
-    private Map<Integer, ToolResult> executeReadOnlyBatch(List<ObjectNode> toolCalls, int start,
-                                                          Long sessionId, AgentPolicy policy,
-                                                          Long projectId, AtomicBoolean cancelRequested) {
-        int end = start;
-        while (end < toolCalls.size() && isParallelReadOnlyCall(toolCalls.get(end))) {
-            end++;
-        }
-        int size = end - start;
-        if (size < 2) {
-            return Map.of();
-        }
-
-        AgentPolicy.Permission permission = permissionTracker.get(sessionId, policy.permission());
-        WorkspaceContext parent = WorkspaceContext.get();
-        List<java.util.concurrent.Future<ToolResult>> futures = new ArrayList<>(size);
-        for (int i = start; i < end; i++) {
-            ObjectNode call = toolCalls.get(i);
-            String toolName = call.path("function").path("name").asText();
-            String arguments = call.path("function").path("arguments").asText();
-            futures.add(readOnlyToolPool().submit(() -> {
-                if (cancelRequested != null && cancelRequested.get()) {
-                    return ToolResult.fail("本轮执行已取消，未执行只读工具 " + toolName);
-                }
-                if (parent == null) {
-                    return dispatchWithScopeCheck(toolName, arguments, permission, projectId);
-                }
-                // 工作区工具依赖 ThreadLocal 上下文，子线程必须带入派生上下文
-                return WorkspaceContext.callIn(parent.child(),
-                        () -> dispatchWithScopeCheck(toolName, arguments, permission, projectId));
-            }));
-        }
-        log.info("P5-08 只读批并发执行: {} 个调用，并发上限 {}", size, Math.max(1, readonlyMaxConcurrency));
-
-        Map<Integer, ToolResult> results = new HashMap<>();
-        for (int i = 0; i < size; i++) {
-            if (cancelRequested != null && cancelRequested.get()) {
-                // 停止生成：取消尚未完成的任务，剩余调用标记为未执行
-                for (int j = i; j < size; j++) {
-                    futures.get(j).cancel(true);
-                    results.put(start + j, ToolResult.fail("本轮执行已取消，未执行只读工具"));
-                }
-                break;
-            }
-            try {
-                results.put(start + i, futures.get(i).get());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                results.put(start + i, ToolResult.fail("只读工具执行被中断"));
-            } catch (java.util.concurrent.ExecutionException e) {
-                results.put(start + i, ToolResult.fail("只读工具执行异常: " + e.getCause()));
-            }
-        }
-        return results;
-    }
-
-    /** P5-08：只读批线程池，按配置上限懒初始化；daemon 线程不阻止进程退出 */
-    private java.util.concurrent.ExecutorService readOnlyToolPool() {
-        java.util.concurrent.ExecutorService pool = readOnlyToolPool;
-        if (pool == null) {
-            synchronized (this) {
-                pool = readOnlyToolPool;
-                if (pool == null) {
-                    java.util.concurrent.atomic.AtomicInteger seq = new java.util.concurrent.atomic.AtomicInteger();
-                    pool = java.util.concurrent.Executors.newFixedThreadPool(
-                            Math.max(1, readonlyMaxConcurrency), r -> {
-                                Thread t = new Thread(r, "readonly-tool-" + seq.incrementAndGet());
-                                t.setDaemon(true);
-                                return t;
-                            });
-                    readOnlyToolPool = pool;
-                }
-            }
-        }
-        return pool;
-    }
-
     @jakarta.annotation.PreDestroy
     void shutdownReadOnlyToolPool() {
-        java.util.concurrent.ExecutorService pool = readOnlyToolPool;
-        if (pool != null) {
-            pool.shutdownNow();
+        // R3：线程池随执行链路迁入 ToolExecutor
+        com.capsule.agentkey.agent.tool.ToolExecutor executor = toolExecutor;
+        if (executor != null) {
+            executor.shutdown();
         }
     }
 
-    /**
-     * D1: 带 scope 约束的工具分发——scope 非空 + 文件类工具 → 先校验路径再执行；校验失败返回 ToolResult.fail
-     * 让 Agent 收到 tool_error 后自动换方案，不抛 BusinessException 炸掉整个 ReAct 循环
-     */
-    private ToolResult dispatchWithScopeCheck(String toolName, String arguments,
-                                              AgentPolicy.Permission permission, Long projectId) {
-        try {
-            com.fasterxml.jackson.databind.JsonNode args = null;
-            try {
-                args = mapper.readTree(arguments);
-            } catch (Exception e) {
-                // 参数不是合法 JSON → 让工具自己解析，scope 检查跳过
-            }
-
-            // scope 约束只用相对路径匹配——如果工具传了绝对路径，让工具自己的沙箱越界校验先拦掉
-            scopeConstraintService.checkToolCall(toolName, args, null);
-            return toolRegistry.dispatch(toolName, arguments, permission);
-        } catch (com.capsule.agentkey.exception.BusinessException e) {
-            log.info("D1 scope 拦截工具调用: tool={}, reason={}", toolName, e.getMessage());
-            return ToolResult.fail(e.getMessage());
-        }
-    }
 }
