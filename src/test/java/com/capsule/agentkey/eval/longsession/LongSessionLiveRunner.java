@@ -87,6 +87,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -103,6 +104,11 @@ public class LongSessionLiveRunner {
     static final String REPEATS_ENV = "P7_02_REPEATS";
     static final String ASK_USER_ENV = "P7_02_ASK_USER";
     static final String MAX_SECONDS_ENV = "P7_02_MAX_SECONDS_PER_TURN";
+    /** R5 A/B：计划软注入与三层压缩的显式开关，默认关闭，避免基线被无意改变 */
+    static final String PLAN_INJECTION_ENV = "P7_02_PLAN_INJECTION";
+    static final String CONDENSE_ENV = "P7_02_CONDENSE";
+    /** R5 A/B：压缩滑窗（字符）；L2 的 prompt 峰值约 1 万 tokens，默认值不会触发，需要显式调低 */
+    static final String CONDENSE_WINDOW_ENV = "P7_02_CONDENSE_WINDOW_CHARS";
     static final Path REPORT_DIR = Paths.get("eval", "runtime-reports");
 
     private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -126,6 +132,9 @@ public class LongSessionLiveRunner {
         int repeats = Math.max(1, intEnv(REPEATS_ENV, 1));
         boolean askUser = "on".equalsIgnoreCase(envOr(ASK_USER_ENV, "off"));
         long maxSeconds = Math.max(30, intEnv(MAX_SECONDS_ENV, 300));
+        boolean planInjection = "on".equalsIgnoreCase(envOr(PLAN_INJECTION_ENV, "off"));
+        boolean condense = "on".equalsIgnoreCase(envOr(CONDENSE_ENV, "off"));
+        int condenseWindowChars = Math.max(4_000, intEnv(CONDENSE_WINDOW_ENV, 120_000));
         Set<String> levels = parseLevels(envOr(LEVELS_ENV, "L1"));
 
         List<LongSessionDataset.Spec> specs = new ArrayList<>(LongSessionDataset.loadAll());
@@ -143,7 +152,8 @@ public class LongSessionLiveRunner {
             for (LongSessionDataset.Spec spec : specs) {
                 System.out.printf("[P7-02] start level=%s repeat=%d/%d model=%s askUser=%s%n",
                         spec.level(), repeat, repeats, model, askUser ? "on" : "off");
-                RunOutcome outcome = runOne(apiKey, baseUrl, model, spec, repeat, askUser, maxSeconds);
+                RunOutcome outcome = runOne(apiKey, baseUrl, model, spec, repeat, askUser, maxSeconds,
+                        planInjection, condense, condenseWindowChars);
                 outcomes.add(outcome);
                 System.out.printf("[P7-02] done level=%s repeat=%d success=%s attribution=%s calls=%d tokens=%d wall=%dms%n",
                         spec.level(), repeat, outcome.success(), outcome.attribution(),
@@ -153,6 +163,10 @@ public class LongSessionLiveRunner {
         }
 
         ObjectNode report = buildReport(model, baseUrl, repeats, levels, askUser, maxSeconds, outcomes);
+        // R5 A/B 的配置必须写进报告，否则两次运行无法区分开关状态
+        report.put("context_plan_injection", planInjection ? "on" : "off");
+        report.put("context_condense", condense ? "on" : "off");
+        report.put("context_condense_window_chars", condenseWindowChars);
         Path path = writeReport(report);
         System.out.println("P7-02 报告已写入: " + path.toAbsolutePath());
         System.out.println("结论: " + report.path("decision").path("summary").asText());
@@ -161,7 +175,8 @@ public class LongSessionLiveRunner {
 
     private static RunOutcome runOne(String apiKey, String baseUrl, String model,
                                      LongSessionDataset.Spec spec, int repeat,
-                                     boolean askUserEnabled, long maxSeconds) {
+                                     boolean askUserEnabled, long maxSeconds,
+                                     boolean planInjection, boolean condense, int condenseWindowChars) {
         long started = System.nanoTime();
         Metrics metrics = new Metrics();
         metrics.firstChunkMs = -1;
@@ -207,7 +222,15 @@ public class LongSessionLiveRunner {
             ReflectionTestUtils.setField(agent, "maxRepeatedToolCalls", 3);
             ReflectionTestUtils.setField(agent, "maxStagnantRounds", 4);
             ReflectionTestUtils.setField(agent, "maxSecondsPerRun", maxSeconds);
+            // R5 A/B：开关与滑窗参数由环境变量显式传入，默认关闭时基线与旧版一致
+            ReflectionTestUtils.setField(agent, "planInjectionEnabled", planInjection);
+            ReflectionTestUtils.setField(agent, "condenseEnabled", condense);
+            ReflectionTestUtils.setField(agent, "condenseWindowChars", condenseWindowChars);
             if (askTool != null) ReflectionTestUtils.setField(agent, "askUserQuestionTool", askTool);
+            // R1/R5：计划必须真正落库，否则软注入只能读到内存快照，无法验证单一事实源
+            RunHarness runs = new RunHarness();
+            ReflectionTestUtils.setField(agent, "agentRunService", runs.service());
+            ReflectionTestUtils.setField(agent, "runEventStore", runs.store());
 
             AgentPolicy policy = new AgentPolicy(model, AgentPolicy.Reasoning.from(spec.reasoning()),
                     AgentPolicy.Permission.from(spec.permission()));
@@ -228,7 +251,6 @@ public class LongSessionLiveRunner {
                     metrics.executeTurns++;
                     history.add(message(ChatMessage.MessageRole.USER, prompt));
 
-                    RunHarness runs = new RunHarness();
                     AgentRun run = runs.service.create(USER_ID, SESSION_ID, PROJECT_ID, null,
                             MAPPER.writeValueAsString(Map.of("prompt", prompt))).run();
                     runs.service.start(run.getId());
@@ -800,6 +822,7 @@ public class LongSessionLiveRunner {
     /** 内存 repository + 真实 AgentRunService；不 mock Run 状态迁移。 */
     private static final class RunHarness {
         private final AgentRunService service;
+        private final com.capsule.agentkey.agent.run.RunEventStore store;
         private RunHarness() {
             AgentRunRepository runRepo = mock(AgentRunRepository.class);
             AgentRunEventRepository eventRepo = mock(AgentRunEventRepository.class);
@@ -818,6 +841,16 @@ public class LongSessionLiveRunner {
             when(runRepo.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
             // R1：事件追加前先锁 Run 行
             when(runRepo.lockForEventAppend(anyLong())).thenAnswer(inv -> Optional.ofNullable(runs.get(inv.getArgument(0))));
+            // R5：计划快照落库。未 mock 时 updatePlanJson 返回 0，savePlan 抛错后只保留内存快照，
+            // 软注入的“单一事实源”就形同虚设。
+            when(runRepo.updatePlanJson(anyLong(), anyString())).thenAnswer(inv -> {
+                AgentRun run = runs.get(inv.getArgument(0));
+                if (run == null) {
+                    return 0;
+                }
+                run.setPlanJson(inv.getArgument(1));
+                return 1;
+            });
             when(eventRepo.findMaxSeqByRunId(anyLong())).thenAnswer(inv -> {
                 List<AgentRunEvent> list = events.get(inv.getArgument(0));
                 return list == null || list.isEmpty() ? null : list.get(list.size() - 1).getSeq();
@@ -830,7 +863,16 @@ public class LongSessionLiveRunner {
             });
             when(eventRepo.findByRunIdOrderBySeqAsc(anyLong())).thenAnswer(inv ->
                     List.copyOf(events.getOrDefault(inv.getArgument(0), List.of())));
-            this.service = new AgentRunService(runRepo, eventRepo, MAPPER, new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, MAPPER));
+            this.store = new com.capsule.agentkey.agent.run.RunEventStore(runRepo, eventRepo, MAPPER);
+            this.service = new AgentRunService(runRepo, eventRepo, MAPPER, this.store);
+        }
+
+        AgentRunService service() {
+            return service;
+        }
+
+        com.capsule.agentkey.agent.run.RunEventStore store() {
+            return store;
         }
     }
 }

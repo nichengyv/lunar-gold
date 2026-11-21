@@ -977,7 +977,14 @@ views/        ChatView（只负责布局与挂载）
 - 行为保持：默认关闭时消息列表、工具顺序、终态载荷与既有测试零改动；压缩不删除 `agent_run_event`、数据库聊天历史或前端事件，只是发给模型的副本变短。
 - 新增测试：`ContextAssemblerTest`（5 例：关闭不读取、每轮重读、读取失败降级、空计划、无 system 时插入位置）；`ContextCondenserTest`（8 例：只留最近读取、过短/单次不折叠、摘要生成与复用、摘要异常降级、滑窗保留 system、孤儿 tool 清理、参数钳制）；`ScriptedAgentLoopTest` 新增 1 例，断言两轮分别看到 update_plan 前后的持久化快照。
 - 全量测试通过：**464 tests / 0 failures / 0 errors / 17 skipped**。
-- **未执行项（如实记录）**：L2/L3 真实模型 A/B 未运行（当前环境无可用模型 API），因此两个开关默认关闭；token 峰值下降、成功率不降等出口指标待有 API 后按预注册口径补测。灰度方式：`AGENT_CONTEXT_PLAN_INJECTION_ENABLED=true` / `AGENT_CONTEXT_CONDENSE_ENABLED=true`。
+- **未执行项（如实记录）**：L3 与多次重复的 A/B 未执行；L2 已用真实模型跑单次对照，见下节。两个开关仍默认关闭。
+- **执行项（2026-11-21，deepseek-flash，L2×1）**：
+  - A 组（plan-injection=off / condense=off）：45 calls、262,196 tokens、峰值 prompt 9,462、update_plan 10 次、planCompletionRate 0.286、终态失败（HISTORY_REPETITION）、447s。
+  - B 组（plan-injection=on / condense=on / window=30k 字符）：36 calls、215,805 tokens、峰值 prompt 9,042、update_plan 12 次、planCompletionRate 1.000、终态失败（HISTORY_REPETITION）、225s。
+  - 计划软注入有正向信号：planCompletionRate 0.286 → 1.000；但两组都仍因历史重复失败，说明计划连续性不能单独解决该失败归因。
+  - token/耗时/调用数下降混入了模型随机轨迹（单次重复），峰值 prompt 仅 -4.4%，**不足以证明压缩收益**；摘要调用走非流式接口，其 usage 未计入报告，对 B 组略有利。
+  - 压缩是否实际触发未能从 Maven 日志确认（中文日志在控制台被转码）。正式结论需要 ≥3 次重复与 L3 数据。
+  - 复现：`P7_02_LEVELS=L2 P7_02_REPEATS=1 P7_02_PLAN_INJECTION=on P7_02_CONDENSE=on P7_02_CONDENSE_WINDOW_CHARS=30000`。
 
 **下一刀（R6）**：前端拆分——`SSEService` + store 拆分 + 断线恢复补全。
 
