@@ -2,7 +2,7 @@
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
 > 更新日期：2026-11-22；基线提交 `3d38de8`（R7c 四项代码完成，位于 Gitee `origin/master` 的 `f825fc4` 之后）。
-> 后端 **623 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **117 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
+> 后端 **624 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **117 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
 
 ## 一句话定位
 

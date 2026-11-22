@@ -3,6 +3,9 @@ package com.capsule.agentkey.agent.run;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * 无进展检测与渐进式恢复（R4，落地 P7-08）。
  *
@@ -66,6 +69,8 @@ public final class LoopGuard {
     private String lastToolSignature;
     private int toolRepeatCount;
     private int toolNudgeLevel;
+    /** 本轮 Run 内已出现过的调用签名；交替调用 A/B/A/B 不能算作新进展。 */
+    private final Set<String> seenToolSignatures = new HashSet<>();
 
     private String lastFailureFingerprint;
     private int failureCount;
@@ -95,12 +100,15 @@ public final class LoopGuard {
      */
     public Signal onToolCall(String toolName, String arguments) {
         String signature = normalizeToolCall(toolName, arguments);
-        boolean firstOccurrence = !signature.equals(lastToolSignature);
-        if (firstOccurrence) {
+        // 进展判定看“整个 Run 是否首次出现”，重复计数只看“是否连续相同”：
+        // 交替调用 A/B/A/B 时前者为 false（停滞），后者每轮都是新签名（不误报重复）。
+        boolean firstOccurrence = seenToolSignatures.add(signature);
+        boolean consecutiveNew = !signature.equals(lastToolSignature);
+        lastToolSignature = signature;
+        if (consecutiveNew) {
             toolRepeatCount = 1;
             toolNudgeLevel = 0;
-            lastToolSignature = signature;
-            return Signal.none(true);
+            return Signal.none(firstOccurrence);
         }
         toolRepeatCount++;
         if (maxRepeats <= 0) {

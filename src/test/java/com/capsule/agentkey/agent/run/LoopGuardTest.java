@@ -51,6 +51,19 @@ class LoopGuardTest {
     }
 
     @Test
+    void 交替调用不重复计数但不再算新进展() {
+        LoopGuard guard = new LoopGuard(3, 4);
+        String a = "{\"path\":\"a.txt\"}";
+        String b = "{\"path\":\"b.txt\"}";
+
+        assertTrue(guard.onToolCall("read_file", a).firstOccurrence());
+        assertTrue(guard.onToolCall("read_file", b).firstOccurrence());
+        assertFalse(guard.onToolCall("read_file", a).firstOccurrence(),
+                "A/B/A 的第三次 A 不是新签名，应计入停滞而不是进展");
+        assertFalse(guard.onToolCall("read_file", b).firstOccurrence());
+    }
+
+    @Test
     void 连续失败同样保留一轮自救窗口() {
         LoopGuard guard = new LoopGuard(3, 4);
 
