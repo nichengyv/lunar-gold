@@ -3,6 +3,7 @@ package com.capsule.agentkey.service;
 import com.capsule.agentkey.agent.run.PlanStep;
 import com.capsule.agentkey.agent.run.RunContext;
 import com.capsule.agentkey.client.AgentClient;
+import com.capsule.agentkey.agent.context.WorkspaceInstructionLoader;
 import com.capsule.agentkey.entity.AgentRule;
 import com.capsule.agentkey.entity.ChatMessage;
 import com.capsule.agentkey.tool.ToolRegistry;
@@ -916,6 +917,18 @@ public class ReActAgentService {
             }
         } catch (Exception e) {
             log.warn("AgentRule 读取失败，降级：{}", e.getMessage());
+        }
+
+        // 仓库级项目指令文件（AGENTS.md / CLAUDE.md / .cursorrules / copilot-instructions.md）：
+        // 低于应用内显式规则，高于通用提示；读取失败只降级，不影响本轮推理
+        try {
+            String workspaceInstructions = WorkspaceInstructionLoader.load(workspacePath);
+            if (!workspaceInstructions.isBlank()) {
+                systemContent.append("\n\n").append(workspaceInstructions);
+                log.info("项目指令文件已注入 system 消息（{} 字符）", workspaceInstructions.length());
+            }
+        } catch (Exception e) {
+            log.warn("项目指令文件读取失败，降级：{}", e.getMessage());
         }
 
         // P5-01/P5-13：绑定工作区时使用编程交付提示词；普通问答仍走通用助手场景
