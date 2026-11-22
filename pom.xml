@@ -180,6 +180,19 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+            <!-- Boot 4 的 starter-test 把 junit-jupiter 声明为 compile，会随 repackage
+                 进入发布 jar；这里显式排除，并在下方以 test 作用域重新引入。 -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.junit.jupiter</groupId>
+                    <artifactId>junit-jupiter</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
         <!-- 验收测试：Boot 4 把 @DataJpaTest 切片拆到独立模块，starter-test 不再传递引入。
              仅 test 作用域，用于在真实 PostgreSQL 上验证重启恢复与多实例共享。 -->

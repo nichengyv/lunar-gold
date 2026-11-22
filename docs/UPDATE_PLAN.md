@@ -154,7 +154,7 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 - [x] 合规产物可复现（2026-11-11）：新增 `scripts/build-compliance.ps1` 与 `scripts/licenses-config.xml`，输出到忽略的 `build/legal`（12 个文件，含 `THIRD-PARTY-LICENSES.txt`）；`pom.xml` 补齐项目 URL/SCM 并固定 CycloneDX 2.9.3、license-maven-plugin 2.7.1；任一必需文件缺失、SBOM 不可解析或许可合集为空即中止。安装器构建前自动生成并逐文件校验 `resources/legal` 哈希，CI 严格校验后显式上传。
 - [ ] 所有者确认项（不阻塞文档发布）：`TERMS.md` 采用中华人民共和国法律与维护者住所地法院管辖，需确认；Web 版是否对外托管、以及该部署的数据主体联系方式需在真正上线前补充。
 - [x] 发布流程：`release.yml` 已把 `build/legal` 复制为 `release/legal`、逐项校验并显式上传（`fail_on_unmatched_files: true`）；下一次 Release 将随附 `SHA256SUMS.txt`、`NOTICE`、`PRIVACY.md`、`TERMS.md`、四份 SBOM 与 `THIRD-PARTY-LICENSES.txt`。
-- [ ] 发布卫生（本轮盘点发现，未修改代码）：Spring Boot 4 的 `spring-boot-starter-test` 把 `junit-jupiter` / `junit-platform` 以 compile 作用域带入，导致发布 jar 内含约 2 MB 测试框架；后续可在 pom 中显式排除或改用其他测试启动器，并复核测试仍可运行。
+- [x] 发布卫生（2026-11-22）：Spring Boot 4 的 `spring-boot-starter-test` 把 `junit-jupiter` 声明为 compile 作用域，导致发布 jar 内含测试框架；已在 [pom.xml](../pom.xml) 排除并以 test 作用域显式重新引入。重新打包后 `BOOT-INF/lib` 不再含 junit / opentest4j / apiguardian（旧包约 1.38 MB 压缩体积），全量 623 项测试通过。
 
 **Phase 3 出口**：陌生机器可完成一个标准编程 fixture 任务：修改文件 → 必要审批 → 验证 → 审查 diff → 撤回；升级和回滚可用，数据可备份，合规文件随版本发布。P5-06 验证回路与 P5-14 任务级交付已落地，审查与撤回可通过 ChangeSet API/看板执行；前端关键路径已由 P5-11-1 的 Playwright 用例在浏览器层用 API 仿真覆盖，但真实后端 + 真实模型的干净机器完整任务验收仍需人工执行，记录时不得把仿真 E2E 写成真机验收已通过。
 
