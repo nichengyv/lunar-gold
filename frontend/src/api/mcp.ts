@@ -27,3 +27,52 @@ export async function getMcpStatus(): Promise<McpStatusResponse> {
 export async function setMcpEnabled(enabled: boolean): Promise<void> {
   return http.put<never, ApiResponse<void>>('/api/mcp/enabled', { enabled }).then(unwrap);
 }
+
+// ===== M1：用户自助 MCP Server（仅桌面端） =====
+
+export interface McpServerConfig {
+  id: number;
+  name: string;
+  command: string;
+  args: string[];
+  /** 只返回变量名；值永远不会回显 */
+  envKeys: string[];
+  enabled: boolean;
+  connected: boolean;
+  toolCount: number;
+  lastError?: string;
+}
+
+export interface McpServerInput {
+  name: string;
+  command: string;
+  args: string[];
+  /** null = 编辑时保持原环境变量不变；空对象 = 清空 */
+  env?: Record<string, string> | null;
+  enabled: boolean;
+}
+
+export async function listMcpServers(): Promise<McpServerConfig[]> {
+  return http.get<never, ApiResponse<McpServerConfig[]>>('/api/mcp/servers').then(unwrap);
+}
+
+export async function createMcpServer(input: McpServerInput): Promise<McpServerConfig> {
+  return http.post<never, ApiResponse<McpServerConfig>>('/api/mcp/servers', input).then(unwrap);
+}
+
+export async function updateMcpServer(id: number, input: McpServerInput): Promise<McpServerConfig> {
+  return http.put<never, ApiResponse<McpServerConfig>>(`/api/mcp/servers/${id}`, input).then(unwrap);
+}
+
+export async function setMcpServerEnabled(id: number, enabled: boolean): Promise<McpServerConfig> {
+  return http.put<never, ApiResponse<McpServerConfig>>(`/api/mcp/servers/${id}/enabled`, { enabled })
+    .then(unwrap);
+}
+
+export async function reloadMcpServer(id: number): Promise<McpServerConfig> {
+  return http.post<never, ApiResponse<McpServerConfig>>(`/api/mcp/servers/${id}/reload`).then(unwrap);
+}
+
+export async function deleteMcpServer(id: number): Promise<void> {
+  return http.delete<never, ApiResponse<void>>(`/api/mcp/servers/${id}`).then(unwrap);
+}

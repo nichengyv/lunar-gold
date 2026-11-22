@@ -137,11 +137,8 @@
             </div>
 
             <div class="card">
-              <h3><Icon name="info" :size="15" /> 关于扩展工具</h3>
-              <p class="hint">
-                扩展工具由系统管理员配置。如果你觉得 Agent 缺少某些能力（比如查数据库、调内部 API、读写 Notion），
-                联系管理员添加对应扩展即可——不需要你改任何配置。
-              </p>
+              <McpServersPanel v-if="meta.has('MCP_READ')" />
+              <p v-else class="hint">当前部署模式不支持 MCP server 管理。</p>
             </div>
           </div>
         </template>
@@ -322,6 +319,7 @@ import * as settingsApi from '../api/settings';
 import * as mcpApi from '../api/mcp';
 import { encryptPassword } from '../utils/crypto';
 import RulesPanel from '../components/RulesPanel.vue';
+import McpServersPanel from '../components/McpServersPanel.vue';
 import ExperienceDiagnosticsPanel from '../components/ExperienceDiagnosticsPanel.vue';
 import MetricsPanel from '../components/MetricsPanel.vue';
 import KeysView from './KeysView.vue';

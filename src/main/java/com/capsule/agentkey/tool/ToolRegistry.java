@@ -81,6 +81,20 @@ public class ToolRegistry {
     }
 
     /**
+     * M1：运行时注销工具（用户删除或重载 MCP Server 时）。
+     * 同时清理以它为 fallback 的映射，避免 dispatch 继续指向已关闭的 client。
+     */
+    public boolean unregister(String name) {
+        BaseTool removed = tools.remove(name);
+        if (removed != null) {
+            callbackCache.clear();
+            fallbackMap.values().forEach(list -> list.remove(name));
+            log.info("注销工具: {}（来源: {}）", name, removed.source());
+        }
+        return removed != null;
+    }
+
+    /**
      * 第五十九批：建立 fallback 映射——主工具失败时自动 try 这个备选。
      * 同一个主工具可以注册多个 fallback（按注册顺序尝试）。
      */

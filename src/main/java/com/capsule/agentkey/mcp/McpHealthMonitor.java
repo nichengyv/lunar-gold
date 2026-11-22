@@ -90,6 +90,12 @@ public class McpHealthMonitor {
     /** serverName → ServerHealth */
     private final Map<String, ServerHealth> healthMap = new ConcurrentHashMap<>();
 
+    /** M1：用户自助 MCP server 的 client；定时探测与 YAML client 一起参与 */
+    private final Map<String, McpSyncClient> managedClients = new ConcurrentHashMap<>();
+
+    /** 便于删除 server 时移除对应 Gauge */
+    private final Map<String, Gauge> gauges = new ConcurrentHashMap<>();
+
     /**
      * application.yml 里配置的 MCP server 名 baseline。
      * McpToolBridge 因为 npx 超时或 Spring AI initialized=false 导致没注册成功时，
@@ -155,6 +161,32 @@ public class McpHealthMonitor {
             log.info("MCP 健康监控: server [{}] 已注册", serverName);
             return h;
         });
+    }
+
+    /** M1：用户自助 server 连接成功后纳入探测 */
+    public void attachClient(String serverName, McpSyncClient client) {
+        managedClients.put(serverName, client);
+        registerServer(serverName);
+    }
+
+    /** M1：设置页展示全局开关时，用户自助 server 也算「有 MCP 连接」 */
+    public boolean hasManagedClients() {
+        return !managedClients.isEmpty();
+    }
+
+    /** M1：连接重建前先摘掉旧 client，避免探测到已关闭的管道 */
+    public void detachClient(String serverName) {
+        managedClients.remove(serverName);
+    }
+
+    /** M1：用户删除 server 时同时移除健康记录与指标 */
+    public void unregisterServer(String serverName) {
+        managedClients.remove(serverName);
+        healthMap.remove(serverName);
+        Gauge gauge = gauges.remove(serverName);
+        if (gauge != null) {
+            meterRegistry.remove(gauge);
+        }
     }
 
     /**
@@ -223,25 +255,32 @@ public class McpHealthMonitor {
     @Scheduled(fixedDelayString = "${agent.mcp.health.probe-interval-ms:30000}")
     public void probeAllServers() {
         List<McpSyncClient> clients = clientsProvider.getIfAvailable();
-        if (clients == null || clients.isEmpty()) return;
-        for (McpSyncClient client : clients) {
-            String serverName = resolveServerName(client);
-            ServerHealth h = healthMap.get(serverName);
-            if (h == null) continue;
-            h.lastCheckAt = Instant.now();
-            try {
-                if (!client.isInitialized()) continue; // 还没启动完成，跳过
-                client.listTools(); // 轻量探测
-                if (h.status != ServerStatus.UP) {
-                    log.info("MCP 健康监控: server [{}] 探测成功，状态恢复为 UP", serverName);
-                }
-                recordSuccess(serverName);
-            } catch (Exception e) {
-                // 探测失败：只有 UP 状态才计入失败（DOWN 状态已经熔断了，不用重复计数）
-                if (h.status == ServerStatus.UP) {
-                    log.warn("MCP 健康监控: server [{}] 定时探测失败: {}", serverName, e.getMessage());
-                    recordFailure(serverName, e.getMessage());
-                }
+        if (clients != null) {
+            for (McpSyncClient client : clients) {
+                probe(resolveServerName(client), client);
+            }
+        }
+        for (Map.Entry<String, McpSyncClient> entry : managedClients.entrySet()) {
+            probe(entry.getKey(), entry.getValue());
+        }
+    }
+
+    private void probe(String serverName, McpSyncClient client) {
+        ServerHealth h = healthMap.get(serverName);
+        if (h == null) return;
+        h.lastCheckAt = Instant.now();
+        try {
+            if (!client.isInitialized()) return; // 还没启动完成，跳过
+            client.listTools(); // 轻量探测
+            if (h.status != ServerStatus.UP) {
+                log.info("MCP 健康监控: server [{}] 探测成功，状态恢复为 UP", serverName);
+            }
+            recordSuccess(serverName);
+        } catch (Exception e) {
+            // 探测失败：只有 UP 状态才计入失败（DOWN 状态已经熔断了，不用重复计数）
+            if (h.status == ServerStatus.UP) {
+                log.warn("MCP 健康监控: server [{}] 定时探测失败: {}", serverName, e.getMessage());
+                recordFailure(serverName, e.getMessage());
             }
         }
     }
@@ -278,11 +317,12 @@ public class McpHealthMonitor {
 
     private void registerGauge(String serverName, ServerHealth h) {
         // 让 Prometheus 能看到：1=UP, 0=DOWN, -1=UNKNOWN
-        Gauge.builder("mcp.server.up", h, value -> switch (value.status) {
+        Gauge gauge = Gauge.builder("mcp.server.up", h, value -> switch (value.status) {
             case UP -> 1.0;
             case DOWN -> 0.0;
             case UNKNOWN -> -1.0;
         }).tag("name", serverName).description("MCP server 健康状态：1=UP 0=DOWN -1=UNKNOWN")
                 .register(meterRegistry);
+        gauges.put(serverName, gauge);
     }
 }

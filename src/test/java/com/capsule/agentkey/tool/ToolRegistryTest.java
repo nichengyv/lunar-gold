@@ -66,6 +66,21 @@ class ToolRegistryTest {
         assertFalse(registry.isReadOnly("missing_tool"));
     }
 
+    @Test
+    void 注销工具时同步清理fallback映射() {
+        ToolRegistry registry = registry("desktop");
+        registry.register(tool("read_file", Capability.LOCAL_WORKSPACE));
+        registry.register(tool("mcp_demo_read", Capability.MCP_READ, true, "mcp", true));
+        registry.addFallback("read_file", "mcp_demo_read");
+        assertTrue(registry.hasFallback("read_file"));
+
+        assertTrue(registry.unregister("mcp_demo_read"));
+
+        assertFalse(registry.hasTool("mcp_demo_read"));
+        assertFalse(registry.hasFallback("read_file"), "已关闭的 fallback 不能留在 dispatch 链里");
+        assertFalse(registry.unregister("mcp_demo_read"), "重复注销返回 false");
+    }
+
     private ToolRegistry registry(String profile) {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);

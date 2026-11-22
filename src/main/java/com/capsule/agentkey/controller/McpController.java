@@ -44,7 +44,8 @@ public class McpController {
         Map<String, Object> result = new LinkedHashMap<>();
         List<McpSyncClient> clients = clientsProvider.getIfAvailable();
         // 全局开关关闭时覆盖 enabled 字段——前端设置页会正确显示"已禁用"
-        boolean clientPresent = clients != null && !clients.isEmpty();
+        boolean clientPresent = (clients != null && !clients.isEmpty())
+                || healthMonitor.hasManagedClients();
         result.put("enabled", globalSwitch.isEnabled() && clientPresent);
         result.put("servers", healthMonitor.snapshot());
         result.put("timestamp", java.time.Instant.now());

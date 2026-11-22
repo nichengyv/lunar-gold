@@ -107,6 +107,10 @@ public class McpToolBridge implements ApplicationRunner {
         this.maxResultChars = maxResultChars;
     }
 
+    /** M1：一次注册的结果；registry 在重载/删除时据此注销 */
+    public record Registration(List<String> toolNames, int fallbackCount) {
+    }
+
     @Override
     public void run(ApplicationArguments args) {
         List<McpSyncClient> clients = clientsProvider.getIfAvailable();
@@ -118,9 +122,10 @@ public class McpToolBridge implements ApplicationRunner {
         int registered = 0;
         int fallbackCount = 0;
         for (McpSyncClient client : clients) {
-            int[] result = registerServer(client, commonProperties);
-            registered += result[0];
-            fallbackCount += result[1];
+            String serverName = resolveServerName(client, commonProperties);
+            Registration result = registerServer(client, serverName, true);
+            registered += result.toolNames().size();
+            fallbackCount += result.fallbackCount();
         }
         int total = toolRegistry.getAllTools().size();
         log.info("MCP 工具注册完成：新增 {} 个（其中 {} 个 fallback）；系统总工具数 {}（= {} 内置 + {} MCP）。",
@@ -128,16 +133,21 @@ public class McpToolBridge implements ApplicationRunner {
     }
 
     /**
+     * M1：注册用户在设置页自助添加的 MCP server。
+     * 用户显式添加的 server 不受开发者白名单约束，其余规则与 YAML server 一致。
+     */
+    public Registration registerManagedServer(McpSyncClient client, String serverName) {
+        return registerServer(client, serverName, false);
+    }
+
+    /**
      * 注册单个 server 的全部工具。第五十九批：不再 DEDUP 跳过，
      * 等价工具注册为 fallback=true + 建立映射，独有工具正常注册。
-     *
-     * @return int[2]: [成功注册数, fallback 数]
      */
-    private int[] registerServer(McpSyncClient client, McpClientCommonProperties commonProperties) {
-        String serverName = resolveServerName(client, commonProperties);
-        if (!allowedServers.isEmpty() && !allowedServers.contains(serverName)) {
+    private Registration registerServer(McpSyncClient client, String serverName, boolean enforceAllowlist) {
+        if (enforceAllowlist && !allowedServers.isEmpty() && !allowedServers.contains(serverName)) {
             log.info("MCP server [{}] 不在白名单内，跳过", serverName);
-            return new int[]{0, 0};
+            return new Registration(List.of(), 0);
         }
         // 纳入健康监控
         healthMonitor.registerServer(serverName);
@@ -148,9 +158,9 @@ public class McpToolBridge implements ApplicationRunner {
             McpSchema.ListToolsResult result = client.listTools();
             if (result == null || result.tools() == null || result.tools().isEmpty()) {
                 log.warn("MCP server [{}] 没有提供任何工具", serverName);
-                return new int[]{0, 0};
+                return new Registration(List.of(), 0);
             }
-            int registered = 0;
+            List<String> registeredTools = new java.util.ArrayList<>();
             int fallbackCount = 0;
             for (McpSchema.Tool tool : result.tools()) {
                 // 第五十九批：判断是等价（fallback）还是独有（正常注册）
@@ -160,22 +170,23 @@ public class McpToolBridge implements ApplicationRunner {
                 if (!toolRegistry.register(adapter)) {
                     continue;
                 }
+                String fullMcpName = toolName(serverName, tool.name());
+                registeredTools.add(fullMcpName);
                 // 建立 fallback 映射：主工具 → 这个 fallback 工具名
                 if (isFallback) {
-                    String fullMcpName = toolName(serverName, tool.name());
                     toolRegistry.addFallback(mainToolName, fullMcpName);
                     fallbackCount++;
                     log.debug("MCP [{}/{}] 注册为 fallback → 主工具 [{}]",
                             serverName, tool.name(), mainToolName);
                 }
-                registered++;
             }
-            log.info("MCP server [{}] 注册 {} 个工具（其中 {} 个 fallback）", serverName, registered, fallbackCount);
-            return new int[]{registered, fallbackCount};
+            log.info("MCP server [{}] 注册 {} 个工具（其中 {} 个 fallback）",
+                    serverName, registeredTools.size(), fallbackCount);
+            return new Registration(List.copyOf(registeredTools), fallbackCount);
         } catch (Exception e) {
             log.warn("MCP server [{}] 初始化或读取工具列表失败，已跳过: {}", serverName, e.getMessage());
             healthMonitor.recordFailure(serverName, "初始化失败: " + e.getMessage());
-            return new int[]{0, 0};
+            return new Registration(List.of(), 0);
         }
     }
 
