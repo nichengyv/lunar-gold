@@ -1114,3 +1114,15 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 
 
 
+
+#### R7c/P8-03 串行子智能体与分别验收（2026-11-22）
+
+- **要解决的问题**：单 Run 在长任务里既要做计划、又要读大量文件，容易在同一个上下文里反复自我确认；需要把可独立验收的子目标交给隔离的子 Run，同时避免「父任务替子任务宣布成功」。
+- **入口与边界**：仅当 `agent.subtasks.enabled=true` 时，根 Run 的工具列表才追加合成工具 `delegate_subtasks`；该工具**不注册进 ToolRegistry**，由 `AgentOrchestrator` 在工具循环最前拦截。单次委派最多 4 个子任务，严格串行，前一个验收通过才启动下一个；子 Run 的工具列表不含 `delegate_subtasks`，因此深度固定为 1。
+- **隔离**：每个子任务对应一条独立 `agent_run`（`parent_run_id + delegation_id` 唯一，`V24` 迁移）；子 Run 拥有自己的 `RunContext`、计划、断点、状态与事件流。父 SSE 只收到 `subtask` 轻量状态（按 `subtaskId` 去重），子 Run 的 chunk/tool/plan/verify 事件写 child runId。
+- **验收**：子任务规格强制 `id + objective + acceptance`；`SubtaskRunCoordinator` 在子 Run 结束后用同一个 `PlanEvidenceService` 按验收契约重新读取工件/验证版本，证据不满足即标 `FAILED`，不会因为子 Run 自报完成而通过。父 Run 的 `RunTermination` 再次检查 `findSubtasks(parentRunId)`，存在任何非 `SUCCEEDED` 子 Run 时返回 `INCOMPLETE:SUBTASK_NOT_ACCEPTED`。
+- **续跑**：父 Run 在启动子任务前与每个子任务终结后把 `pendingDelegation`（规格、已产生结果、下一未完成下标、toolCallId）写入 `RunCheckpoint`；重启后先复用已 `SUCCEEDED` 的子 Run，再按断点恢复 `FAILED/PROCESS_RESTARTED` 子 Run，补齐 `tool` 响应后回到正常循环，不重新让模型猜委派意图。
+- **审批与用户询问**：子 Run 的审批仍走既有 `approvalId` 与 `ApprovalGate`，询问仍走 `ask_user_question`；父 SSE 转发时附带 `runId=childRunId`，前端按 childRunId 回答，父 Run 不会被置为 `WAITING_APPROVAL/WAITING_USER_INPUT`。父取消通过共享 `cancelRequested` 级联终止已启动的子 Run。
+- **预算与用量**：父子共享 `RunBudget`，子任务不能重置父预算；子 Run 到达终态后把它自己的 token 用量一次性汇总进父 Run，会话用量查询仍只统计顶层 Run，避免双计。
+- **默认行为**：`agent.subtasks.enabled=false`、`agent.subtasks.max-subtasks=4`；关闭时模型看不到委派工具，行为与改造前一致。
+- **验证**：后端新增 `SubtaskSpecTest`、`SubtaskRunCoordinatorTest`、`AgentOrchestratorSubtaskResumeTest`、`AgentRunServiceTest` 子 Run 幂等/父子关系用例、`ChatStreamBridgeTest` 轻量 `SUBTASK` 事件用例与 `RunTerminationTest` 子任务收口用例；前端新增 `subtask` SSE 解析、`runRecovery` 按 `subtaskId` 去重、ChatView 子任务状态条与对应单测。**本次未运行真实模型**，没有子智能体完成率或 A/B 结论，只有离线/脚本化验证。

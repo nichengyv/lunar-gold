@@ -104,6 +104,9 @@ export interface ApprovalRequest {
   risk: 'WRITE' | 'EXECUTE' | 'DESTRUCTIVE';
   /** 自动拒绝的时间戳（毫秒） */
   expiresAt: number;
+  /** R7c：子任务审批时指向 child Run；顶层审批为空 */
+  runId?: number;
+  subtaskId?: string;
 }
 
 /** P7-06：agent 执行中提出的决策询问（SSE user_question 事件） */
@@ -131,6 +134,39 @@ export interface UserQuestionAnswer {
   questionId: string;
   selected?: string[];
   custom?: string;
+}
+
+/** R7c：子智能体状态（SSE subtask 事件）；父 Run 只转发这一种轻量状态 */
+export type SubtaskStatus =
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'WAITING_APPROVAL'
+  | 'WAITING_USER_INPUT';
+
+export interface SubtaskUpdate {
+  type: 'status' | 'approval' | 'approval_resolved' | 'question';
+  parentRunId?: number;
+  /** 子 Run id：审批 / 询问 / 事件流都以它为准 */
+  childRunId?: number;
+  subtaskId: string;
+  status?: SubtaskStatus;
+  message?: string;
+  approvalId?: string;
+  tool?: string;
+  questionId?: string;
+  question?: string;
+  header?: string;
+  options?: UserQuestionOption[];
+  multiSelect?: boolean;
+  preview?: ApprovalPreview;
+  risk?: ApprovalRequest['risk'];
+  expiresAt?: number;
+  decision?: 'APPROVE' | 'REJECT';
+  source?: ApprovalDecisionSource;
+  batchId?: string;
 }
 
 /** P5-10-2：审批决策来源；旧记录为 null，展示为来源未知。P6-05：CLIENT 表示 CLI / 扩展入口 */

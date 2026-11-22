@@ -45,10 +45,6 @@ public class UpdatePlanTool implements BaseTool {
     /** 契约步骤 id 长度与字符集上限 */
     private static final int MAX_ID_LENGTH = 40;
     private static final Pattern ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
-    /** 单个步骤的工件断言上限与每条期望文本上限 */
-    private static final int MAX_ARTIFACTS = 8;
-    private static final int MAX_EXPECTED_TEXTS = 20;
-    private static final int MAX_EXPECTED_LENGTH = 200;
 
     private final PlanEvidenceService planEvidenceService;
 
@@ -276,69 +272,8 @@ public class UpdatePlanTool implements BaseTool {
 
     /** 解析可选的验收契约；格式非法时抛出带用户可读信息的 IllegalArgumentException */
     private PlanStep.Acceptance parseAcceptance(JsonNode node, int index) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return null;
-        }
-        if (!node.isObject()) {
-            throw new IllegalArgumentException("第 " + (index + 1) + " 步 acceptance 必须是对象");
-        }
-
-        List<PlanStep.Artifact> artifacts = new ArrayList<>();
-        JsonNode artifactsNode = node.get("artifacts");
-        if (artifactsNode != null && !artifactsNode.isNull()) {
-            if (!artifactsNode.isArray()) {
-                throw new IllegalArgumentException("第 " + (index + 1) + " 步 acceptance.artifacts 必须是数组");
-            }
-            if (artifactsNode.size() > MAX_ARTIFACTS) {
-                throw new IllegalArgumentException("第 " + (index + 1) + " 步工件断言过多：最多 "
-                        + MAX_ARTIFACTS + " 条");
-            }
-            for (int j = 0; j < artifactsNode.size(); j++) {
-                artifacts.add(parseArtifact(artifactsNode.get(j), index, j));
-            }
-        }
-
-        boolean requireVerify = node.path("requireVerify").asBoolean(false);
-        if (artifacts.isEmpty() && !requireVerify) {
-            throw new IllegalArgumentException("第 " + (index + 1)
-                    + " 步 acceptance 至少要有一个 artifacts 断言或 requireVerify=true");
-        }
-        return new PlanStep.Acceptance(artifacts, requireVerify);
-    }
-
-    private PlanStep.Artifact parseArtifact(JsonNode node, int stepIndex, int artifactIndex) {
-        String prefix = "第 " + (stepIndex + 1) + " 步第 " + (artifactIndex + 1) + " 条工件断言";
-        if (node == null || !node.isObject()) {
-            throw new IllegalArgumentException(prefix + "必须是对象");
-        }
-        String path = node.path("path").asText("").trim();
-        if (path.isEmpty()) {
-            throw new IllegalArgumentException(prefix + "缺少 path");
-        }
-        if (!PlanEvidenceService.isSafeRelativePath(path)) {
-            throw new IllegalArgumentException(prefix + "的 path 必须是工作区内的安全相对路径：" + path);
-        }
-        JsonNode expectedNode = node.get("expectedContains");
-        if (expectedNode == null || !expectedNode.isArray() || expectedNode.isEmpty()) {
-            throw new IllegalArgumentException(prefix + "的 expectedContains 必须是非空数组");
-        }
-        if (expectedNode.size() > MAX_EXPECTED_TEXTS) {
-            throw new IllegalArgumentException(prefix + "的 expectedContains 过多：最多 "
-                    + MAX_EXPECTED_TEXTS + " 条");
-        }
-        List<String> expected = new ArrayList<>();
-        for (JsonNode textNode : expectedNode) {
-            String text = textNode.asText("").trim();
-            if (text.isEmpty()) {
-                throw new IllegalArgumentException(prefix + "的 expectedContains 不能包含空文本");
-            }
-            if (text.length() > MAX_EXPECTED_LENGTH) {
-                throw new IllegalArgumentException(prefix + "的 expectedContains 单条不能超过 "
-                        + MAX_EXPECTED_LENGTH + " 字");
-            }
-            expected.add(text);
-        }
-        return new PlanStep.Artifact(path, expected);
+        return com.capsule.agentkey.agent.run.PlanAcceptanceParser.parse(node,
+                "第 " + (index + 1) + " 步");
     }
 
     private String describeIssues(List<PlanEvidenceService.Issue> issues) {

@@ -25,10 +25,17 @@ import java.util.Set;
 class RunTermination {
 
     private final PlanEvidenceService planEvidenceService;
+    /** R7c：父 Run 只有全部子 Run 验收成功才允许 COMPLETED；测试装配时为 null */
+    private final AgentRunService agentRunService;
 
     RunTermination(PlanEvidenceService planEvidenceService) {
+        this(planEvidenceService, null);
+    }
+
+    RunTermination(PlanEvidenceService planEvidenceService, AgentRunService agentRunService) {
         this.planEvidenceService = planEvidenceService == null
                 ? PlanEvidenceService.withoutWorkspace() : planEvidenceService;
+        this.agentRunService = agentRunService;
     }
 
     /** 候选完成判定：优先看未完成计划与失败信号，再用诊断/验证作为证据 */
@@ -51,6 +58,10 @@ class RunTermination {
         if (unresolvedApprovalRejection) {
             return new Completion(CompletionStatus.INCOMPLETE, "APPROVAL_REJECTED",
                     "所需操作未获批准，任务尚未完成。", workspaceChanged);
+        }
+        Completion subtaskFailure = subtaskAcceptanceFailure(workspaceChanged);
+        if (subtaskFailure != null) {
+            return subtaskFailure;
         }
         if (unresolvedWriteFailure) {
             return new Completion(CompletionStatus.INCOMPLETE, "WRITE_TOOL_FAILED",
@@ -112,6 +123,41 @@ class RunTermination {
         WorkspaceContext ctx = WorkspaceContext.get();
         return ctx != null && ctx.plan().stream()
                 .anyMatch(s -> "pending".equals(s.status()) || "in_progress".equals(s.status()));
+    }
+
+    /**
+     * R7c：父 Run 的交付不能超过子 Run 的验收结论。
+     *
+     * <p>只要存在未 SUCCEEDED 的子 Run（失败、取消、等待中或已丢失），父 Run 就不得 COMPLETED；
+     * 已成功的子任务也不能被包装成「全部成功」。
+     */
+    private Completion subtaskAcceptanceFailure(boolean workspaceChanged) {
+        WorkspaceContext ctx = WorkspaceContext.get();
+        if (agentRunService == null || ctx == null || ctx.runId() == null) {
+            return null;
+        }
+        List<com.capsule.agentkey.entity.AgentRun> subtasks;
+        try {
+            subtasks = agentRunService.findSubtasks(ctx.runId());
+        } catch (Exception e) {
+            log.warn("读取子 Run 状态失败，按未通过处理: {}", e.getMessage());
+            return new Completion(CompletionStatus.INCOMPLETE, "SUBTASK_NOT_ACCEPTED",
+                    "无法确认子任务验收状态，任务尚未完成。", workspaceChanged);
+        }
+        if (subtasks == null || subtasks.isEmpty()) {
+            return null;
+        }
+        List<com.capsule.agentkey.entity.AgentRun> notAccepted = subtasks.stream()
+                .filter(run -> run.getState() != com.capsule.agentkey.entity.AgentRun.RunState.SUCCEEDED)
+                .toList();
+        if (notAccepted.isEmpty()) {
+            return null;
+        }
+        com.capsule.agentkey.entity.AgentRun first = notAccepted.get(0);
+        return new Completion(CompletionStatus.INCOMPLETE, "SUBTASK_NOT_ACCEPTED",
+                "有 " + notAccepted.size() + " 个子任务未通过验收（例如 "
+                        + first.getId() + ":" + first.getState() + "），任务尚未完成。",
+                workspaceChanged);
     }
 
     /** LoopGuard 停止信号转换成既有的 NoProgress 载荷，保持 SSE/落库格式不变 */

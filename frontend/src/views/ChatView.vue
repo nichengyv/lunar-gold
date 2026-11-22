@@ -178,6 +178,35 @@
             </div>
           </div>
 
+          <!-- R7c：串行子智能体状态条；父任务只展示轻量状态，明细仍在子 Run 事件里 -->
+          <div v-if="currentSubtasks.length" class="plan-strip" :style="{ marginTop: '6px' }">
+            <div class="plan-strip-head" style="cursor: default">
+              <span class="plan-strip-label">子任务</span>
+              <span class="plan-strip-count">
+                {{ currentSubtasks.filter((s) => s.status === 'SUCCEEDED').length }}/{{ currentSubtasks.length }}
+              </span>
+            </div>
+            <div class="plan-strip-body">
+              <div
+                v-for="task in currentSubtasks"
+                :key="task.subtaskId"
+                class="plan-strip-step"
+                :class="'is-' + (task.status === 'SUCCEEDED' ? 'completed'
+                  : task.status === 'RUNNING' ? 'in_progress' : 'aborted')"
+              >
+                <span class="plan-strip-mark">
+                  <Icon v-if="task.status === 'SUCCEEDED'" name="check" :size="10" />
+                  <Icon v-else-if="task.status === 'FAILED' || task.status === 'CANCELLED'
+                    || task.status === 'SKIPPED'" name="x" :size="10" />
+                  <span v-else class="plan-strip-dot"></span>
+                </span>
+                <span class="plan-strip-text">
+                  {{ task.subtaskId }} · {{ subtaskLabel[task.status ?? 'RUNNING'] ?? task.status }}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <!-- P5-10：断线续传状态条：只在重连 / 已恢复 / 中断时需要提示 -->
           <div v-if="streamNotice" class="stream-status" :class="'is-' + chat.streamStatus">
             <span class="stream-status-dot"></span>
@@ -383,7 +412,7 @@ import ApprovalCard from '../components/ApprovalCard.vue';
 import AskUserCard from '../components/AskUserCard.vue';
 import Icon from '../components/Icon.vue';
 import type { DocumentInfo } from '../types/api';
-import type { PermissionLevel, PlanSnapshot, ReasoningLevel, TaskStageItem } from '../types/chat';
+import type { PermissionLevel, PlanSnapshot, ReasoningLevel, SubtaskUpdate, TaskStageItem } from '../types/chat';
 
 /** P5-09：历史加载失败时也能直接带走诊断，不用先去设置页 */
 function exportDiagnostics() {
@@ -863,6 +892,22 @@ const currentPlan = computed<PlanSnapshot | null>(() => {
   return last?.plan?.steps?.length ? last.plan : null;
 });
 
+// R7c：串行子智能体的轻量状态条；子任务全部结束或没有委派时不展示
+const currentSubtasks = computed<SubtaskUpdate[]>(() => {
+  const last = [...chat.messages].reverse().find((m) => m.role === 'assistant');
+  return last?.subtasks ?? [];
+});
+
+const subtaskLabel: Record<string, string> = {
+  RUNNING: '执行中',
+  SUCCEEDED: '已通过',
+  FAILED: '未通过',
+  CANCELLED: '已取消',
+  SKIPPED: '已跳过',
+  WAITING_APPROVAL: '待审批',
+  WAITING_USER_INPUT: '待回答'
+};
+
 // 每次新任务开始（isProcessing 由 false → true）都重新展开计划条，
 // 避免上一次手动关闭后一直隐藏，看起来像"任务开始了却没有计划"
 watch(
@@ -876,8 +921,7 @@ watch(
 );
 const planTotal = computed(() => currentPlan.value?.steps.length ?? 0);
 const planDone = computed(() => currentPlan.value?.steps.filter((s) => s.status === 'completed').length ?? 0);
-const planPercent = computed(() => (planTotal.value ? Math.round((planDone.value / planTotal.value) * 100) : 0));
-const currentStepTitle = computed(() => {
+const planPercent = computed(() => (planTotal.value ? Math.round((planDone.value / planTotal.value) * 100) : 0));const currentStepTitle = computed(() => {
   const steps = currentPlan.value?.steps ?? [];
   const running = steps.find((s) => s.status === 'in_progress');
   if (running) return '进行中：' + running.title;

@@ -5,6 +5,7 @@ import type {
   DiagnosticsInfo,
   PlanSnapshot,
   PlanStepStatus,
+  SubtaskUpdate,
   UserQuestion,
   VerifyInfo
 } from '../types/chat';
@@ -29,6 +30,8 @@ export interface RecoveredRun {
   completion?: CompletionInfo;
   diagnostics?: DiagnosticsInfo;
   verify?: VerifyInfo;
+  /** R7c：子智能体状态（按 subtaskId 去重，保留最新） */
+  subtasks: SubtaskUpdate[];
 }
 
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'apply_patch', 'delete_file', 'create_file']);
@@ -52,6 +55,7 @@ export function replayRunEvents(events: RunEventItem[]): RecoveredRun {
   let completion: CompletionInfo | undefined;
   let diagnostics: DiagnosticsInfo | undefined;
   let verify: VerifyInfo | undefined;
+  const subtasks: SubtaskUpdate[] = [];
 
   for (const event of events) {
     const payload = parsePayload(event);
@@ -114,6 +118,21 @@ export function replayRunEvents(events: RunEventItem[]): RecoveredRun {
       if (userQuestion && userQuestion.questionId === payload.questionId) {
         userQuestion = undefined;
       }
+    } else if (event.type === 'SUBTASK') {
+      const subtaskId = String(payload.subtaskId ?? '');
+      if (!subtaskId) continue;
+      const update: SubtaskUpdate = {
+        type: payload.type === 'approval' || payload.type === 'approval_resolved'
+          || payload.type === 'question' ? payload.type : 'status',
+        parentRunId: payload.parentRunId ? Number(payload.parentRunId) : undefined,
+        childRunId: payload.childRunId ? Number(payload.childRunId) : undefined,
+        subtaskId,
+        status: payload.status,
+        message: payload.message
+      };
+      const index = subtasks.findIndex((item) => item.subtaskId === subtaskId);
+      if (index >= 0) subtasks[index] = update;
+      else subtasks.push(update);
     }
   }
 
@@ -127,7 +146,8 @@ export function replayRunEvents(events: RunEventItem[]): RecoveredRun {
     userQuestion,
     completion,
     diagnostics,
-    verify
+    verify,
+    subtasks
   };
 }
 

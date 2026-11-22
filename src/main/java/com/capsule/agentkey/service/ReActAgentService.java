@@ -150,6 +150,21 @@ public class ReActAgentService {
     @org.springframework.beans.factory.annotation.Value("${agent.context.retrieval.min-score:6}")
     private int retrievalMinScore = 6;
 
+    /** R7c / P8-03：串行子智能体总开关；默认关闭，只有根 Run 能看到 delegate_subtasks */
+    @org.springframework.beans.factory.annotation.Value("${agent.subtasks.enabled:false}")
+    private boolean subtasksEnabled = false;
+
+    /** R7c：单次委派的子任务上限；与深度 1、串行执行共同约束第一版能力 */
+    @org.springframework.beans.factory.annotation.Value("${agent.subtasks.max-subtasks:4}")
+    private int maxSubtasks = 4;
+
+    /** R7c：合成工具只用于下发定义，执行由主循环拦截 */
+    private final com.capsule.agentkey.agent.subtask.DelegateSubtasksTool delegateSubtasksTool =
+            new com.capsule.agentkey.agent.subtask.DelegateSubtasksTool();
+
+    /** R7c：串行子智能体协调器；延迟构建以读取配置与可选协作者 */
+    private volatile com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator subtaskCoordinator;
+
     private static final int SPILL_PREVIEW_CHARS = 1500;
 
     /**
@@ -368,6 +383,30 @@ public class ReActAgentService {
         return value;
     }
 
+    /**
+     * R7c：延迟构建子智能体协调器。
+     *
+     * <p>开关关闭或没有 Run 持久化能力（手动装配/单测）时返回 null，
+     * 主循环既不暴露 {@code delegate_subtasks}，也不会创建任何子 Run。
+     */
+    private com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator subtaskCoordinator() {
+        if (!subtasksEnabled || agentRunService == null) {
+            return null;
+        }
+        com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator value = subtaskCoordinator;
+        if (value == null) {
+            synchronized (this) {
+                value = subtaskCoordinator;
+                if (value == null) {
+                    value = new com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator(
+                            agentRunService, planEvidenceService, this::runSubtask, maxSubtasks);
+                    subtaskCoordinator = value;
+                }
+            }
+        }
+        return value;
+    }
+
     /** R3：把 SSE 回调适配成 ToolExecutor 的审批 UI */
     private com.capsule.agentkey.agent.tool.ToolExecutor.ApprovalUi approvalUi(
             StreamCallback callback, Long userId, Long projectId) {
@@ -430,6 +469,8 @@ public class ReActAgentService {
         /** P7-06：agent 暂停等用户回答决策询问，questionId 用于用户回答时关联 */
         default void onUserQuestion(String questionId, String question, String header,
                                     java.util.List<java.util.Map<String, Object>> options, boolean multiSelect) {}
+        /** R7c：串行子智能体状态更新；父 SSE 只转发这一种轻量状态 */
+        default void onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate update) {}
         void onComplete();//整套智能体流程全部结束
         void onError(Throwable t);//发生异常，推送错误报告
     }
@@ -526,7 +567,14 @@ public class ReActAgentService {
             }
             //第六十批：工具清单先用 tool scoring 智能排序（关键词匹配 + 历史成功率 + 启发式），
             //再送模型——模型优先看到最相关的工具，减少瞎选
-            List<ToolCallback> tools = toolRegistry.buildRankedToolCallbacks(userPrompt, policy.permission());
+            List<ToolCallback> tools = new ArrayList<>(
+                    toolRegistry.buildRankedToolCallbacks(userPrompt, policy.permission()));
+            // R7c：只有开启了子智能体且具备 Run 持久化能力的根 Run 才能看到委派工具；
+            // 子 Run 通过 executeSubtask 单独构建工具列表，天然只有深度 1
+            com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator coordinator = subtaskCoordinator();
+            if (coordinator != null && runId != null) {
+                tools.add(delegateSubtasksTool.toToolCallback());
+            }
             log.info("本轮策略: model={}, reasoning={}, permission={}, tools={}",
                     policy.model(), policy.reasoning().name(), policy.permission().name(), tools.size());
 
@@ -547,7 +595,9 @@ public class ReActAgentService {
                     userId, projectId, sessionId, cancelRequested, callback,
                     approvalUi(callback, userId, projectId),
                     buildContextAssembler(apiKey, policy.model(), runId),
-                    runId, null, checkpointSink(runId)));
+                    runId, null, checkpointSink(runId),
+                    coordinator,
+                    new com.capsule.agentkey.agent.run.RunBudget(maxTokensPerRun, maxSecondsPerRun)));
 
         } catch (Exception e) {
             log.error("ReAct 执行异常", e);
@@ -563,6 +613,107 @@ public class ReActAgentService {
             }
             WorkspaceContext.clear();
         }
+    }
+
+    /**
+     * R7c：子 Run 的执行入口。
+     *
+     * <p>与父 Run 的 {@link #execute} 完全隔离：只有子任务目标、必要项目指令/repo map
+     * 与自己的消息列表；不复制父消息、不做会话 RAG、不注册 {@code delegate_subtasks}，
+     * 因此天然限制深度为 1。子 Run 的 SSE 回调只写自己的事件流。
+     */
+    private com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator.Execution runSubtask(
+            com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator.Request request) {
+        RunContext runContext = createRunContext(request.childRunId(), request.userId(),
+                request.projectId(), request.sessionId(), null, request.cancelRequested());
+        // 子任务的验收契约写入子 RunContext，让子 Run 自己的 RunTermination 也能核对
+        if (runContext.plan().isEmpty()) {
+            runContext.updatePlan(List.of(new PlanStep(request.spec().objective(), "in_progress",
+                    request.spec().id(), request.spec().acceptance())));
+        }
+
+        String workspacePath = request.workspacePath();
+        String projectInstruction = "";
+        String repoMap = "";
+        try {
+            Long resolvedId = projectService.resolveProjectId(request.userId(), request.projectId());
+            com.capsule.agentkey.entity.Project p = projectService.getOwned(request.userId(), resolvedId);
+            projectInstruction = p.getInstruction();
+            if (workspacePath == null || workspacePath.isBlank()) {
+                workspacePath = p.getWorkspacePath();
+            }
+            if (workspacePath != null) {
+                repoMap = repoMapService.build(workspacePath);
+            }
+        } catch (Exception e) {
+            log.warn("子任务读取项目指令/工作区失败，降级: {}", e.getMessage());
+        }
+
+        String finalWorkspacePath = workspacePath;
+        final String finalProjectInstruction = projectInstruction;
+        final String finalRepoMap = repoMap;
+        WorkspaceContext childView = new WorkspaceContext(runContext);
+        try {
+            return WorkspaceContext.callIn(childView, () -> {
+                List<ObjectNode> messages;
+                if (request.resumeFrom() != null && request.resumeFrom().getMessages() != null
+                        && !request.resumeFrom().getMessages().isEmpty()) {
+                    messages = new ArrayList<>(request.resumeFrom().getMessages());
+                } else {
+                    messages = buildMessages(request.userId(), request.projectId(), request.sessionId(),
+                            List.of(), buildSubtaskPrompt(request.spec()), "", "", "", "",
+                            finalProjectInstruction, finalRepoMap, finalWorkspacePath,
+                            request.policy(), runContext.plan());
+                    // 子任务计划已由子 Run 自己持有，避免 ContextAssembler 再注入一次重复快照
+                    messages.removeIf(node -> "user".equals(node.path("role").asText())
+                            && node.path("content").asText("").startsWith("【当前计划 Current plan】"));
+                }
+                List<ToolCallback> tools = new ArrayList<>(
+                        toolRegistry.buildRankedToolCallbacks(request.spec().objective(),
+                                request.policy().permission()));
+                orchestrator().run(new AgentOrchestrator.Invocation(
+                        request.apiKey(), request.policy(), messages, tools, "", finalWorkspacePath,
+                        request.userId(), request.projectId(), request.sessionId(),
+                        request.cancelRequested(), request.childCallback(),
+                        approvalUi(request.childCallback(), request.userId(), request.projectId()),
+                        null, request.childRunId(), request.resumeFrom(),
+                        checkpointSink(request.childRunId()), null, request.budget()));
+                return new com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator.Execution(
+                        runContext, request.childCallback().summary(), null);
+            });
+        } catch (Exception e) {
+            log.warn("子任务执行失败 [childRunId={}]: {}", request.childRunId(), e.getMessage(), e);
+            return new com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator.Execution(
+                    runContext, "", e);
+        } finally {
+            if (askUserQuestionTool != null && request.childRunId() != null) {
+                try {
+                    askUserQuestionTool.cleanup(request.childRunId());
+                } catch (Exception ignored) {
+                    // 清理失败不影响子任务结果
+                }
+            }
+        }
+    }
+
+    /** 子任务提示词：只保留目标与验收契约，避免继承父 Run 的无关上下文 */
+    private String buildSubtaskPrompt(com.capsule.agentkey.agent.subtask.SubtaskSpec spec) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【子任务目标】\n").append(spec.objective()).append("\n\n");
+        sb.append("【验收契约（必须满足）】\n");
+        if (spec.acceptance() == null) {
+            sb.append("（无）\n");
+        } else {
+            try {
+                sb.append(mapper.writeValueAsString(spec.acceptance())).append('\n');
+            } catch (Exception e) {
+                sb.append(spec.describeAcceptance()).append('\n');
+            }
+        }
+        sb.append("\n完成后可用 update_plan 把步骤 ").append(spec.id())
+                .append(" 标记为 completed；更新时必须原样保留该步骤的 id 与 acceptance 字段。\n");
+        sb.append("只完成本子任务范围，不要尝试再次委派其他子任务。");
+        return sb.toString();
     }
 
     /**
@@ -623,7 +774,12 @@ public class ReActAgentService {
                 log.warn("续跑读取项目工作区失败，按无工作区继续: {}", e.getMessage());
             }
             List<ObjectNode> messages = new ArrayList<>(checkpoint.getMessages());
-            List<ToolCallback> tools = toolRegistry.buildRankedToolCallbacks(safePrompt, policy.permission());
+            List<ToolCallback> tools = new ArrayList<>(
+                    toolRegistry.buildRankedToolCallbacks(safePrompt, policy.permission()));
+            com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator coordinator = subtaskCoordinator();
+            if (coordinator != null && runId != null) {
+                tools.add(delegateSubtasksTool.toToolCallback());
+            }
             log.info("续跑策略: model={}, reasoning={}, permission={}, tools={}, round={}",
                     policy.model(), policy.reasoning().name(), policy.permission().name(),
                     tools.size(), checkpoint.getRound());
@@ -639,7 +795,9 @@ public class ReActAgentService {
                     userId, projectId, sessionId, cancelRequested, callback,
                     approvalUi(callback, userId, projectId),
                     buildContextAssembler(apiKey, policy.model(), runId),
-                    runId, checkpoint, checkpointSink(runId)));
+                    runId, checkpoint, checkpointSink(runId),
+                    coordinator,
+                    new com.capsule.agentkey.agent.run.RunBudget(maxTokensPerRun, maxSecondsPerRun)));
         } catch (Exception e) {
             log.error("ReAct 续跑异常", e);
             orchestrator().finalizePlan(callback);

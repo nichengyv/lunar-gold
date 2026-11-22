@@ -7,6 +7,21 @@ function event(type: string, payload: unknown, seq = 1, createTime = '2026-11-21
 }
 
 describe('replayRunEvents', () => {
+  it('按 subtaskId 去重保留最新子任务状态', () => {
+    const recovered = replayRunEvents([
+      event('SUBTASK', { type: 'status', childRunId: 7, subtaskId: 's1', status: 'RUNNING' }, 1),
+      event('SUBTASK', { type: 'status', childRunId: 7, subtaskId: 's1', status: 'SUCCEEDED',
+        message: '通过' }, 2),
+      event('SUBTASK', { type: 'status', childRunId: 8, subtaskId: 's2', status: 'FAILED' }, 3)
+    ]);
+
+    expect(recovered.subtasks).toHaveLength(2);
+    expect(recovered.subtasks[0]).toMatchObject({
+      subtaskId: 's1', childRunId: 7, status: 'SUCCEEDED', message: '通过', type: 'status'
+    });
+    expect(recovered.subtasks[1]).toMatchObject({ subtaskId: 's2', status: 'FAILED' });
+  });
+
   it('取最后一个 MODEL_CHUNK 检查点并标记截断', () => {
     const recovered = replayRunEvents([
       event('MODEL_CHUNK', { text: '第一段', length: 3 }, 1),

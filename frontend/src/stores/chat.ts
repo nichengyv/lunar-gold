@@ -66,6 +66,7 @@ function applyRunEvents(events: agentApi.RunEventItem[], target: UiMessage) {
   if (recovered.completion) target.completion = recovered.completion;
   if (recovered.diagnostics) target.diagnostics = recovered.diagnostics;
   if (recovered.verify) target.verify = recovered.verify;
+  if (recovered.subtasks.length) target.subtasks = recovered.subtasks;
   return recovered;
 }
 

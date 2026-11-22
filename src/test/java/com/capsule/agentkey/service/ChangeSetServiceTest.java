@@ -72,7 +72,7 @@ class ChangeSetServiceTest {
         AgentRun run2 = run(2L, "turn-2", AgentRun.RunState.SUCCEEDED,
                 "{\"status\":\"COMPLETED\",\"reason\":\"VERIFY_PASSED\"}",
                 LocalDateTime.now().minusHours(1));
-        when(runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
+        when(runRepo.findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
                 .thenReturn(List.of(run2, run1));
 
         PendingFileChange change1 = change(1L, "turn-1", "a.txt", "A", "B", 1, 1, "PENDING");
@@ -113,7 +113,7 @@ class ChangeSetServiceTest {
     @Test
     void buildsContinuePromptWithFailureAndUnfinishedPlan() {
         AgentRun run = run(2L, "turn-2", AgentRun.RunState.SUCCEEDED, null, LocalDateTime.now());
-        when(runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
+        when(runRepo.findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
                 .thenReturn(List.of(run));
         when(changeRepo.findBySessionIdOrderByCreateTimeDescIdDesc(SESSION_ID))
                 .thenReturn(List.of(change(2L, "turn-2", "a.txt", "A", "B", 1, 1, "PENDING")));
@@ -155,7 +155,7 @@ class ChangeSetServiceTest {
         AgentRun run = run(1L, "turn-1", AgentRun.RunState.SUCCEEDED,
                 "{\"status\":\"UNVERIFIED\",\"reason\":\"VERIFY_NOT_CONFIGURED\"}",
                 LocalDateTime.now().minusHours(1));
-        when(runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
+        when(runRepo.findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(USER_ID, SESSION_ID))
                 .thenReturn(List.of(run));
         when(changeRepo.findBySessionIdOrderByCreateTimeDescIdDesc(SESSION_ID))
                 .thenReturn(List.of(change(1L, "turn-1", "a.txt", "A", "B", 1, 1, "ACCEPTED")));
@@ -304,3 +304,4 @@ class ChangeSetServiceTest {
         return event;
     }
 }
+

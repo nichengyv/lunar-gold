@@ -42,7 +42,7 @@ public class AgentExperienceMetricsService {
 
     @Transactional(readOnly = true)
     public ExperienceMetrics getMetrics(Long userId) {
-        List<AgentRun> runs = runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(userId);
+        List<AgentRun> runs = runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(userId);
         return new ExperienceMetrics(
                 Instant.now().toString(),
                 runs.size(),

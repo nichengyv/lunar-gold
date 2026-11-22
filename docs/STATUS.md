@@ -1,8 +1,8 @@
 # Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
-> 更新日期：2026-11-21；基线提交 `f825fc4`（Gitee `origin/master`）。
-> 后端 **502 tests / 0 failures / 17 skipped**（`mvn clean test`）；前端 **112 tests** 通过，`vue-tsc + vite build` 通过。
+> 更新日期：2026-11-22；基线提交 `f825fc4`（Gitee `origin/master`）。
+> 后端 **589 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **115 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
 
 ## 一句话定位
 
@@ -16,7 +16,7 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 | R7b Run 级断点续跑 | 已完成 | 轮末写 `agent_run.checkpoint_json` + `CHECKPOINT` 事件；重启后 `FAILED/PROCESS_RESTARTED` 并保留断点；`POST /api/agent/runs/{runId}/resume` + 前端「继续执行」；真实 `taskkill`→重启→resume E2E 通过 | 审批中/等待用户输入仍终止；仅支持手动触发 |
 | R7b-live 续跑完成率 | 部分完成 | `P7_02_RESUME=on` A/B runner + `LongSessionResumeGate` 已落地；Key 冒烟 n=1 通过（直接执行与续跑均 success，`resumeInjected=true`） | L1 全量 20 对（约 3-4h）、L2/L3（10h+）待确认后执行；尚无完成率结论 |
 | L1～L4 门禁验证 | 部分完成 | L3/L4 真实模型 n=1：L3 12 turn 全部 SUCCEEDED、60/60 工件、memoryProbe 通过，期间真实工具失败 1 次并自行恢复（`success=true`，口径修正后复验）；L4 prompt 峰值 7,949 tokens 达标，不跑 condense A/B；L1 已补 30 turn / 150 工件数据集（10 replicas，离线通过） | L3 各 turn 均 `UNVERIFIED:VERIFY_NOT_CONFIGURED`，完成仍靠模型自报（→ R7c L5）；L1 真实模型未运行；L2/L3 层完成率待批准 |
-| R7c 长任务剩余项 | 进行中 | L5 完成强校验：无 `verify.json` 时按 pom.xml / build.gradle / package.json / go.mod / Cargo.toml / tsconfig.json 自动探测验证命令；连构建文件都没有的**纯 Java** 工作区退回有界全量源码编译（深度 12 / 2000 文件 / 10 MiB，混合语言与超限降级 UNAVAILABLE）；计划步骤支持工件/验证证据契约，完成与收口都重新核对；压缩后对被省略历史做本地检索型记忆（默认关闭） | 大任务分解（L7）未开始；混合语言目录仍需显式配置；检索记忆需先开启 condense 才有省略候选 |
+| R7c 长任务剩余项 | 进行中 | L5 完成强校验：无 `verify.json` 时按 pom.xml / build.gradle / package.json / go.mod / Cargo.toml / tsconfig.json 自动探测验证命令；连构建文件都没有的**纯 Java** 工作区退回有界全量源码编译（深度 12 / 2000 文件 / 10 MiB，混合语言与超限降级 UNAVAILABLE）；计划步骤支持工件/验证证据契约，完成与收口都重新核对；压缩后对被省略历史做本地检索型记忆（默认关闭）；串行子智能体：根 Run 可委派最多 4 个子任务，深度 1、独立 Run/事件/验收，父 Run 全部子任务 SUCCEEDED 才允许完成（默认关闭） | 子智能体真实模型 A/B 未跑；深度 1 与手动续跑范围不变；混合语言目录仍需显式配置；检索记忆需先开启 condense 才有省略候选 |
 | P3-08 干净机器验收 | 未开始 | — | Windows 干净机器完整任务 + 所有者确认 |
 
 判定规则：**L1～L8 全部达标才能宣称「具备长任务能力」**；当前只可表述为「中等长度任务稳定」。
@@ -26,7 +26,7 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 - 可执行多轮长会话：计划跟踪、循环保护、可选上下文压缩（默认关闭）
 - 执行中可调用 `ask_user_question` 向用户提问（仅 root agent；等待上限 15 分钟；断线可还原卡片）
 - 崩溃后仅 `RUNNING` 可手动续跑；工具副作用按 at-least-once 语义可能重复执行
-- 尚未支持子任务分解、完成状态强校验、自动续跑
+- 尚未支持自动续跑；子智能体默认关闭，仅根 Run 可委派且深度固定为 1
 
 ## 文档导航
 
@@ -51,7 +51,8 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 | 撤销 | `revert-run` / `revert-session` 只回滚平台记录的文件改动，命令等外部副作用不撤销 |
 | MCP | 仅支持 stdio；MCP 进程失败不阻塞主流程 |
 | 平台 | 当前只适配 Windows；PowerShell 5 与 NSIS 打包限制见 operations.md |
-| 完成判定 | 计划收口已强制（R7b 口径），验证命令支持自动探测；纯 Java 裸源码支持有界全量编译；计划步骤可声明确定性工件/验证证据契约，候选完成与收口都重新核对，证据不满足的 completed 会降级 aborted（R7c 续） |
+| 完成判定 | 计划收口已强制（R7b 口径），验证命令支持自动探测；纯 Java 裸源码支持有界全量编译；计划步骤可声明确定性工件/验证证据契约，候选完成与收口都重新核对，证据不满足的 completed 会降级 aborted（R7c 续）；父 Run 只有在全部子 Run SUCCEEDED 后才允许 COMPLETED |
+| 子智能体 | `agent.subtasks.enabled=false` 默认关闭；开启后根 Run 可调用 `delegate_subtasks`，单次最多 4 个、串行、深度 1；子 Run 独立 state/plan/checkpoint/event，父 SSE 只转发 `subtask` 轻量状态与带 childRunId 的审批/询问 |
 | 上下文组装 | `ContextAssembler` + `ContextCondenser` + `RunHistoryRetriever`（`agent/context`）；压缩后按本地确定性关键词召回被省略的历史片段，默认关闭 |
 
 ## 踩坑速查（完整版见 operations.md）

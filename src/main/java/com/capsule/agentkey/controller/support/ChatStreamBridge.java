@@ -330,6 +330,70 @@ public final class ChatStreamBridge implements ReActAgentService.StreamCallback 
     }
 
     @Override
+    public void onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate update) {
+        if (update == null) {
+            return;
+        }
+        // 父 Run 事件表只落轻量状态；子 Run 的完整事件在 child runId 下
+        Map<String, Object> persisted = new LinkedHashMap<>();
+        persisted.put("type", update.type());
+        persisted.put("childRunId", update.childRunId());
+        persisted.put("subtaskId", update.subtaskId());
+        persisted.put("status", update.status());
+        persisted.put("message", truncateForTrace(update.message(), 500));
+        appendRunEvent(AgentRunEvent.EventType.SUBTASK, persisted);
+        try {
+            channel.send("subtask", mapper.writeValueAsString(update));
+            switch (update.type()) {
+                case com.capsule.agentkey.agent.subtask.SubtaskUpdate.TYPE_APPROVAL -> {
+                    // 复用审批卡片：带上 childRunId，前端不会把父 Run 置为等待审批
+                    Map<String, Object> data = new HashMap<>();
+                    data.put("approvalId", update.approvalId());
+                    data.put("tool", update.tool());
+                    data.put("preview", update.preview());
+                    data.put("risk", update.risk());
+                    data.put("expiresAt", update.expiresAt());
+                    data.put("runId", update.childRunId());
+                    data.put("subtaskId", update.subtaskId());
+                    channel.send("approval_required", mapper.writeValueAsString(data));
+                }
+                case com.capsule.agentkey.agent.subtask.SubtaskUpdate.TYPE_APPROVAL_RESOLVED -> {
+                    Map<String, Object> data = new HashMap<>();
+                    data.put("approvalId", update.approvalId());
+                    data.put("decision", update.decision());
+                    data.put("source", update.source());
+                    if (update.batchId() != null) {
+                        data.put("batchId", update.batchId());
+                    }
+                    data.put("runId", update.childRunId());
+                    data.put("subtaskId", update.subtaskId());
+                    channel.send("approval_resolved", mapper.writeValueAsString(data));
+                }
+                case com.capsule.agentkey.agent.subtask.SubtaskUpdate.TYPE_QUESTION -> {
+                    // 用户回答按 childRunId 路由；父 Run 不进入 WAITING_USER_INPUT
+                    Map<String, Object> data = new HashMap<>();
+                    data.put("runId", update.childRunId());
+                    data.put("questionId", update.questionId());
+                    data.put("question", update.question());
+                    if (update.header() != null) data.put("header", update.header());
+                    if (update.options() != null && !update.options().isEmpty()) {
+                        data.put("options", update.options());
+                    }
+                    data.put("multiSelect", update.multiSelect());
+                    data.put("subtaskId", update.subtaskId());
+                    channel.send("user_question", mapper.writeValueAsString(data));
+                }
+                default -> {
+                    // status 更新只发 subtask 事件
+                }
+            }
+        } catch (IOException e) {
+            channel.detached().set(true);
+            log.error("发送 subtask 事件失败（客户端可能已断开）", e);
+        }
+    }
+
+    @Override
     public void onUsage(long promptTokens, long completionTokens) {
         // P4-07：模型多次调用会分多次上报，这里只累加，终态时统一落库
         turnPromptTokens.addAndGet(promptTokens);

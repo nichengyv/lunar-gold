@@ -169,6 +169,11 @@ agent:
       max-fragment-chars: ${AGENT_CONTEXT_RETRIEVAL_MAX_FRAGMENT_CHARS:1500}
       max-total-chars: ${AGENT_CONTEXT_RETRIEVAL_MAX_TOTAL_CHARS:6000}
       min-score: ${AGENT_CONTEXT_RETRIEVAL_MIN_SCORE:6}
+  # 【R7c / P8-03】串行子智能体：默认关闭；开启后只有根 Run 能看到 delegate_subtasks，
+  # 子运行深度固定为 1，单次委派最多 4 个且严格串行
+  subtasks:
+    enabled: ${AGENT_SUBTASKS_ENABLED:false}
+    max-subtasks: ${AGENT_SUBTASKS_MAX:4}
   # 【P5-05】变更文件诊断：默认进程内 javac；provider=lsp 时走外部 language server，
   # 未配置 lsp.command 或启动失败会自动降级，不阻塞工具调用
   diagnostics:

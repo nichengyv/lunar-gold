@@ -79,7 +79,7 @@ public class ChangeSetService {
     @Transactional(readOnly = true)
     public ChangeSetView view(Long userId, Long sessionId, Long runIdFilter) {
         List<AgentRun> runs = new ArrayList<>(
-                runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId));
+                runRepo.findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId));
         if (runIdFilter != null) {
             runs.removeIf(run -> !runIdFilter.equals(run.getId()));
         }

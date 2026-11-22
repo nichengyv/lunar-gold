@@ -125,7 +125,7 @@ public class AgentRunService {
 
     @Transactional(readOnly = true)
     public List<AgentRun> findRunningByUser(Long userId) {
-        return runRepo.findByUserIdAndStateIn(userId,
+        return runRepo.findByUserIdAndParentRunIdIsNullAndStateIn(userId,
                 List.of(RunState.RUNNING, RunState.WAITING_APPROVAL, RunState.WAITING_USER_INPUT));
     }
 
@@ -188,6 +188,79 @@ public class AgentRunService {
         log.info("新建 run：id={}, userId={}, state=QUEUED", saved.getId(), userId);
         appendInternal(saved.getId(), EventType.STATE_CHANGED, Map.of("targetState", RunState.QUEUED));
         return new CreateResult(saved, true);
+    }
+
+    // ---------------------------------------------------------------------
+    // R7c：子智能体 Run
+    // ---------------------------------------------------------------------
+
+    /**
+     * 创建子 Run；同一父 Run + delegationId 重试时复用已有记录。
+     *
+     * <p>子 Run 与顶层 Run 共享状态机与事件流，但不出现在顶层历史、运行中列表与
+     * 会话用量查询里；父 Run 收尾时按 delegation 汇总子用量。
+     */
+    @Transactional
+    public CreateResult createSubtask(Long parentRunId, Long userId, Long sessionId, Long projectId,
+                                      String delegationId, String requestJson) {
+        Optional<AgentRun> existing =
+                runRepo.findByParentRunIdAndDelegationId(parentRunId, delegationId);
+        if (existing.isPresent()) {
+            log.info("子任务幂等命中：parentRun={}, delegationId={}, existingRun={}",
+                    parentRunId, delegationId, existing.get().getId());
+            return new CreateResult(existing.get(), false);
+        }
+        AgentRun run = new AgentRun();
+        run.setUserId(userId);
+        run.setSessionId(sessionId);
+        run.setProjectId(projectId);
+        run.setParentRunId(parentRunId);
+        run.setDelegationId(delegationId);
+        run.setClientRequestId("subtask:" + parentRunId + ":" + delegationId);
+        run.setState(RunState.QUEUED);
+        run.setRequestJson(requestJson);
+        AgentRun saved = runRepo.save(run);
+        log.info("新建子 Run：id={}, parentRun={}, delegationId={}",
+                saved.getId(), parentRunId, delegationId);
+        appendInternal(saved.getId(), EventType.STATE_CHANGED, Map.of("targetState", RunState.QUEUED));
+        return new CreateResult(saved, true);
+    }
+
+    /** 父 Run 下的全部子 Run，按创建顺序 */
+    @Transactional(readOnly = true)
+    public List<AgentRun> findSubtasks(Long parentRunId) {
+        if (parentRunId == null) {
+            return List.of();
+        }
+        return runRepo.findByParentRunIdOrderByIdAsc(parentRunId);
+    }
+
+    /**
+     * 把一个子 Run 的用量汇总进父 Run。
+     *
+     * <p>只在子 Run 到达终态后调用一次：会话用量查询只统计顶层 Run，
+     * 子 Run 行保留用于审计，但不会与父 Run 双计。
+     */
+    @Transactional
+    public void addSubtaskUsageToParent(Long parentRunId, Long childRunId) {
+        if (parentRunId == null || childRunId == null) {
+            return;
+        }
+        AgentRun child = runRepo.findById(childRunId).orElse(null);
+        if (child == null) {
+            return;
+        }
+        long prompt = child.getPromptTokens();
+        long completion = child.getCompletionTokens();
+        if (prompt <= 0 && completion <= 0) {
+            return;
+        }
+        runRepo.findById(parentRunId).ifPresent(parent -> {
+            parent.setPromptTokens(parent.getPromptTokens() + prompt);
+            parent.setCompletionTokens(parent.getCompletionTokens() + completion);
+            parent.setTotalTokens(parent.getPromptTokens() + parent.getCompletionTokens());
+            runRepo.save(parent);
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -469,7 +542,8 @@ public class AgentRunService {
      */
     @Transactional(readOnly = true)
     public Optional<AgentRun> findLatestResumable(Long userId, Long sessionId) {
-        List<AgentRun> runs = runRepo.findByUserIdAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId);
+        List<AgentRun> runs = runRepo
+                .findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId);
         if (runs.isEmpty()) {
             return Optional.empty();
         }

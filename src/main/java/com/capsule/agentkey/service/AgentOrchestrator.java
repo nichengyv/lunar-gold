@@ -69,7 +69,11 @@ public class AgentOrchestrator {
                              /** R7b：续跑起点；为 null 表示一次普通的新执行 */
                              RunCheckpoint resumeFrom,
                              /** R7b：轮末断点写入回调；为 null 表示关闭断点 */
-                             java.util.function.Consumer<RunCheckpoint> checkpointSink) {
+                             java.util.function.Consumer<RunCheckpoint> checkpointSink,
+                             /** R7c：串行子智能体协调器；为 null 时 delegate_subtasks 不可用 */
+                             com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator subtaskCoordinator,
+                             /** R7c：父子共享的 token/时间预算；为 null 时保持旧预算口径 */
+                             com.capsule.agentkey.agent.run.RunBudget budget) {
     }
 
     private final AgentClient springAiClient;
@@ -101,7 +105,7 @@ public class AgentOrchestrator {
         this.askUserQuestionHandler = new AskUserQuestionHandler(askUserQuestionTool, agentRunService);
         this.toolContentFormatter = toolContentFormatter;
         this.limits = limits;
-        this.termination = new RunTermination(planEvidenceService);
+        this.termination = new RunTermination(planEvidenceService, agentRunService);
     }
 
     /**
@@ -131,6 +135,10 @@ public class AgentOrchestrator {
                 ? RunContext.create(invocation.runId(), userId, projectId, sessionId, null,
                         cancelRequested, List.of(), null)
                 : boundContext.runContext();
+        // R7c：父子共享预算；子 Run 与父 Run 用同一份计数，不能各自重置
+        com.capsule.agentkey.agent.run.RunBudget budget = invocation.budget();
+        com.capsule.agentkey.agent.subtask.SubtaskRunCoordinator subtaskCoordinator =
+                invocation.subtaskCoordinator();
 
         int round = 0;
         // P5-10-3：本轮开始时间，用于时间预算检查和前端耗时展示的对账
@@ -165,6 +173,46 @@ public class AgentOrchestrator {
             log.info("从断点续跑：已完成 {} 轮，累计 token={}", round,
                     resume.getPromptTokens() + resume.getCompletionTokens());
         }
+        // R7c：委派进度回调在协调器内部执行，runStartedAt 在续跑时会被重赋值，
+        // 这里先固化为快照，保证 lambda 只捕获 effectively-final 变量
+        final long runStartedAtSnapshot = runStartedAt;
+        // R7c：断点里还有未完成的委派 → 先按 child Run 状态恢复/复用子任务，
+        // 把 tool 响应补进权威消息后再回到正常循环；不重新调用模型猜测委派意图
+        if (resume != null && resume.getPendingDelegation() != null && subtaskCoordinator != null) {
+            RunCheckpoint.PendingDelegation pending = resume.getPendingDelegation();
+            final int snapRound = round;
+            final boolean snapWorkspaceChanged = workspaceChanged;
+            final int snapVerifyAttempts = verifyAttempts;
+            final boolean snapBudgetHint = budgetHintSent;
+            final boolean snapWriteFailure = unresolvedWriteFailure;
+            final boolean snapApprovalRejection = unresolvedApprovalRejection;
+            final boolean snapVerifyUnavailable = verifyUnavailableNotified;
+            final long snapPrompt = promptTokensTotal.get();
+            final long snapCompletion = completionTokensTotal.get();
+            List<com.capsule.agentkey.agent.subtask.SubtaskResult> recovered =
+                    subtaskCoordinator.delegate(invocation.apiKey(), policy, invocation.runId(),
+                            userId, projectId, sessionId, workspacePath, pending.getDelegationId(),
+                            pending.getSpecs(), pending.getResults(), pending.getNextIndex(),
+                            cancelRequested, callback, budget,
+                            (results, nextIndex) -> persistCheckpoint(invocation, snapRound,
+                                    System.currentTimeMillis() - runStartedAtSnapshot, messages,
+                                    snapWorkspaceChanged, runContext.changeEpoch(),
+                                    runContext.verifiedEpoch(), snapVerifyAttempts, snapBudgetHint,
+                                    snapWriteFailure, snapApprovalRejection,
+                                    snapVerifyUnavailable, snapPrompt, snapCompletion,
+                                    new RunCheckpoint.PendingDelegation(pending.getDelegationId(),
+                                            pending.getSpecs(), nextIndex, new ArrayList<>(results),
+                                            pending.getToolCallId())));
+            ObjectNode recoveredToolMsg = mapper.createObjectNode();
+            recoveredToolMsg.put("role", "tool");
+            recoveredToolMsg.put("tool_call_id", pending.getToolCallId() == null
+                    ? "" : pending.getToolCallId());
+            recoveredToolMsg.put("content", delegationToolContent(recovered));
+            messages.add(recoveredToolMsg);
+            round = Math.max(round, resume.getRound());
+            log.info("断点恢复委派：{}/{} 个子任务已产生结果", recovered.size(),
+                    pending.getSpecs() == null ? 0 : pending.getSpecs().size());
+        }
         while (round < policy.reasoning().maxToolRounds()) {
             //P6-06：只有用户显式停止才中止；客户端断流不会进入这里，Run 继续执行
             if (cancelRequested != null && cancelRequested.get()) {
@@ -177,7 +225,11 @@ public class AgentOrchestrator {
                 return;
             }
             // P5-10-3：时间预算耗尽时在下一轮开始前停止，给出可操作的原因而不是静默截断
-            if (isTimeBudgetExceeded(System.currentTimeMillis() - runStartedAt, limits.maxSecondsPerRun())) {
+            boolean timeExceeded = budget != null
+                    ? budget.timeExceeded()
+                    : isTimeBudgetExceeded(System.currentTimeMillis() - runStartedAt,
+                            limits.maxSecondsPerRun());
+            if (timeExceeded) {
                 termination.stopWithCompletion(callback, workspaceChanged, "TIME_BUDGET_EXCEEDED",
                         "本轮已超过 " + limits.maxSecondsPerRun() + " 秒时间预算，已停止。"
                                 + "可以缩小任务范围或调高 agent.budget.max-seconds-per-run。");
@@ -201,11 +253,20 @@ public class AgentOrchestrator {
                 messages.add(hint);
             }
 
+            long turnMaxTokens = budget == null
+                    ? limits.maxTokensPerRun()
+                    : budget.remainingTokens(limits.maxTokensPerRun());
+            StreamPublisher.UsageSink usageSink = (promptTokens, completionTokens) -> {
+                callback.onUsage(promptTokens, completionTokens);
+                if (budget != null) {
+                    budget.addTokens(promptTokens + completionTokens);
+                }
+            };
             StreamPublisher.Turn turn = streamPublisher.stream(
                     springAiClient, invocation.apiKey(), policy.model(),
                     assembleContext(contextAssembler, messages), tools, advisorSummary,
-                    callback::onChunk, callback::onUsage,
-                    promptTokensTotal, completionTokensTotal, limits.maxTokensPerRun());
+                    callback::onChunk, usageSink,
+                    promptTokensTotal, completionTokensTotal, turnMaxTokens);
             String streamedText = turn.text();
             List<ObjectNode> streamedToolCalls = turn.toolCalls();
 
@@ -271,6 +332,97 @@ public class AgentOrchestrator {
                 String toolName = toolCall.path("function").path("name").asText();
                 String arguments = toolCall.path("function").path("arguments").asText();//工具所需的入参
                 String toolCallId = toolCall.path("id").asText();//工具调用的唯一编号
+
+                // R7c：delegate_subtasks 是合成工具，不进入 ToolExecutor；
+                // 必须是本轮唯一工具调用，避免与普通工具交错破坏 tool 响应配对
+                if (com.capsule.agentkey.agent.subtask.SubtaskSpec.TOOL_NAME.equals(toolName)) {
+                    callback.onToolCall(toolName, arguments);
+                    log.info("拦截子智能体委派: {}", arguments);
+                    ToolResult delegated = null;
+                    if (streamedToolCalls.size() != 1) {
+                        delegated = ToolResult.fail("delegate_subtasks 必须是本轮唯一的工具调用；"
+                                + "请单独发起下一次委派");
+                    } else if (subtaskCoordinator == null) {
+                        delegated = ToolResult.fail("子智能体未启用，无法委派子任务");
+                    } else {
+                        List<com.capsule.agentkey.agent.subtask.SubtaskSpec> specs = null;
+                        try {
+                            specs = com.capsule.agentkey.agent.subtask.SubtaskSpec.parse(
+                                    mapper.readTree(arguments == null || arguments.isBlank()
+                                            ? "{}" : arguments),
+                                    com.capsule.agentkey.agent.subtask.SubtaskSpec
+                                            .MAX_SUBTASKS_PER_DELEGATION);
+                        } catch (Exception e) {
+                            delegated = ToolResult.fail("委派参数非法：" + e.getMessage());
+                        }
+                        if (specs != null) {
+                            final List<com.capsule.agentkey.agent.subtask.SubtaskSpec> finalSpecs = specs;
+                            String delegationId = delegationId(toolCallId);
+                            // 进度回调在子任务线程/循环内执行，先快照可变计数，避免捕获可变局部变量
+                            final int snapRound = round;
+                            final boolean snapWorkspaceChanged = workspaceChanged;
+                            final int snapVerifyAttempts = verifyAttempts;
+                            final boolean snapBudgetHint = budgetHintSent;
+                            final boolean snapWriteFailure = unresolvedWriteFailure;
+                            final boolean snapApprovalRejection = unresolvedApprovalRejection;
+                            final boolean snapVerifyUnavailable = verifyUnavailableNotified;
+                            final long snapPrompt = promptTokensTotal.get();
+                            final long snapCompletion = completionTokensTotal.get();
+                            persistCheckpoint(invocation, snapRound + 1,
+                                    System.currentTimeMillis() - runStartedAtSnapshot, messages,
+                                    snapWorkspaceChanged, runContext.changeEpoch(),
+                                    runContext.verifiedEpoch(), snapVerifyAttempts, snapBudgetHint,
+                                    snapWriteFailure, snapApprovalRejection,
+                                    snapVerifyUnavailable, snapPrompt, snapCompletion,
+                                    new RunCheckpoint.PendingDelegation(delegationId, finalSpecs, 0,
+                                            new ArrayList<>(), toolCallId));
+                            List<com.capsule.agentkey.agent.subtask.SubtaskResult> results =
+                                    subtaskCoordinator.delegate(invocation.apiKey(), policy,
+                                            invocation.runId(), userId, projectId, sessionId,
+                                            workspacePath, delegationId, finalSpecs,
+                                            List.of(), 0, cancelRequested, callback, budget,
+                                            (produced, nextIndex) -> persistCheckpoint(invocation,
+                                                    snapRound + 1,
+                                                    System.currentTimeMillis() - runStartedAtSnapshot,
+                                                    messages, snapWorkspaceChanged,
+                                                    runContext.changeEpoch(),
+                                                    runContext.verifiedEpoch(), snapVerifyAttempts,
+                                                    snapBudgetHint, snapWriteFailure,
+                                                    snapApprovalRejection, snapVerifyUnavailable,
+                                                    snapPrompt, snapCompletion,
+                                                    new RunCheckpoint.PendingDelegation(
+                                                            delegationId, finalSpecs, nextIndex,
+                                                            new ArrayList<>(produced),
+                                                            toolCallId)));
+                            boolean allAccepted = !results.isEmpty()
+                                    && results.stream().allMatch(
+                                            com.capsule.agentkey.agent.subtask.SubtaskResult::accepted);
+                            String content = delegationToolContent(results);
+                            delegated = allAccepted ? ToolResult.ok(content) : ToolResult.fail(content);
+                            if (allAccepted) {
+                                roundProgress = true;
+                            }
+                        }
+                    }
+                    callback.onToolResult(toolName, delegated);
+                    ObjectNode delegatedMsg = mapper.createObjectNode();
+                    delegatedMsg.put("role", "tool");
+                    delegatedMsg.put("tool_call_id", toolCallId);
+                    String delegatedContent = delegated.isSuccess()
+                            ? delegated.getContent() : "错误: " + delegated.getError();
+                    delegatedMsg.put("content", toolContentFormatter.format(delegatedContent,
+                            policy.reasoning().toolContentLimit()));
+                    messages.add(delegatedMsg);
+                    if (cancelRequested != null && cancelRequested.get()) {
+                        log.info("用户已停止生成，子智能体委派已中止");
+                        termination.finalizePlan(callback);
+                        callback.onCompletion(new Completion(CompletionStatus.INCOMPLETE,
+                                "CANCELLED", "本轮执行已取消，任务尚未完成。", workspaceChanged));
+                        callback.onComplete();
+                        return;
+                    }
+                    continue;
+                }
 
                 //P5-08：到达新的批首时，先把连续只读调用并发执行；结果仍按原下标顺序回放
                 if (!readOnlyBatch.containsKey(callIndex)) {
@@ -571,6 +723,20 @@ public class AgentOrchestrator {
                                    boolean budgetHintSent, boolean unresolvedWriteFailure,
                                    boolean unresolvedApprovalRejection, boolean verifyUnavailableNotified,
                                    long promptTokens, long completionTokens) {
+        persistCheckpoint(invocation, completedRounds, elapsedMs, messages, workspaceChanged,
+                changeEpoch, verifiedEpoch, verifyAttempts, budgetHintSent, unresolvedWriteFailure,
+                unresolvedApprovalRejection, verifyUnavailableNotified, promptTokens,
+                completionTokens, null);
+    }
+
+    /** R7c：带委派进度的断点；pending 为 null 表示清除委派状态（委派已收口） */
+    private void persistCheckpoint(Invocation invocation, int completedRounds, long elapsedMs,
+                                   List<ObjectNode> messages, boolean workspaceChanged,
+                                   long changeEpoch, long verifiedEpoch, int verifyAttempts,
+                                   boolean budgetHintSent, boolean unresolvedWriteFailure,
+                                   boolean unresolvedApprovalRejection, boolean verifyUnavailableNotified,
+                                   long promptTokens, long completionTokens,
+                                   RunCheckpoint.PendingDelegation pending) {
         java.util.function.Consumer<RunCheckpoint> sink = invocation.checkpointSink();
         if (sink == null) {
             return;
@@ -590,10 +756,48 @@ public class AgentOrchestrator {
             checkpoint.setVerifyUnavailableNotified(verifyUnavailableNotified);
             checkpoint.setPromptTokens(promptTokens);
             checkpoint.setCompletionTokens(completionTokens);
+            checkpoint.setPendingDelegation(pending);
             sink.accept(checkpoint);
         } catch (Exception e) {
             log.warn("断点写入失败，保留上一份断点：{}", e.getMessage());
         }
+    }
+
+    /** 委派 id 必须跨重启稳定；toolCallId 是模型天然提供的稳定锚点 */
+    private static String delegationId(String toolCallId) {
+        String base = toolCallId == null ? "" : toolCallId;
+        StringBuilder sb = new StringBuilder("del-");
+        for (int i = 0; i < base.length() && sb.length() < 60; i++) {
+            char c = base.charAt(i);
+            sb.append(Character.isLetterOrDigit(c) || c == '_' || c == '-' ? c : '_');
+        }
+        if (sb.length() == 4) {
+            sb.append(java.util.UUID.randomUUID().toString().substring(0, 8));
+        }
+        return sb.toString();
+    }
+
+    /** 子任务结果转成模型可读的 tool 内容；失败必须显式标出，不能被包装成成功 */
+    private static String delegationToolContent(
+            List<com.capsule.agentkey.agent.subtask.SubtaskResult> results) {
+        long accepted = results.stream()
+                .filter(com.capsule.agentkey.agent.subtask.SubtaskResult::accepted).count();
+        StringBuilder sb = new StringBuilder();
+        sb.append("子任务执行结果（通过 ").append(accepted).append('/')
+                .append(results.size()).append("）：\n");
+        for (com.capsule.agentkey.agent.subtask.SubtaskResult result : results) {
+            sb.append("- [").append(result.status()).append("] ").append(result.subtaskId());
+            if (result.childRunId() != null) {
+                sb.append(" (run ").append(result.childRunId()).append(')');
+            }
+            sb.append("：").append(result.message() == null ? result.reason() : result.message());
+            sb.append('\n');
+        }
+        if (accepted < results.size()) {
+            sb.append("有子任务未通过验收：必须在父 Run 中修复或重新委派，"
+                    + "不能把失败包装成已完成交付。");
+        }
+        return sb.toString();
     }
 
     /** P5-06：把验证结果作为 user 消息注入下一轮模型上下文 */

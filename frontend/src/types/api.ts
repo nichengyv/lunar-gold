@@ -1,4 +1,4 @@
-import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, PlanSnapshot, VerifyInfo } from './chat';
+import type { ApprovalDecisionSource, ApprovalRequest, CompletionInfo, DiagnosticsInfo, PlanSnapshot, SubtaskUpdate, VerifyInfo } from './chat';
 
 /** 待审批项：SSE 事件 + 归属会话，用于切会话时不串卡片；resolved 存在表示已被处理（用户/超时/停止） */
 export interface PendingApproval extends ApprovalRequest {
@@ -357,6 +357,8 @@ export interface UiMessage {
   diagnostics?: DiagnosticsInfo;
   /** P5-06：最近一次项目验证结果 */
   verify?: VerifyInfo;
+  /** R7c：本轮串行子智能体的最新状态（按 subtaskId 去重） */
+  subtasks?: SubtaskUpdate[];
   /** R7b：进程重启中断后保留的断点 Run，可在气泡上点「继续执行」 */
   resumableRunId?: number;
 }

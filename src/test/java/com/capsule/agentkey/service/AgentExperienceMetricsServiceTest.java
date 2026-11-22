@@ -54,7 +54,7 @@ class AgentExperienceMetricsServiceTest {
         for (long id = 1; id <= 100; id++) {
             runs.add(run(id, USER_ID, null, 0));
         }
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID))
                 .thenReturn(runs);
         when(eventRepository.findFirstModelChunkTimes(anyList())).thenReturn(List.of());
         when(approvalRepository
@@ -65,7 +65,7 @@ class AgentExperienceMetricsServiceTest {
 
         assertEquals(100, metrics.windowRuns());
         List<Long> expectedRunIds = runs.stream().map(AgentRun::getId).toList();
-        verify(runRepository).findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID);
+        verify(runRepository).findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID);
         verify(eventRepository).findFirstModelChunkTimes(expectedRunIds);
         verify(approvalRepository)
                 .findTop100ByUserIdAndDecisionTimeIsNotNullOrderByCreateTimeDescIdDesc(USER_ID);
@@ -81,7 +81,7 @@ class AgentExperienceMetricsServiceTest {
             runs.add(run(id, USER_ID, BASE_TIME, tokens));
             firstChunks.addFirst(firstChunk(id, BASE_TIME.plus(id * 100, ChronoUnit.MILLIS)));
         }
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID))
                 .thenReturn(runs);
         when(eventRepository.findFirstModelChunkTimes(anyList())).thenReturn(firstChunks);
         when(approvalRepository
@@ -114,7 +114,7 @@ class AgentExperienceMetricsServiceTest {
 
     @Test
     void returnsNullForEmptySamples() {
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID))
                 .thenReturn(List.of());
         when(approvalRepository
                 .findTop100ByUserIdAndDecisionTimeIsNotNullOrderByCreateTimeDescIdDesc(USER_ID))
@@ -144,9 +144,9 @@ class AgentExperienceMetricsServiceTest {
         AgentRun otherRun = run(202L, OTHER_USER_ID, BASE_TIME, 9000);
         FirstModelChunkTime ownChunk = firstChunk(101L, BASE_TIME.plus(100, ChronoUnit.MILLIS));
         FirstModelChunkTime otherChunk = firstChunk(202L, BASE_TIME.plus(900, ChronoUnit.MILLIS));
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID))
                 .thenReturn(List.of(ownRun));
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(OTHER_USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(OTHER_USER_ID))
                 .thenReturn(List.of(otherRun));
         when(eventRepository.findFirstModelChunkTimes(anyList())).thenAnswer(invocation -> {
             List<Long> runIds = invocation.getArgument(0);
@@ -184,7 +184,7 @@ class AgentExperienceMetricsServiceTest {
 
     @Test
     void groupsApprovalMetricsByEntry() {
-        when(runRepository.findTop100ByUserIdOrderByCreateTimeDescIdDesc(USER_ID))
+        when(runRepository.findTop100ByUserIdAndParentRunIdIsNullOrderByCreateTimeDescIdDesc(USER_ID))
                 .thenReturn(List.of());
         when(approvalRepository
                 .findTop100ByUserIdAndDecisionTimeIsNotNullOrderByCreateTimeDescIdDesc(USER_ID))
@@ -286,3 +286,4 @@ class AgentExperienceMetricsServiceTest {
         }
     }
 }
+

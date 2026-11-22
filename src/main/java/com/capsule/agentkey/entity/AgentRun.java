@@ -51,6 +51,17 @@ public class AgentRun {
     @Column(length = 128)
     private String clientRequestId;
 
+    /**
+     * R7c：父 Run id；顶层 Run 为空，子智能体 Run 指向发起委派的父 Run。
+     *
+     * <p>顶层历史、最近会话 Run、运行中列表与用量查询都只统计 parentRunId 为空的 Run。
+     */
+    private Long parentRunId;
+
+    /** R7c：父 Run 内稳定的子任务标识；与 parentRunId 一起唯一，保证重试不重复建 Run */
+    @Column(length = 80)
+    private String delegationId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private RunState state;

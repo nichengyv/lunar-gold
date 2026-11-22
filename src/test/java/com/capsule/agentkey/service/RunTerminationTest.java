@@ -143,4 +143,35 @@ class RunTerminationTest {
         assertEquals("NO_VERIFICATION_REQUIRED", completion.reason());
         assertFalse(completion.filesChanged());
     }
+
+    @Test
+    void 存在未验收子任务时父Run不得完成() {
+        AgentRunService runService = org.mockito.Mockito.mock(AgentRunService.class);
+        com.capsule.agentkey.entity.AgentRun failed = new com.capsule.agentkey.entity.AgentRun();
+        failed.setId(9L);
+        failed.setState(com.capsule.agentkey.entity.AgentRun.RunState.FAILED);
+        org.mockito.Mockito.when(runService.findSubtasks(1L)).thenReturn(List.of(failed));
+        RunTermination withSubtasks = new RunTermination(PlanEvidenceService.withLocator(
+                (userId, projectId) -> workspace), runService);
+
+        var completion = withSubtasks.candidateCompletion(false, false, false);
+
+        assertEquals(CompletionStatus.INCOMPLETE, completion.status());
+        assertEquals("SUBTASK_NOT_ACCEPTED", completion.reason());
+    }
+
+    @Test
+    void 子任务全部验收成功时父Run可以完成() {
+        AgentRunService runService = org.mockito.Mockito.mock(AgentRunService.class);
+        com.capsule.agentkey.entity.AgentRun ok = new com.capsule.agentkey.entity.AgentRun();
+        ok.setId(10L);
+        ok.setState(com.capsule.agentkey.entity.AgentRun.RunState.SUCCEEDED);
+        org.mockito.Mockito.when(runService.findSubtasks(1L)).thenReturn(List.of(ok));
+        RunTermination withSubtasks = new RunTermination(PlanEvidenceService.withLocator(
+                (userId, projectId) -> workspace), runService);
+
+        var completion = withSubtasks.candidateCompletion(false, false, false);
+
+        assertEquals(CompletionStatus.COMPLETED, completion.status());
+    }
 }

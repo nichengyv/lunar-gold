@@ -94,4 +94,29 @@ describe('streamChat', () => {
 
     expect(resolved).toEqual([['ap-1', 'APPROVE', 'BATCH', 'bt-1']]);
   });
+
+  it('R7c：解析子任务状态事件', async () => {
+    const payloads = [
+      'event: subtask\ndata: {"type":"status","parentRunId":11,"childRunId":31,"subtaskId":"s1","status":"RUNNING","message":"开始"}\n\n',
+      'event: done\ndata: {}\n\n'
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(realBody(payloads), { status: 200 })));
+
+    const updates: Array<Record<string, unknown>> = [];
+    await streamChat(
+      { message: 'hi' } as never,
+      {
+        onSubtask: (update) => updates.push(update as unknown as Record<string, unknown>)
+      }
+    );
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        type: 'status',
+        childRunId: 31,
+        subtaskId: 's1',
+        status: 'RUNNING'
+      })
+    ]);
+  });
 });

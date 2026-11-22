@@ -109,4 +109,22 @@ class ChatStreamBridgeTest {
             channel.emitter().complete();
         }
     }
+
+    @Test
+    void 子任务状态只写父Run的轻量SUBTASK事件() {
+        ChatSseChannel channel = ChatSseChannel.open(1L);
+        try {
+            ChatStreamBridge bridge = newBridge(channel);
+
+            bridge.onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate.status(
+                    99L, 700L, "sub-a", "RUNNING", "子任务开始执行"));
+
+            verify(agentRunService).appendEvent(eq(99L),
+                    eq(AgentRunEvent.EventType.SUBTASK), anyMap());
+            verify(agentRunService, never()).succeedIfActive(anyLong(), any());
+            verify(agentRunService, never()).cancelIfActive(anyLong(), anyString());
+        } finally {
+            channel.emitter().complete();
+        }
+    }
 }

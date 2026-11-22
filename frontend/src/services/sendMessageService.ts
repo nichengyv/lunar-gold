@@ -140,6 +140,13 @@ async function runStream(
         onUserQuestion: (q) => {
           question.ask(q);
         },
+        // R7c：子智能体状态——同一 subtaskId 只保留最新一条
+        onSubtask: (update) => {
+          if (!aiMsg.subtasks) aiMsg.subtasks = [];
+          const index = aiMsg.subtasks.findIndex((item) => item.subtaskId === update.subtaskId);
+          if (index >= 0) aiMsg.subtasks[index] = update;
+          else aiMsg.subtasks.push(update);
+        },
         // 同一文件被多次改动时只保留最新一条，避免面板里重复堆叠
         onFileChange: (change: FileChange) => {
           if (!aiMsg.changes) aiMsg.changes = [];

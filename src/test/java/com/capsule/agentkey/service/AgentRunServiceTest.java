@@ -404,4 +404,51 @@ class AgentRunServiceTest {
         assertTrue(cap.getAllValues().stream()
                 .anyMatch(e -> e.getEventType() == EventType.CANCELED));
     }
+
+    @Test
+    void createSubtask建立父子关系并使用稳定幂等键() {
+        when(runRepo.findByParentRunIdAndDelegationId(88L, "del-1:sub-a"))
+                .thenReturn(Optional.empty());
+        when(runRepo.save(any(AgentRun.class))).thenAnswer(inv -> {
+            AgentRun toSave = inv.getArgument(0);
+            toSave.setId(42L);
+            return toSave;
+        });
+
+        AgentRunService.CreateResult result = service.createSubtask(88L, 1L, 2L, 3L,
+                "del-1:sub-a", "{\"subtaskId\":\"sub-a\"}");
+
+        assertTrue(result.created());
+        assertEquals(42L, result.run().getId());
+
+        ArgumentCaptor<AgentRun> cap = ArgumentCaptor.forClass(AgentRun.class);
+        verify(runRepo).save(cap.capture());
+        AgentRun created = cap.getValue();
+        assertEquals(88L, created.getParentRunId());
+        assertEquals("del-1:sub-a", created.getDelegationId());
+        assertEquals("subtask:88:del-1:sub-a", created.getClientRequestId());
+        assertEquals(RunState.QUEUED, created.getState());
+        assertEquals(1L, created.getUserId());
+        assertEquals(2L, created.getSessionId());
+        assertEquals(3L, created.getProjectId());
+
+        ArgumentCaptor<AgentRunEvent> events = ArgumentCaptor.forClass(AgentRunEvent.class);
+        verify(eventRepo).save(events.capture());
+        assertEquals(EventType.STATE_CHANGED, events.getValue().getEventType());
+    }
+
+    @Test
+    void createSubtask幂等命中直接复用已有子Run() {
+        AgentRun existing = run(41L, RunState.SUCCEEDED);
+        when(runRepo.findByParentRunIdAndDelegationId(88L, "del-1:sub-a"))
+                .thenReturn(Optional.of(existing));
+
+        AgentRunService.CreateResult result = service.createSubtask(88L, 1L, 2L, 3L,
+                "del-1:sub-a", "{\"subtaskId\":\"sub-a\"}");
+
+        assertFalse(result.created());
+        assertEquals(41L, result.run().getId());
+        verify(runRepo, never()).save(any(AgentRun.class));
+        verify(eventRepo, never()).save(any(AgentRunEvent.class));
+    }
 }

@@ -1,5 +1,7 @@
 package com.capsule.agentkey.agent.run;
 
+import com.capsule.agentkey.agent.subtask.SubtaskResult;
+import com.capsule.agentkey.agent.subtask.SubtaskSpec;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -58,4 +60,25 @@ public class RunCheckpoint {
 
     /** 断点写入时间（ISO 字符串），仅用于排查；用字符串避免依赖 ObjectMapper 的 JSR310 模块 */
     private String savedAt;
+
+    /**
+     * R7c：尚未完成的委派断点。
+     *
+     * <p>父 Run 在启动子任务前与每个子任务终结后写入；全部子任务结果与
+     * {@code delegate_subtasks} 的 tool 响应进入权威消息后清除。
+     * 续跑时据此复用已验收成功的子 Run、恢复可续跑子 Run，并从下一个未完成下标继续。
+     */
+    private PendingDelegation pendingDelegation;
+
+    /** 委派执行进度：完整规格、已产生结果、下一子任务下标与原始 toolCallId */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PendingDelegation {
+        private String delegationId;
+        private List<SubtaskSpec> specs;
+        private int nextIndex;
+        private List<SubtaskResult> results;
+        private String toolCallId;
+    }
 }

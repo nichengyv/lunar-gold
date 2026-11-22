@@ -16,6 +16,7 @@ import type {
   RunUsage,
   SourceRef,
   StreamPayload,
+  SubtaskUpdate,
   UserQuestion,
   VerifyInfo
 } from '../types/chat';
@@ -42,6 +43,8 @@ export interface StreamHooks {
   ) => void;
   /** P7-06：agent 暂停等用户回答决策询问（ask_user_question 工具） */
   onUserQuestion?: (question: UserQuestion) => void;
+  /** R7c：串行子智能体状态更新 */
+  onSubtask?: (update: SubtaskUpdate) => void;
   onContent?: (fullText: string, chunk: string) => void;
   onSources?: (sources: SourceRef[]) => void;
   onFileChange?: (change: FileChange) => void;
@@ -169,6 +172,13 @@ async function consumeStream(
       case 'user_question':
         try {
           hooks.onUserQuestion?.(JSON.parse(data) as UserQuestion);
+        } catch {
+          /* 忽略解析失败 */
+        }
+        break;
+      case 'subtask':
+        try {
+          hooks.onSubtask?.(JSON.parse(data) as SubtaskUpdate);
         } catch {
           /* 忽略解析失败 */
         }
