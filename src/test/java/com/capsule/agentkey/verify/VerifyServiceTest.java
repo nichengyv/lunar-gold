@@ -199,6 +199,24 @@ class VerifyServiceTest {
     }
 
     @Test
+    void 后端与前端同仓库时按顺序验证两条命令() throws Exception {
+        Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+        Files.writeString(workspace.resolve("package.json"),
+                "{\"scripts\":{\"build\":\"vite build\"}}");
+        when(commandService.run(anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(success("ok"));
+
+        VerifyResult result = service.verify(workspace, 1, new AtomicBoolean(false));
+
+        assertEquals(VerifyResult.Status.PASSED, result.status());
+        assertEquals(2, result.commands().size());
+        assertEquals("mvn -B -q -DskipTests compile", result.commands().get(0).command());
+        assertEquals("npm run build", result.commands().get(1).command());
+        assertTrue(result.message().contains("自动探测自 pom.xml+package.json"),
+                "结论必须列出全部自动来源：" + result.message());
+    }
+
+    @Test
     void 自动探测可关闭且关闭后仍报未配置() throws Exception {
         Files.writeString(workspace.resolve("pom.xml"), "<project/>");
         properties.setAutoDetect(false);

@@ -71,18 +71,23 @@ public class VerifyService {
         }
         if (config == null) {
             //R7c L5：没有显式配置时按构建文件自动探测，让完成判定仍能走工具验证
-            VerifyCommandDetector.Detected detected = properties.isAutoDetect()
+            List<VerifyCommandDetector.Detected> detected = properties.isAutoDetect()
                     ? VerifyCommandDetector.detect(root, properties.getAutoDetectTimeoutSeconds())
-                            .orElse(null)
-                    : null;
-            if (detected == null) {
+                    : List.of();
+            if (detected.isEmpty()) {
                 //R7c L5：连构建文件都没有时，退回纯 Java 源码的有界全量编译
                 return verifyJavaSources(root, safeAttempt, configPath, cancelled);
             }
-            config = new VerifyConfig(Boolean.TRUE, 0, List.of(detected.command()));
-            autoSource = detected.source();
-            log.info("验证命令自动探测: workspace={}, source={}, command={}",
-                    root, autoSource, detected.command().command());
+            // 后端 + 前端同仓库等场景按固定顺序逐条验证，避免只覆盖其中一种构建
+            config = new VerifyConfig(Boolean.TRUE, 0, detected.stream()
+                    .map(VerifyCommandDetector.Detected::command)
+                    .toList());
+            autoSource = String.join("+", detected.stream()
+                    .map(VerifyCommandDetector.Detected::source)
+                    .distinct()
+                    .toList());
+            log.info("验证命令自动探测: workspace={}, source={}, commands={}", root, autoSource,
+                    detected.stream().map(d -> d.command().command()).toList());
         }
 
         int maxAttempts = maxAttempts(config);
