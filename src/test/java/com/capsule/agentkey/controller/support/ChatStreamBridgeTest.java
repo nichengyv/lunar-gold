@@ -11,11 +11,16 @@ import com.capsule.agentkey.tool.ToolResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -123,6 +128,65 @@ class ChatStreamBridgeTest {
                     eq(AgentRunEvent.EventType.SUBTASK), anyMap());
             verify(agentRunService, never()).succeedIfActive(anyLong(), any());
             verify(agentRunService, never()).cancelIfActive(anyLong(), anyString());
+        } finally {
+            channel.emitter().complete();
+        }
+    }
+
+    @Test
+    void 子任务审批只落SUBTASK事件且不暂停父Run() {
+        ChatSseChannel channel = ChatSseChannel.open(1L);
+        try {
+            ChatStreamBridge bridge = newBridge(channel);
+
+            bridge.onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate.approval(
+                    99L, 700L, "sub-a", "ap-9", "run_command",
+                    Map.of("command", "dir"), "EXECUTE", 123L));
+
+            verify(agentRunService).appendEvent(eq(99L), eq(AgentRunEvent.EventType.SUBTASK),
+                    argThat(map -> "approval".equals(map.get("type"))
+                            && Long.valueOf(700L).equals(map.get("childRunId"))
+                            && "sub-a".equals(map.get("subtaskId"))));
+            verify(agentRunService, never()).pauseForApproval(anyLong(), anyString(), anyString());
+        } finally {
+            channel.emitter().complete();
+        }
+    }
+
+    @Test
+    void 子任务审批结果不恢复父Run() {
+        ChatSseChannel channel = ChatSseChannel.open(1L);
+        try {
+            ChatStreamBridge bridge = newBridge(channel);
+
+            bridge.onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate.approvalResolved(
+                    99L, 700L, "sub-a", "ap-9", "APPROVE", "USER", null));
+
+            verify(agentRunService).appendEvent(eq(99L), eq(AgentRunEvent.EventType.SUBTASK),
+                    argThat(map -> "approval_resolved".equals(map.get("type"))
+                            && Long.valueOf(700L).equals(map.get("childRunId"))));
+            verify(agentRunService, never()).resumeAfterApproval(anyLong(), anyString(),
+                    anyString(), any());
+        } finally {
+            channel.emitter().complete();
+        }
+    }
+
+    @Test
+    void 子任务询问只落SUBTASK事件且不暂停父Run() {
+        ChatSseChannel channel = ChatSseChannel.open(1L);
+        try {
+            ChatStreamBridge bridge = newBridge(channel);
+
+            bridge.onSubtask(com.capsule.agentkey.agent.subtask.SubtaskUpdate.question(
+                    99L, 700L, "sub-a", "q-1", "选哪个？", "子任务询问",
+                    List.of(Map.of("label", "A")), false));
+
+            verify(agentRunService).appendEvent(eq(99L), eq(AgentRunEvent.EventType.SUBTASK),
+                    argThat(map -> "question".equals(map.get("type"))
+                            && Long.valueOf(700L).equals(map.get("childRunId"))));
+            verify(agentRunService, never()).pauseForUserInput(anyLong(), anyString(), anyString(),
+                    anyString(), any(), anyBoolean());
         } finally {
             channel.emitter().complete();
         }

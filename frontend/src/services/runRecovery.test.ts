@@ -22,6 +22,30 @@ describe('replayRunEvents', () => {
     expect(recovered.subtasks[1]).toMatchObject({ subtaskId: 's2', status: 'FAILED' });
   });
 
+  it('子任务审批与询问按 subtaskId 去重并保留类型', () => {
+    const recovered = replayRunEvents([
+      event('SUBTASK', {
+        type: 'approval', childRunId: 7, subtaskId: 's1',
+        status: 'WAITING_APPROVAL', message: '子任务需要审批：write_file'
+      }, 1),
+      event('SUBTASK', {
+        type: 'approval_resolved', childRunId: 7, subtaskId: 's1', status: 'RUNNING'
+      }, 2),
+      event('SUBTASK', {
+        type: 'question', childRunId: 8, subtaskId: 's2',
+        status: 'WAITING_USER_INPUT'
+      }, 3)
+    ]);
+
+    expect(recovered.subtasks).toHaveLength(2);
+    expect(recovered.subtasks[0]).toMatchObject({
+      subtaskId: 's1', type: 'approval_resolved', status: 'RUNNING'
+    });
+    expect(recovered.subtasks[1]).toMatchObject({
+      subtaskId: 's2', type: 'question', status: 'WAITING_USER_INPUT'
+    });
+  });
+
   it('取最后一个 MODEL_CHUNK 检查点并标记截断', () => {
     const recovered = replayRunEvents([
       event('MODEL_CHUNK', { text: '第一段', length: 3 }, 1),

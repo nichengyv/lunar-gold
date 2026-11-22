@@ -119,4 +119,25 @@ describe('streamChat', () => {
       })
     ]);
   });
+
+  it('R7c：子任务审批事件保留 childRunId 归属', async () => {
+    const payloads = [
+      'event: approval_required\ndata: {"approvalId":"ap-c","tool":"write_file","risk":"WRITE","runId":31,"subtaskId":"s1"}\n\n',
+      'event: done\ndata: {}\n\n'
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(realBody(payloads), { status: 200 })));
+
+    const approvals: Array<Record<string, unknown>> = [];
+    await streamChat(
+      { message: 'hi' } as never,
+      {
+        onApprovalRequired: (approval) =>
+          approvals.push(approval as unknown as Record<string, unknown>)
+      }
+    );
+
+    expect(approvals).toEqual([
+      expect.objectContaining({ approvalId: 'ap-c', runId: 31, subtaskId: 's1' })
+    ]);
+  });
 });

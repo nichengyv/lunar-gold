@@ -174,6 +174,46 @@ class ContextAssemblerTest {
                 .contains("【历史检索记忆】")));
     }
 
+    @Test
+    void 检索记忆注入不破坏assistant与tool的配对顺序() {
+        ContextAssembler assembler = new ContextAssembler(false, null,
+                new ContextCondenser(new ContextCondenser.Settings(60, 60, 3), null),
+                retriever());
+        ObjectNode assistant = mapper.createObjectNode();
+        assistant.put("role", "assistant");
+        assistant.put("content", "调用工具");
+        ObjectNode call = assistant.putArray("tool_calls").addObject();
+        call.put("id", "call-1");
+        call.put("type", "function");
+        call.set("function", mapper.createObjectNode()
+                .put("name", "read_file").put("arguments", "{\"path\":\"a.txt\"}"));
+        ObjectNode tool = mapper.createObjectNode();
+        tool.put("role", "tool");
+        tool.put("tool_call_id", "call-1");
+        tool.put("content", "alpha 文件内容");
+        List<ObjectNode> base = List.of(
+                system("你是助手"),
+                user("alpha 旧任务需要记住 verifyOptions"),
+                assistant,
+                tool,
+                user("alpha 继续"));
+        List<String> before = base.stream().map(ObjectNode::toString).toList();
+
+        List<ObjectNode> result = assembler.assemble(base);
+
+        assertEquals(before, base.stream().map(ObjectNode::toString).toList(),
+                "权威消息不得被修改");
+        assertEquals(5, result.size());
+        assertEquals("user", result.get(1).path("role").asText());
+        assertTrue(result.get(1).path("content").asText().startsWith("【历史检索记忆】"));
+        assertEquals("assistant", result.get(2).path("role").asText());
+        assertEquals("call-1", result.get(2).path("tool_calls").get(0).path("id").asText());
+        assertEquals("tool", result.get(3).path("role").asText());
+        assertEquals("call-1", result.get(3).path("tool_call_id").asText(),
+                "tool 响应必须紧跟在对应的 assistant 调用之后");
+        assertEquals("alpha 继续", result.get(4).path("content").asText());
+    }
+
     private ObjectNode system(String content) {
         ObjectNode message = mapper.createObjectNode();
         message.put("role", "system");

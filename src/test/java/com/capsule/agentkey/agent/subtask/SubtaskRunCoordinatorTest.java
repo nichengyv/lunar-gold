@@ -2,11 +2,13 @@ package com.capsule.agentkey.agent.subtask;
 
 import com.capsule.agentkey.agent.run.PlanEvidenceService;
 import com.capsule.agentkey.agent.run.PlanStep;
+import com.capsule.agentkey.agent.run.RunCheckpoint;
 import com.capsule.agentkey.agent.run.RunContext;
 import com.capsule.agentkey.entity.AgentRun;
 import com.capsule.agentkey.entity.AgentRun.RunState;
 import com.capsule.agentkey.service.AgentRunService;
 import com.capsule.agentkey.service.ReActAgentService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -14,6 +16,7 @@ import org.mockito.Mockito;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,6 +78,11 @@ class SubtaskRunCoordinatorTest {
     }
 
     private List<SubtaskResult> delegate(List<SubtaskSpec> specs, AtomicBoolean cancel) {
+        return delegate(specs, cancel, null);
+    }
+
+    private List<SubtaskResult> delegate(List<SubtaskSpec> specs, AtomicBoolean cancel,
+                                         SubtaskRunCoordinator.ProgressSink sink) {
         return coordinator.delegate("key", new com.capsule.agentkey.service.AgentPolicy(
                         "model", com.capsule.agentkey.service.AgentPolicy.Reasoning.STANDARD,
                         com.capsule.agentkey.service.AgentPolicy.Permission.AUTO),
@@ -86,7 +95,7 @@ class SubtaskRunCoordinatorTest {
                     @Override public void onChunk(String chunk) {}
                     @Override public void onComplete() {}
                     @Override public void onError(Throwable t) {}
-                }, null, null);
+                }, null, sink);
     }
 
     @Test
@@ -161,6 +170,7 @@ class SubtaskRunCoordinatorTest {
         assertTrue(executed.isEmpty());
         assertEquals(SubtaskResult.SUCCEEDED, results.get(0).status());
         assertEquals("REUSED", results.get(0).reason());
+        verify(runService, never()).addSubtaskUsageToParent(anyLong(), anyLong());
     }
 
     @Test
@@ -196,5 +206,80 @@ class SubtaskRunCoordinatorTest {
         assertTrue(results.isEmpty());
         verify(runService, never()).createSubtask(anyLong(), any(), any(), any(), anyString(),
                 anyString());
+    }
+
+    @Test
+    void 可续跑子Run加载断点后继续执行() {
+        AgentRun failed = child(150L, RunState.FAILED);
+        failed.setErrorCode("PROCESS_RESTARTED");
+        failed.setCheckpointJson("{}");
+        RunCheckpoint checkpoint = new RunCheckpoint();
+        checkpoint.setRound(1);
+        ObjectMapper mapper = new ObjectMapper();
+        checkpoint.setMessages(new ArrayList<>(List.of(
+                mapper.createObjectNode().put("role", "user").put("content", "继续"))));
+        when(runService.createSubtask(anyLong(), any(), any(), any(), anyString(), anyString()))
+                .thenReturn(new AgentRunService.CreateResult(failed, false));
+        when(runService.loadCheckpoint(150L)).thenReturn(Optional.of(checkpoint));
+
+        List<RunCheckpoint> resumedFrom = new ArrayList<>();
+        build(request -> {
+            executed.add(request.spec().id());
+            resumedFrom.add(request.resumeFrom());
+            RunContext context = RunContext.create(request.childRunId(), request.userId(),
+                    request.projectId(), request.sessionId(), null,
+                    new AtomicBoolean(false), List.of(), null);
+            return new SubtaskRunCoordinator.Execution(context, "续跑完成", null);
+        }, 4);
+
+        List<SubtaskResult> results = delegate(List.of(spec("s1")), new AtomicBoolean(false));
+
+        assertEquals(List.of("s1"), executed);
+        assertEquals(SubtaskResult.SUCCEEDED, results.get(0).status());
+        assertEquals(List.of(checkpoint), resumedFrom, "必须把断点交给子执行入口");
+        verify(runService).resumeInterrupted(150L);
+    }
+
+    @Test
+    void 可续跑子Run缺少断点时安全失败() {
+        AgentRun failed = child(151L, RunState.FAILED);
+        failed.setErrorCode("PROCESS_RESTARTED");
+        failed.setCheckpointJson("{}");
+        when(runService.createSubtask(anyLong(), any(), any(), any(), anyString(), anyString()))
+                .thenReturn(new AgentRunService.CreateResult(failed, false));
+        when(runService.loadCheckpoint(151L)).thenReturn(Optional.empty());
+        build(recordingRunner(), 4);
+
+        List<SubtaskResult> results = delegate(List.of(spec("s1")), new AtomicBoolean(false));
+
+        assertTrue(executed.isEmpty());
+        assertEquals("SUBTASK_NO_CHECKPOINT", results.get(0).reason());
+        verify(runService, never()).resumeInterrupted(anyLong());
+    }
+
+    @Test
+    void 子Run处于不可恢复状态时标记冲突() {
+        when(runService.createSubtask(anyLong(), any(), any(), any(), anyString(), anyString()))
+                .thenReturn(new AgentRunService.CreateResult(
+                        child(152L, RunState.RUNNING), false));
+        build(recordingRunner(), 4);
+
+        List<SubtaskResult> results = delegate(List.of(spec("s1")), new AtomicBoolean(false));
+
+        assertTrue(executed.isEmpty());
+        assertEquals("SUBTASK_STATE_CONFLICT", results.get(0).reason());
+        verify(runService).failIfActive(eq(152L), eq("SUBTASK_STATE_CONFLICT"), anyString());
+    }
+
+    @Test
+    void 每个子任务结束后保存进度断点() {
+        build(recordingRunner(), 4);
+        List<Integer> progresses = new ArrayList<>();
+
+        List<SubtaskResult> results = delegate(List.of(spec("s1"), spec("s2")),
+                new AtomicBoolean(false), (r, nextIndex) -> progresses.add(nextIndex));
+
+        assertEquals(2, results.size());
+        assertEquals(List.of(1, 2), progresses, "每个子任务终结后都要推进委派断点");
     }
 }

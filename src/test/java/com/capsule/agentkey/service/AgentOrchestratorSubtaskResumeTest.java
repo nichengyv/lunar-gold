@@ -143,6 +143,81 @@ class AgentOrchestratorSubtaskResumeTest {
                 "进度断点必须推进到下一个未完成下标");
     }
 
+    @Test
+    void 全部子任务已验收时只补委派tool响应且不重放() throws Exception {
+        Files.writeString(workspace.resolve("a.txt"), "ok", StandardCharsets.UTF_8);
+
+        ScriptedAgentClient client = new ScriptedAgentClient(List.of(
+                ScriptedAgentClient.ScriptedTurn.ofText("汇总完成")));
+        AgentRunService runService = mock(AgentRunService.class);
+        when(runService.findSubtasks(PARENT_RUN_ID)).thenReturn(List.of(
+                childRun(910L), childRun(911L)));
+
+        List<String> executed = new ArrayList<>();
+        PlanEvidenceService evidence = PlanEvidenceService.withLocator(
+                (userId, projectId) -> workspace);
+        SubtaskRunCoordinator coordinator = new SubtaskRunCoordinator(runService, evidence,
+                request -> {
+                    executed.add(request.spec().id());
+                    RunContext context = RunContext.create(request.childRunId(), USER_ID,
+                            PROJECT_ID, SESSION_ID, null, new AtomicBoolean(false),
+                            List.of(), null);
+                    return new SubtaskRunCoordinator.Execution(context, "不应执行", null);
+                }, 4);
+
+        PlanStep.Acceptance acceptance = new PlanStep.Acceptance(
+                List.of(new PlanStep.Artifact("a.txt", List.of("ok"))), false);
+        List<SubtaskSpec> specs = List.of(
+                new SubtaskSpec("sub-a", "完成A", acceptance),
+                new SubtaskSpec("sub-b", "完成B", acceptance));
+        List<SubtaskResult> done = List.of(
+                new SubtaskResult("sub-a", 910L, SubtaskResult.SUCCEEDED, "ACCEPTED", "A完成"),
+                new SubtaskResult("sub-b", 911L, SubtaskResult.SUCCEEDED, "ACCEPTED", "B完成"));
+
+        ObjectMapper mapper = new ObjectMapper();
+        List<ObjectNode> messages = new ArrayList<>();
+        messages.add(mapper.createObjectNode().put("role", "user").put("content", "执行委派"));
+        messages.add(mapper.createObjectNode().put("role", "assistant").putNull("content"));
+
+        RunCheckpoint resume = new RunCheckpoint();
+        resume.setRound(2);
+        resume.setMessages(new ArrayList<>(messages));
+        resume.setPendingDelegation(new RunCheckpoint.PendingDelegation(
+                "del-1", specs, 2, new ArrayList<>(done), "call-1"));
+
+        List<RunCheckpoint> checkpoints = new ArrayList<>();
+        Capture capture = new Capture();
+        AgentOrchestrator.Invocation invocation = new AgentOrchestrator.Invocation(
+                "test-key",
+                new AgentPolicy("scripted", AgentPolicy.Reasoning.FAST, AgentPolicy.Permission.AUTO),
+                messages, List.of(), "", workspace.toString(), USER_ID, PROJECT_ID, SESSION_ID,
+                new AtomicBoolean(false), capture, null, null, PARENT_RUN_ID, resume,
+                checkpoints::add, coordinator, null);
+
+        AgentOrchestrator orchestrator = new AgentOrchestrator(client,
+                mock(ToolExecutor.class), mock(FileChangeService.class),
+                mock(VerifyService.class), mock(AskUserQuestionTool.class), runService,
+                (content, limit) -> content,
+                new AgentOrchestrator.Limits(3, 4, 0, 0), evidence);
+
+        orchestrator.run(invocation);
+
+        assertTrue(executed.isEmpty(), "全部子任务已验收时不得重放");
+        assertEquals(1, client.modelCalls(), "续跑后只发起一次正常推理");
+
+        ObjectNode toolResponse = client.messageSnapshots().get(0).stream()
+                .filter(m -> "tool".equals(m.path("role").asText()))
+                .findFirst().orElse(null);
+        assertNotNull(toolResponse, "必须补齐委派 tool 响应");
+        assertEquals("call-1", toolResponse.path("tool_call_id").asText());
+        assertTrue(toolResponse.path("content").asText().contains("sub-a"));
+        assertTrue(toolResponse.path("content").asText().contains("sub-b"));
+
+        assertNotNull(capture.completion);
+        assertEquals(ReActAgentService.CompletionStatus.COMPLETED, capture.completion.status(),
+                "全部子 Run SUCCEEDED 时父 Run 才允许 COMPLETED");
+    }
+
     private static AgentRun childRun(long id) {
         AgentRun run = new AgentRun();
         run.setId(id);
