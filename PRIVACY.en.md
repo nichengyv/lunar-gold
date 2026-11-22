@@ -86,9 +86,12 @@ source code, conversations, knowledge bases, the database, model keys,
    directly to the third-party service: web search to Tavily (with your own
    Tavily key), weather to `wttr.in` and Open-Meteo, and page fetching to the URL
    you specify. Results are returned to the model as tool output.
-4. **MCP servers.** If you configure MCP servers, the app connects to them.
-   Those servers may contact their own services; their behavior is outside this
-   policy.
+4. **MCP servers.** If you configure MCP servers — including local stdio servers
+   you add in Settings — the app starts and connects to them as configured. Those
+   servers may contact their own services; their behavior is outside this policy.
+   User-added server configurations are stored in the local database, their
+   environment variables are encrypted with a local key, and Settings only shows
+   variable names, never values. Commands run locally with your user privileges.
 
 The desktop edition does **not** send usage analytics, telemetry, crash reports,
 device identifiers or advertising data to the maintainers.
