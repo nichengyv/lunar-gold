@@ -60,7 +60,7 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 | 工作 | 当前状态 / 下一步 | 验收 |
 |---|---|---|
-| 最新 Windows 安装器最小回归 | **已完成**（2026-11-10）；发布基线哈希 `3E085FAB…9022`，22 项检查全通过 | 安装、首启、卸载通过；目录、注册项、health 和进程状态正确 |
+| 最新 Windows 安装器最小回归 | **已完成**（2026-11-10）；发布基线哈希 `3E085FAB…9022`，22 项检查全通过。**0.1.3 复验（2026-11-22）**：安装、首启 `/actuator/health=UP`、正常退出无残留、静默卸载清理均通过；安装包 330,235,757 字节，SHA-256 `DCB11A78…EAED` | 安装、首启、卸载通过；目录、注册项、health 和进程状态正确 |
 | Windows 应用与安装器签名 | **SignPath Foundation 申请已被拒**（2026-11-10，缺公开可见度信号）；改按未签名发布并在 README 明示提示，待可见度积累后重申或评估商业/Azure 证书 | Authenticode 为 `Valid`，发布者与实际证书一致，可信时间戳有效 |
 | GitHub Release | **已完成**（2026-11-10）：`v0.1.1` 为正式 Release（非 prerelease），`/releases/latest` 指向它；资产为 `LunarGold-Setup-0.1.1.exe`（371,688,816 字节，SHA-256 `5ECB4371…6400B`）、`.blockmap`、`latest.yml`（声明 v0.1.1，sha512/size 与实际一致）、`SHA256SUMS.txt`。未签名声明与 SHA-256 已写入 Release 说明和 README | 从 Release 重新下载后哈希一致，干净机器安装/首启/首个任务/卸载通过 |
 | macOS/Linux 运行时与安装包 | **暂缓**；项目所有者决定本阶段只适配 Windows | 恢复时每个 OS/arch 独立安装与首启通过，不外推 Windows 结果 |
@@ -93,7 +93,7 @@ SignPath 的 Windows 方案不覆盖 macOS Developer ID 和 Apple 公证；macOS
   - sha512 由 electron-updater 强校验；`LUNARGOLD_REQUIRE_SIGNATURE=1` 时额外校验 Authenticode（SignPath 接入后开启）。
 - [x] 升级前备份数据目录；数据库迁移失败不得删除工作区、会话、知识库或 uploads。
   - 备份整目录到 `~/.lunargold/backup/<旧版本>-<时间戳>`，保留最近 2 份；安装前写 `upgrade-state.json` 标记，首启成功自动清理，失败保留证据目录 `*.failed-<时间戳>`。
-  - 工作区为用户自选目录、`uploads/` 在安装目录，升级与回滚均未删除。
+  - 工作区为用户自选目录、`uploads/` 自 0.1.3 起位于数据目录，升级与回滚均未删除。
 - [x] 验证 N-1 → N 的下载、退出、安装、重启和首启。
   - 本地 generic 源实测 `0.1.1 → 0.1.2`：下载 → 备份 → 静默安装 → 重启 → 首启成功 → 标记清理；`local-token` 哈希、`db` 数据、用户 canary 文件均完整。
 - [x] 模拟下载中断、磁盘不足、签名错误、安装失败和迁移失败，确认旧版本可恢复。
@@ -147,7 +147,7 @@ macOS/Linux 恢复时分别补充独立打包、签名/公证与首启验收，�
 - [x] 开源许可证：Apache-2.0（`LICENSE`，P3-04 已完成）。
 - [x] 第三方组件清单：新增根目录 `NOTICE`，覆盖 Electron / Chromium / Node.js / electron-updater、Temurin JDK 21 运行时、PostgreSQL 16.11 + pgvector 0.8.7、前端依赖和 243 个 Maven 组件；按许可证分组并注明测试作用域差异。
 - [x] SBOM：`SBOM.json`（Java，CycloneDX 1.6，243 个组件）+ `SBOM.frontend.json` + `SBOM.desktop.json` + `SBOM.runtime.json`（Electron、裁剪 JRE、内嵌 PostgreSQL 16.11、pgvector 0.8.7，含哈希与外部引用）；四份均由 `scripts/build-compliance.ps1` 生成并校验可解析、组件非空。
-- [x] 隐私政策重写 `PRIVACY.md`（2026-11-11）：本地数据目录逐项说明；本地诊断的报告位置、10 份上限、白名单与脱敏、导出内容、无自动上传；自动更新访问 GitHub Releases；模型 / 向量服务商、内置联网工具（Tavily、wttr.in、Open-Meteo、网页抓取）与 MCP 的网络边界；卸载保留 `%USERPROFILE%\.lunargold`、删除安装目录内 uploads。
+- [x] 隐私政策重写 `PRIVACY.md`（2026-11-11）：本地数据目录逐项说明；本地诊断的报告位置、10 份上限、白名单与脱敏、导出内容、无自动上传；自动更新访问 GitHub Releases；模型 / 向量服务商、内置联网工具（Tavily、wttr.in、Open-Meteo、网页抓取）与 MCP 的网络边界；卸载保留 `%USERPROFILE%\.lunargold`（含 uploads）。
 - [x] 服务条款新增 `TERMS.md`：Apache-2.0 授权不变、审批与备份责任、BYOK 费用、第三方服务、无担保与责任限制、Web 版账号与终止。
 - [x] README 扩充：SHA-256 校验命令、首启说明、自动更新行为、卸载保留行为、基础故障排查、合规文件入口；修正原先「sends nothing anywhere」的不准确表述。
 - [x] 文档语言：中文为主，英文对照版保留在 `README.en.md`、`PRIVACY.en.md`、`TERMS.en.md`、`NOTICE.en`，各文档首页互相链接；`SBOM.json` 保持机器可读的英文标识。

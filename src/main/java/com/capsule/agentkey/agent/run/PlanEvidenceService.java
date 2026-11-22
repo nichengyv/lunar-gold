@@ -3,6 +3,7 @@ package com.capsule.agentkey.agent.run;
 import com.capsule.agentkey.service.ProjectService;
 import com.capsule.agentkey.verify.VerifyResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -48,6 +49,7 @@ public class PlanEvidenceService {
 
     private final WorkspaceLocator locator;
 
+    @Autowired
     public PlanEvidenceService(ProjectService projectService) {
         this.locator = (userId, projectId) -> {
             if (userId == null || projectService == null) {

@@ -33,7 +33,7 @@ Lunar Gold 是免费的开源软件。本政策说明桌面应用与可选的 We
 
 - `%USERPROFILE%\.lunargold\updater.log` — 自动更新日志。
 - `%USERPROFILE%\.lunargold\backup\<旧版本>-<时间戳>` — 升级前的数据目录备份，只保留最近两份。
-- 应用工作目录下的 `uploads\documents` 与 `uploads\chat-attachments`（通过快捷方式正常启动时即安装目录）— 知识库文件与对话附件。
+- 数据目录下的 `uploads\documents` 与 `uploads\chat-attachments`（默认 `%USERPROFILE%\.lunargold\desktop\uploads`）— 知识库文件与对话附件。
 
 你可以随时查看、备份或删除这些文件。删除数据目录会重置应用。
 
@@ -54,7 +54,7 @@ Lunar Gold 是免费的开源软件。本政策说明桌面应用与可选的 We
 
 ### 卸载与数据保留
 
-- 卸载会删除程序文件，包括私有运行时和安装目录内的 `uploads` 文件夹。
+- 卸载会删除程序文件，包括私有运行时；数据目录（含其中的 `uploads`）会**保留**。
 - `%USERPROFILE%\.lunargold` 下的数据目录（数据库、`aes.key`、`local-token`、日志、诊断报告）和 `backup` 文件夹会**保留**，以便重装后继续使用。需要彻底清除时请手动删除该文件夹。
 - 诊断报告本地最多保留 10 份，可随时删除。
 

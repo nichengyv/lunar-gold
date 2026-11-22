@@ -40,7 +40,7 @@ Get-FileHash .\LunarGold-Setup-x.y.z.exe -Algorithm SHA256
 
 ### 卸载
 
-在 Windows 设置 → 应用 中卸载。卸载会删除程序文件，包括私有运行时和安装目录内的对话/知识库附件；**数据目录 `%USERPROFILE%\.lunargold` 会保留**（数据库、加密密钥、local-token、日志、诊断报告、升级备份），需要彻底清除时请手动删除。
+在 Windows 设置 → 应用 中卸载。卸载会删除程序文件，包括私有运行时；**数据目录 `%USERPROFILE%\.lunargold` 会保留**（数据库、加密密钥、local-token、日志、诊断报告、升级备份、对话/知识库附件），需要彻底清除时请手动删除。
 
 ## 隐私与网络行为
 

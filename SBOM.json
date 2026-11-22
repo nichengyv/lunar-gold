@@ -4,7 +4,7 @@
   "serialNumber" : "urn:uuid:870a779e-4a38-3e85-9354-06e821568abb",
   "version" : 1,
   "metadata" : {
-    "timestamp" : "2026-11-12T06:32:19Z",
+    "timestamp" : "2026-11-22T12:52:47Z",
     "lifecycles" : [
       {
         "phase" : "build"
@@ -3025,151 +3025,6 @@
         {
           "type" : "vcs",
           "url" : "https://github.com/spring-projects/spring-boot"
-        }
-      ]
-    },
-    {
-      "type" : "library",
-      "bom-ref" : "pkg:maven/org.springframework.boot/spring-boot-jpa@4.1.2?type=jar",
-      "publisher" : "VMware, Inc.",
-      "group" : "org.springframework.boot",
-      "name" : "spring-boot-jpa",
-      "version" : "4.1.2",
-      "description" : "Spring Boot JPA",
-      "scope" : "required",
-      "hashes" : [
-        {
-          "alg" : "MD5",
-          "content" : "52a7d102c0b5f1995137854344d0314d"
-        },
-        {
-          "alg" : "SHA-1",
-          "content" : "84251095bfd543894393bba4a7e2551abde088c0"
-        },
-        {
-          "alg" : "SHA-256",
-          "content" : "3afd067fed0732e28b3b45f276d50d90ed1345d7f864857566dcf0ef7923427a"
-        },
-        {
-          "alg" : "SHA-512",
-          "content" : "f9f64a50420d1efbceadda6726229f054a1bebbd9181a903e9b5290034258a3f071b773ea889d55c4f5c7aeab5a4bf1dfa9071782f1d07ed0fdc947fa5644cc1"
-        },
-        {
-          "alg" : "SHA-384",
-          "content" : "5ee4096af016b637ad4c5ba1def317b0af85e1e3c487b3e5820b7daa7b1fbbe3be860edabfae09e6cf3e6e10981e230f"
-        },
-        {
-          "alg" : "SHA3-384",
-          "content" : "5a36944296957c814addf6852e9817ea1e4f347b5d71cc81491114455cb0c9d1a2fe0528b81ba84ad61a3fb5b5c31683"
-        },
-        {
-          "alg" : "SHA3-256",
-          "content" : "2b2024e0a97147d72c57f33d8bd0000962d897ab77afc1f7a4d368cbf3705877"
-        },
-        {
-          "alg" : "SHA3-512",
-          "content" : "bb26976ad651b338538c3f1ed394866a0bac7bf7a353a37da68146aa9551b011fc9e2ae775aa4b673dbe014033a39c733e753ab6ad1cee6c2a85de7ad59dfc96"
-        }
-      ],
-      "licenses" : [
-        {
-          "license" : {
-            "id" : "Apache-2.0"
-          }
-        }
-      ],
-      "purl" : "pkg:maven/org.springframework.boot/spring-boot-jpa@4.1.2?type=jar",
-      "externalReferences" : [
-        {
-          "type" : "website",
-          "url" : "https://spring.io/projects/spring-boot"
-        },
-        {
-          "type" : "issue-tracker",
-          "url" : "https://github.com/spring-projects/spring-boot/issues"
-        },
-        {
-          "type" : "vcs",
-          "url" : "https://github.com/spring-projects/spring-boot"
-        }
-      ]
-    },
-    {
-      "type" : "library",
-      "bom-ref" : "pkg:maven/jakarta.persistence/jakarta.persistence-api@3.2.0?type=jar",
-      "publisher" : "Eclipse Foundation",
-      "group" : "jakarta.persistence",
-      "name" : "jakarta.persistence-api",
-      "version" : "3.2.0",
-      "description" : "Eclipse Enterprise for Java (EE4J) is an open source initiative to create standard APIs, implementations of those APIs, and technology compatibility kits for Java runtimes that enable development, deployment, and management of server-side and cloud-native applications.",
-      "scope" : "required",
-      "hashes" : [
-        {
-          "alg" : "MD5",
-          "content" : "79acec18d202797dcba1fff596a47684"
-        },
-        {
-          "alg" : "SHA-1",
-          "content" : "bb75a113f3fa191c2c7ee7b206d8e674251b3129"
-        },
-        {
-          "alg" : "SHA-256",
-          "content" : "be8a26b0e75c84c1b7600f759256fbc68d60333d89ec0ce3f784fc3ffa09aa8c"
-        },
-        {
-          "alg" : "SHA-512",
-          "content" : "2913707daaad67506551f016fb582612cf76565386b48e9b27ac96ac72f5763ecd1bf8b25fdb06ea94e57782eeaaf6378c709d13221634a23dabbadf3eeadb18"
-        },
-        {
-          "alg" : "SHA-384",
-          "content" : "26b919c9c720a6ef60ee071787099b9f72096870132bd0df05a258b25ce465e3f0bc0bd9196cd39def76ddf2d22f0e6c"
-        },
-        {
-          "alg" : "SHA3-384",
-          "content" : "0469ec95cf94bc641edad7085a1afcea5a9533090617900fb1e41c9b3e817bfec560a861ea3271fbd2701b41ab463c36"
-        },
-        {
-          "alg" : "SHA3-256",
-          "content" : "991f44eb42c824663e55cc0e3dd70447381806021d7a1cbffebf51c316112a7a"
-        },
-        {
-          "alg" : "SHA3-512",
-          "content" : "2e094d39690bee54c2933cbe4de425d65ed965739526cff65a4f6265d85df1dcec0b71cba9629405880cf4141daeb435489c9f27d708d148072202867ee541a0"
-        }
-      ],
-      "licenses" : [
-        {
-          "license" : {
-            "id" : "EPL-2.0"
-          }
-        },
-        {
-          "license" : {
-            "id" : "BSD-3-Clause"
-          }
-        }
-      ],
-      "purl" : "pkg:maven/jakarta.persistence/jakarta.persistence-api@3.2.0?type=jar",
-      "externalReferences" : [
-        {
-          "type" : "website",
-          "url" : "https://github.com/jakartaee/persistence"
-        },
-        {
-          "type" : "distribution-intake",
-          "url" : "https://jakarta.oss.sonatype.org/service/local/staging/deploy/maven2/"
-        },
-        {
-          "type" : "issue-tracker",
-          "url" : "https://github.com/jakartaee/persistence/issues"
-        },
-        {
-          "type" : "mailing-list",
-          "url" : "https://dev.eclipse.org/mhonarc/lists/jpa-dev/"
-        },
-        {
-          "type" : "vcs",
-          "url" : "https://github.com/jakartaee/persistence.git"
         }
       ]
     },
@@ -10840,6 +10695,72 @@
     },
     {
       "type" : "library",
+      "bom-ref" : "pkg:maven/org.springframework/spring-core@7.0.10?type=jar",
+      "publisher" : "Spring IO",
+      "group" : "org.springframework",
+      "name" : "spring-core",
+      "version" : "7.0.10",
+      "description" : "Spring Core",
+      "scope" : "required",
+      "hashes" : [
+        {
+          "alg" : "MD5",
+          "content" : "d0f471a1d80bd6dfffefe621b2e56755"
+        },
+        {
+          "alg" : "SHA-1",
+          "content" : "0746da81d290cf89a64b9659596cc851af34f60a"
+        },
+        {
+          "alg" : "SHA-256",
+          "content" : "a236f31a7c07e3a1a8e7839ec5c0d47b5cc75709132db50416d5dad320341f12"
+        },
+        {
+          "alg" : "SHA-512",
+          "content" : "72954550c5ccb9b656875a2d58d445a444bd5bda21cae84be4a136984125d18aeab1e9acf49b1a3fb0aa546cc22d889fda331c7410e33cfcf743a6634aaa72c9"
+        },
+        {
+          "alg" : "SHA-384",
+          "content" : "5bc05aa25d620783cdf388779dddb7c4e32ed33b4ced1613d0f5a1415d3517d2534e4c7b9b2a2ec2d183f9b4e7635a2a"
+        },
+        {
+          "alg" : "SHA3-384",
+          "content" : "9218a76322d7f349c478e4fe41cfe43fb0a0019a3e45da2423ecbd84cae0f46c8ce77f1c278b2c7a5eb8c0905a51ff21"
+        },
+        {
+          "alg" : "SHA3-256",
+          "content" : "553b15940861853f84eb5b7185fe6fb2b75cb9ba9d53b658fb3354d0c4b1ef24"
+        },
+        {
+          "alg" : "SHA3-512",
+          "content" : "9a43505a77949d46d9c9637d1eb9bee28119ac0ba72bc0289c8efc23b1830a4a10934166414e75d4082aee56c14f164aced5570a59bb81e9328970076aa6ef3c"
+        }
+      ],
+      "licenses" : [
+        {
+          "license" : {
+            "id" : "Apache-2.0"
+          }
+        }
+      ],
+      "purl" : "pkg:maven/org.springframework/spring-core@7.0.10?type=jar",
+      "externalReferences" : [
+        {
+          "type" : "website",
+          "url" : "https://github.com/spring-projects/spring-framework"
+        },
+        {
+          "type" : "issue-tracker",
+          "url" : "https://github.com/spring-projects/spring-framework/issues"
+        },
+        {
+          "type" : "vcs",
+          "url" : "https://github.com/spring-projects/spring-framework"
+        }
+      ]
+    },
+    {
+      "type" : "library",
       "bom-ref" : "pkg:maven/org.junit.jupiter/junit-jupiter@6.0.3?type=jar",
       "group" : "org.junit.jupiter",
       "name" : "junit-jupiter",
@@ -11328,45 +11249,45 @@
     },
     {
       "type" : "library",
-      "bom-ref" : "pkg:maven/org.springframework/spring-core@7.0.10?type=jar",
-      "publisher" : "Spring IO",
-      "group" : "org.springframework",
-      "name" : "spring-core",
-      "version" : "7.0.10",
-      "description" : "Spring Core",
+      "bom-ref" : "pkg:maven/org.springframework.boot/spring-boot-jpa@4.1.2?type=jar",
+      "publisher" : "VMware, Inc.",
+      "group" : "org.springframework.boot",
+      "name" : "spring-boot-jpa",
+      "version" : "4.1.2",
+      "description" : "Spring Boot JPA",
       "scope" : "required",
       "hashes" : [
         {
           "alg" : "MD5",
-          "content" : "d0f471a1d80bd6dfffefe621b2e56755"
+          "content" : "52a7d102c0b5f1995137854344d0314d"
         },
         {
           "alg" : "SHA-1",
-          "content" : "0746da81d290cf89a64b9659596cc851af34f60a"
+          "content" : "84251095bfd543894393bba4a7e2551abde088c0"
         },
         {
           "alg" : "SHA-256",
-          "content" : "a236f31a7c07e3a1a8e7839ec5c0d47b5cc75709132db50416d5dad320341f12"
+          "content" : "3afd067fed0732e28b3b45f276d50d90ed1345d7f864857566dcf0ef7923427a"
         },
         {
           "alg" : "SHA-512",
-          "content" : "72954550c5ccb9b656875a2d58d445a444bd5bda21cae84be4a136984125d18aeab1e9acf49b1a3fb0aa546cc22d889fda331c7410e33cfcf743a6634aaa72c9"
+          "content" : "f9f64a50420d1efbceadda6726229f054a1bebbd9181a903e9b5290034258a3f071b773ea889d55c4f5c7aeab5a4bf1dfa9071782f1d07ed0fdc947fa5644cc1"
         },
         {
           "alg" : "SHA-384",
-          "content" : "5bc05aa25d620783cdf388779dddb7c4e32ed33b4ced1613d0f5a1415d3517d2534e4c7b9b2a2ec2d183f9b4e7635a2a"
+          "content" : "5ee4096af016b637ad4c5ba1def317b0af85e1e3c487b3e5820b7daa7b1fbbe3be860edabfae09e6cf3e6e10981e230f"
         },
         {
           "alg" : "SHA3-384",
-          "content" : "9218a76322d7f349c478e4fe41cfe43fb0a0019a3e45da2423ecbd84cae0f46c8ce77f1c278b2c7a5eb8c0905a51ff21"
+          "content" : "5a36944296957c814addf6852e9817ea1e4f347b5d71cc81491114455cb0c9d1a2fe0528b81ba84ad61a3fb5b5c31683"
         },
         {
           "alg" : "SHA3-256",
-          "content" : "553b15940861853f84eb5b7185fe6fb2b75cb9ba9d53b658fb3354d0c4b1ef24"
+          "content" : "2b2024e0a97147d72c57f33d8bd0000962d897ab77afc1f7a4d368cbf3705877"
         },
         {
           "alg" : "SHA3-512",
-          "content" : "9a43505a77949d46d9c9637d1eb9bee28119ac0ba72bc0289c8efc23b1830a4a10934166414e75d4082aee56c14f164aced5570a59bb81e9328970076aa6ef3c"
+          "content" : "bb26976ad651b338538c3f1ed394866a0bac7bf7a353a37da68146aa9551b011fc9e2ae775aa4b673dbe014033a39c733e753ab6ad1cee6c2a85de7ad59dfc96"
         }
       ],
       "licenses" : [
@@ -11376,19 +11297,98 @@
           }
         }
       ],
-      "purl" : "pkg:maven/org.springframework/spring-core@7.0.10?type=jar",
+      "purl" : "pkg:maven/org.springframework.boot/spring-boot-jpa@4.1.2?type=jar",
       "externalReferences" : [
         {
           "type" : "website",
-          "url" : "https://github.com/spring-projects/spring-framework"
+          "url" : "https://spring.io/projects/spring-boot"
         },
         {
           "type" : "issue-tracker",
-          "url" : "https://github.com/spring-projects/spring-framework/issues"
+          "url" : "https://github.com/spring-projects/spring-boot/issues"
         },
         {
           "type" : "vcs",
-          "url" : "https://github.com/spring-projects/spring-framework"
+          "url" : "https://github.com/spring-projects/spring-boot"
+        }
+      ]
+    },
+    {
+      "type" : "library",
+      "bom-ref" : "pkg:maven/jakarta.persistence/jakarta.persistence-api@3.2.0?type=jar",
+      "publisher" : "Eclipse Foundation",
+      "group" : "jakarta.persistence",
+      "name" : "jakarta.persistence-api",
+      "version" : "3.2.0",
+      "description" : "Eclipse Enterprise for Java (EE4J) is an open source initiative to create standard APIs, implementations of those APIs, and technology compatibility kits for Java runtimes that enable development, deployment, and management of server-side and cloud-native applications.",
+      "scope" : "required",
+      "hashes" : [
+        {
+          "alg" : "MD5",
+          "content" : "79acec18d202797dcba1fff596a47684"
+        },
+        {
+          "alg" : "SHA-1",
+          "content" : "bb75a113f3fa191c2c7ee7b206d8e674251b3129"
+        },
+        {
+          "alg" : "SHA-256",
+          "content" : "be8a26b0e75c84c1b7600f759256fbc68d60333d89ec0ce3f784fc3ffa09aa8c"
+        },
+        {
+          "alg" : "SHA-512",
+          "content" : "2913707daaad67506551f016fb582612cf76565386b48e9b27ac96ac72f5763ecd1bf8b25fdb06ea94e57782eeaaf6378c709d13221634a23dabbadf3eeadb18"
+        },
+        {
+          "alg" : "SHA-384",
+          "content" : "26b919c9c720a6ef60ee071787099b9f72096870132bd0df05a258b25ce465e3f0bc0bd9196cd39def76ddf2d22f0e6c"
+        },
+        {
+          "alg" : "SHA3-384",
+          "content" : "0469ec95cf94bc641edad7085a1afcea5a9533090617900fb1e41c9b3e817bfec560a861ea3271fbd2701b41ab463c36"
+        },
+        {
+          "alg" : "SHA3-256",
+          "content" : "991f44eb42c824663e55cc0e3dd70447381806021d7a1cbffebf51c316112a7a"
+        },
+        {
+          "alg" : "SHA3-512",
+          "content" : "2e094d39690bee54c2933cbe4de425d65ed965739526cff65a4f6265d85df1dcec0b71cba9629405880cf4141daeb435489c9f27d708d148072202867ee541a0"
+        }
+      ],
+      "licenses" : [
+        {
+          "license" : {
+            "id" : "EPL-2.0"
+          }
+        },
+        {
+          "license" : {
+            "id" : "BSD-3-Clause"
+          }
+        }
+      ],
+      "purl" : "pkg:maven/jakarta.persistence/jakarta.persistence-api@3.2.0?type=jar",
+      "externalReferences" : [
+        {
+          "type" : "website",
+          "url" : "https://github.com/jakartaee/persistence"
+        },
+        {
+          "type" : "distribution-intake",
+          "url" : "https://jakarta.oss.sonatype.org/service/local/staging/deploy/maven2/"
+        },
+        {
+          "type" : "issue-tracker",
+          "url" : "https://github.com/jakartaee/persistence/issues"
+        },
+        {
+          "type" : "mailing-list",
+          "url" : "https://dev.eclipse.org/mhonarc/lists/jpa-dev/"
+        },
+        {
+          "type" : "vcs",
+          "url" : "https://github.com/jakartaee/persistence.git"
         }
       ]
     },

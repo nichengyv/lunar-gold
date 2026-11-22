@@ -43,9 +43,9 @@ Related locations:
 - `%USERPROFILE%\.lunargold\updater.log` — auto-update log.
 - `%USERPROFILE%\.lunargold\backup\<old-version>-<timestamp>` — pre-upgrade
   backups of the data directory; the two most recent are kept.
-- `uploads\documents` and `uploads\chat-attachments` under the app's working
-  directory (the installation directory for a normal shortcut launch) —
-  knowledge-base files and chat attachments.
+- `uploads\documents` and `uploads\chat-attachments` under the data directory
+  (by default `%USERPROFILE%\.lunargold\desktop\uploads`) — knowledge-base
+  files and chat attachments.
 
 You can inspect, back up or delete any of these files at any time. Deleting the
 data directory resets the app.
@@ -98,8 +98,8 @@ device identifiers or advertising data to the maintainers.
 
 ### Uninstall and data retention
 
-- Uninstalling removes the program files, including the bundled runtime and the
-  `uploads` folder inside the installation directory.
+- Uninstalling removes the program files, including the bundled runtime. The
+  data directory (including its `uploads` folder) is **kept**.
 - The data directory under `%USERPROFILE%\.lunargold` (database, `aes.key`,
   `local-token`, logs, diagnostic reports) and the `backup` folder are **kept**
   so that reinstalling preserves your work. Delete that folder manually to

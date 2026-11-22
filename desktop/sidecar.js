@@ -177,6 +177,12 @@ function isAlive(pid) {
  */
 async function startSidecar({ javaCmd, jarPath, env, logPath, timeoutMs = 120000 }) {
   const port = await findFreePort();
+  // 与后端 app.desktop.data-dir 的默认值保持一致，用于按 postmaster.pid 终止内嵌数据库
+  const dataDir = (env && env.DESKTOP_DATA_DIR) || path.join(os.homedir(), '.lunargold', 'desktop');
+  // 侧车的工作目录必须是可写且持久的位置：后端上传目录按 user.dir 拼接
+  // （<user.dir>/uploads），继承 Electron 的启动目录时，从“运行”对话框或
+  // 无写权限的目录启动会把上传目录解析到 C:\Windows\System32\uploads 并直接启动失败。
+  fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const log = fs.createWriteStream(logPath, { flags: 'a' });
   log.write(`\n===== ${new Date().toISOString()} 启动侧车 port=${port} jar=${jarPath} =====\n`);
@@ -191,6 +197,7 @@ async function startSidecar({ javaCmd, jarPath, env, logPath, timeoutMs = 120000
     ],
     {
       env,
+      cwd: dataDir,
       windowsHide: true,
       // 独立进程组，便于 POSIX 下整组终止
       detached: process.platform !== 'win32',
@@ -201,8 +208,6 @@ async function startSidecar({ javaCmd, jarPath, env, logPath, timeoutMs = 120000
   child.stdout.pipe(log);
   child.stderr.pipe(log);
 
-  // 与后端 app.desktop.data-dir 的默认值保持一致，用于按 postmaster.pid 终止内嵌数据库
-  const dataDir = (env && env.DESKTOP_DATA_DIR) || path.join(os.homedir(), '.lunargold', 'desktop');
   const handle = { child, port, url: `http://127.0.0.1:${port}/`, dataDir };
   try {
     await waitForHealth(port, timeoutMs, child, logPath);
