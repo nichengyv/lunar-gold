@@ -58,49 +58,79 @@
       :close-on-click-modal="false"
     >
       <div class="mcp-form">
-        <label class="mcp-field">
-          <span>名称</span>
-          <el-input v-model="form.name" placeholder="例如 github、postgres" maxlength="40" />
-          <small>用于工具名前缀，添加后不要随意修改。</small>
-        </label>
-        <label class="mcp-field">
-          <span>命令</span>
-          <el-input v-model="form.command" placeholder="例如 npx、uvx、node" />
-          <small>Windows 下 .cmd 需要写全名，例如 npx.cmd。</small>
-        </label>
-        <label class="mcp-field">
-          <span>启动参数</span>
-          <el-input
-            v-model="form.argsText"
-            type="textarea"
-            :rows="3"
-            placeholder="每行一个参数，例如&#10;-y&#10;@modelcontextprotocol/server-github"
-          />
-        </label>
-        <label class="mcp-field">
-          <span>环境变量</span>
-          <el-input
-            v-model="form.envText"
-            type="textarea"
-            :rows="3"
-            :placeholder="envPlaceholder"
-          />
-          <small>每行一个 KEY=VALUE；值只写不读，保存后不再回显。</small>
-        </label>
-        <div v-if="editingId != null && existingEnvKeys.length" class="mcp-env-existing">
-          已保存：{{ existingEnvKeys.join(', ') }}
-          <el-button link type="danger" size="small" @click="clearEnv = true; form.envText = ''">
-            清空
+        <div v-if="editingId == null" class="mcp-mode-switch">
+          <el-button size="small" :type="addMode === 'json' ? 'primary' : undefined" @click="addMode = 'json'">
+            粘贴 JSON
           </el-button>
+          <el-button size="small" :type="addMode === 'form' ? 'primary' : undefined" @click="addMode = 'form'">
+            表单填写
+          </el-button>
+          <span v-if="addMode === 'json'" class="mcp-mode-hint">从 MCP Server 介绍页复制配置 JSON 粘贴即可</span>
         </div>
-        <label class="mcp-field inline">
-          <span>启用</span>
-          <el-switch v-model="form.enabled" />
-        </label>
-        <div class="mcp-warning">
-          <Icon name="alert" :size="13" />
-          命令会以当前用户权限在本机执行。只添加可信来源，并要求其通过审批后才会被模型调用。
-        </div>
+
+        <template v-if="isJsonMode">
+          <el-input
+            v-model="jsonText"
+            type="textarea"
+            :rows="14"
+            class="mcp-json-input"
+            :input-style="jsonInputStyle"
+            :placeholder="jsonPlaceholder"
+          />
+          <div v-if="jsonError" class="mcp-json-error">
+            <Icon name="alert" :size="12" /> {{ jsonError }}
+          </div>
+          <div class="mcp-warning">
+            <Icon name="alert" :size="13" />
+            命令会以当前用户权限在本机执行。只添加可信来源，并要求其通过审批后才会被模型调用。
+          </div>
+        </template>
+
+        <template v-else>
+          <label class="mcp-field">
+            <span>名称</span>
+            <el-input v-model="form.name" placeholder="例如 github、postgres" maxlength="40" />
+            <small>用于工具名前缀，添加后不要随意修改。</small>
+          </label>
+          <label class="mcp-field">
+            <span>命令</span>
+            <el-input v-model="form.command" placeholder="例如 npx、uvx、node" />
+            <small>Windows 下 .cmd 需要写全名，例如 npx.cmd。</small>
+          </label>
+          <label class="mcp-field">
+            <span>启动参数</span>
+            <el-input
+              v-model="form.argsText"
+              type="textarea"
+              :rows="3"
+              placeholder="每行一个参数，例如&#10;-y&#10;@modelcontextprotocol/server-github"
+            />
+          </label>
+          <label class="mcp-field">
+            <span>环境变量</span>
+            <el-input
+              v-model="form.envText"
+              type="textarea"
+              :rows="3"
+              :placeholder="envPlaceholder"
+            />
+            <small>每行一个 KEY=VALUE；值只写不读，保存后不再回显。</small>
+          </label>
+          <div v-if="editingId != null && existingEnvKeys.length" class="mcp-env-existing">
+            已保存：{{ existingEnvKeys.join(', ') }}
+            <el-button link type="danger" size="small" @click="clearEnv = true; form.envText = ''">
+              清空
+            </el-button>
+          </div>
+          <label class="mcp-field inline">
+            <span>启用</span>
+            <el-switch v-model="form.enabled" />
+          </label>
+          <div class="mcp-warning">
+            <Icon name="alert" :size="13" />
+            命令会以当前用户权限在本机执行。只添加可信来源，并要求其通过审批后才会被模型调用。
+          </div>
+        </template>
       </div>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -125,6 +155,26 @@ const dialogVisible = ref(false);
 const editingId = ref<number | null>(null);
 const existingEnvKeys = ref<string[]>([]);
 const clearEnv = ref(false);
+const addMode = ref<'json' | 'form'>('json');
+const jsonText = ref('');
+const jsonError = ref('');
+
+/** 仅「新增」支持 JSON 粘贴；编辑走表单（凭证值不回显，无法还原 JSON） */
+const isJsonMode = computed(() => editingId.value == null && addMode.value === 'json');
+
+const jsonInputStyle = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontSize: '12px',
+  lineHeight: '1.6'
+};
+
+const jsonPlaceholder = [
+  '粘贴配置 JSON，支持以下写法：',
+  '1) Claude Desktop 风格',
+  '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_TOKEN": "ghp_xxx" } } } }',
+  '2) 单个 server',
+  '{ "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }',
+].join('\n');
 
 const form = reactive({
   name: '',
@@ -157,6 +207,9 @@ function openCreate() {
   editingId.value = null;
   existingEnvKeys.value = [];
   clearEnv.value = false;
+  addMode.value = 'json';
+  jsonText.value = '';
+  jsonError.value = '';
   Object.assign(form, { name: '', command: '', argsText: '', envText: '', enabled: true });
   dialogVisible.value = true;
 }
@@ -165,6 +218,8 @@ function openEdit(server: McpServerConfig) {
   editingId.value = server.id;
   existingEnvKeys.value = server.envKeys;
   clearEnv.value = false;
+  addMode.value = 'form';
+  jsonError.value = '';
   Object.assign(form, {
     name: server.name,
     command: server.command,
@@ -176,6 +231,10 @@ function openEdit(server: McpServerConfig) {
 }
 
 async function save() {
+  if (isJsonMode.value) {
+    await saveFromJson();
+    return;
+  }
   const args = form.argsText.split('\n').map(line => line.trim()).filter(Boolean);
   let env: Record<string, string> | null;
   if (clearEnv.value) {
@@ -213,6 +272,100 @@ async function save() {
   } finally {
     saving.value = false;
   }
+}
+
+/** JSON 粘贴导入：支持 Claude Desktop 的 mcpServers 包裹、单 server、以及 {名称: 配置} 映射 */
+async function saveFromJson() {
+  jsonError.value = '';
+  let entries: ParsedServer[];
+  try {
+    entries = parseServersJson(jsonText.value);
+  } catch (e) {
+    jsonError.value = errorText(e);
+    return;
+  }
+  saving.value = true;
+  try {
+    for (const entry of entries) {
+      await mcpApi.createMcpServer({
+        name: entry.name,
+        command: entry.command,
+        args: entry.args,
+        env: entry.env ?? {},
+        enabled: true
+      });
+    }
+    dialogVisible.value = false;
+    ElMessage.success(
+      entries.length > 1 ? `已导入 ${entries.length} 个 MCP server，正在连接` : '已保存，正在连接 MCP server'
+    );
+  } catch (e) {
+    ElMessage.error(errorText(e));
+  } finally {
+    saving.value = false;
+    await load();
+  }
+}
+
+interface ParsedServer {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string> | null;
+}
+
+function parseServersJson(text: string): ParsedServer[] {
+  const raw = text.trim();
+  if (!raw) {
+    throw new Error('请先粘贴 MCP server 配置 JSON');
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error('JSON 格式有误，请检查括号、引号与逗号');
+  }
+  if (!isPlainObject(data)) {
+    throw new Error('JSON 顶层必须是对象');
+  }
+
+  let entries: Array<[string, Record<string, unknown>]>;
+  if (isPlainObject(data.mcpServers)) {
+    entries = Object.entries(data.mcpServers)
+      .filter(([, value]) => isPlainObject(value))
+      .map(([key, value]) => [key, value as Record<string, unknown>]);
+  } else if (typeof data.command === 'string') {
+    entries = [[typeof data.name === 'string' ? data.name : '', data]];
+  } else {
+    entries = Object.entries(data)
+      .filter(([, value]) => isPlainObject(value) && typeof (value as Record<string, unknown>).command === 'string')
+      .map(([key, value]) => [key, value as Record<string, unknown>]);
+  }
+
+  if (entries.length === 0) {
+    throw new Error('没找到配置：需要 command 字段，或用 {"mcpServers": {...}} 包裹');
+  }
+
+  return entries.map(([key, value], index) => {
+    const command = typeof value.command === 'string' ? value.command.trim() : '';
+    if (!command) {
+      throw new Error(`第 ${index + 1} 项缺少 command`);
+    }
+    const name = (typeof value.name === 'string' && value.name.trim()) || key.trim() || command;
+    const args = Array.isArray(value.args) ? value.args.map(item => String(item)) : [];
+    let env: Record<string, string> | null = null;
+    if (isPlainObject(value.env)) {
+      env = {};
+      for (const [envKey, envValue] of Object.entries(value.env)) {
+        env[envKey] = String(envValue);
+      }
+    }
+    return { name, command, args, env };
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function toggle(server: McpServerConfig, enabled: boolean) {
@@ -460,5 +613,24 @@ function errorText(error: unknown) {
   line-height: 1.6;
   color: var(--text-muted);
   background: var(--surface-2);
+}
+.mcp-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mcp-mode-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.mcp-json-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c2410c;
+  word-break: break-word;
 }
 </style>

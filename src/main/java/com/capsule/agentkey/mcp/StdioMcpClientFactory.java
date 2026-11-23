@@ -44,7 +44,7 @@ public class StdioMcpClientFactory implements McpClientFactory {
                     "StdioMcpClientFactory 仅支持 STDIO，不支持 " + spec.transportType()
                             + "；远程传输（HTTP/SSE）尚未实现");
         }
-        ServerParameters parameters = ServerParameters.builder(spec.command())
+        ServerParameters parameters = ServerParameters.builder(normalizeCommand(spec.command()))
                 .args(spec.args() == null ? List.of() : spec.args())
                 .env(spec.env() == null ? Map.of() : spec.env())
                 .build();
@@ -55,5 +55,28 @@ public class StdioMcpClientFactory implements McpClientFactory {
                 .initializationTimeout(initializationTimeout)
                 .clientInfo(new McpSchema.Implementation(clientName + "-mcp", "lunar-gold"))
                 .build();
+    }
+
+    /**
+     * Windows 下 npm/npx/pnpm/yarn 实际是 .cmd 包装脚本，ProcessBuilder 不会自动补扩展名，
+     * 直接执行 "npx" 会失败。这里按平台补齐，让从官方文档复制的配置（command: "npx"）开箱可用。
+     * 非 Windows 或已带路径/扩展名的命令原样返回。
+     */
+    static String normalizeCommand(String command) {
+        if (command == null || command.isBlank()) {
+            return command;
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (!os.startsWith("windows")) {
+            return command;
+        }
+        String lower = command.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("/") || lower.contains("\\") || lower.contains(".")) {
+            return command;
+        }
+        return switch (lower) {
+            case "npx", "npm", "pnpm", "yarn" -> command + ".cmd";
+            default -> command;
+        };
     }
 }
