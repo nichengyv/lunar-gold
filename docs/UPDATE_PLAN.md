@@ -28,7 +28,7 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 - **产品类型**：对外统一称"AI 编程工作台"；"Agent Runtime / 智能体执行引擎"只用于描述模型、工具、审批、执行、状态和验证等内部机制。
 - **执行架构**：保留 ReAct 作为基础循环，以计划、代码上下文、LSP、Verify、无进展检测和评测补强；没有评测证据时，不为了架构名词改做多智能体或复杂状态图。
-- **明确不做**：不 fork VS Code，不建设"万物皆插件"的平台或插件市场，不做泛桌面自动化；模型、MCP、LSP 与未来客户端入口可以扩展，执行约束、审批、验证和恢复保持统一。
+- **明确不做**：不 fork VS Code，不做开放用户提交的插件市场/平台与泛桌面自动化；模型、MCP、LSP 与未来客户端入口可以扩展，执行约束、审批、验证和恢复保持统一。**官方 curated 插件管理中心除外**（0.1.4 规划，见 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)）：插件清单由项目所有者人工审核收录，不开放上传接口。
 - **网页端**：注册/登录、对话、知识库 RAG、附件问答和桌面端下载；不操作本地工作区、不执行命令。
 - **桌面端**：本地项目读写、命令执行、Git、MCP、LSP、审批、审查流和按轮撤回；完全本地、不强制登录。
 - **双端共用**：同一套后端和 Vue 前端，通过 `DeploymentMode`、`CapabilityService` 与 `/api/meta` 区分能力。
@@ -51,6 +51,7 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 | Phase 7 收尾改进 | P7-07 计划持久化与软回注、P7-08 停滞渐进式恢复、P7-09 长会话上下文压缩 | 三项均按 L1～L3 数据集 A/B + 预注册阈值验证；完成率不降、token/耗时退化 <15% 才保留；不引入 plan-first 控制流 |
 | Phase 8（候选） | 长任务能力建设：Run 级持久化续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | **未立项**；P7-07～P7-09 收口且 L1～L4 达标后启动；8 条验收标准（L1～L8）与排期见 13.12；2026-11-21 重规划后并入 R7 |
 | Phase 9 架构重构 | R0 安全网 → R1 状态地基 → R2 Context 瘦身 → R3 工具接缝 → R4 编排接缝 → R5 上下文接缝 → R6 前端拆分 → R7 长任务能力 | **当前主线**；每批行为保持/可回滚，先补测试再动代码；目标与验收见第 14 节 |
+| 0.1.4 插件管理中心 | 设置页 MCP tab 升级为「插件中心」：官方 curated 市场浏览 + schema-driven 一键安装 + 已装管理；阶段 1 内嵌静态目录，阶段 2 远程 JSON，阶段 3 远程传输 | 见 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)；0.1.3 收口后从 main 拉新分支启动，不动已验证的打包/schema 路径 |
 
 ---
 
@@ -275,7 +276,22 @@ M1 已交付用户自助 stdio MCP（设置页增删改、启停、重连、环�
 | 目标场景从本地开发扩展到 SaaS 工具链 | 产品决策 |
 | 主流 MCP 服务停止提供本地 stdio 或 PAT 方式 | 服务商公告 |
 
-实施前置（恢复时直接按此拆）：数据表增加 `transport/url/headers`；`McpServerRuntime` 按 transport 选工厂；设置页增加“本地/远程”；令牌加密且只写不读；远程传输补齐 TLS、超时、重定向与数据出境提示。
+实施前置（恢复时直接按此拆）：数据表增加 `transport/url/headers`；`McpServerRuntime` 按 transport 选工厂；设置页增加“本地/远程”；令牌加密且只写不读；远程传输补齐 TLS、超时、重定向与数据出境提示。传输层抽象与插件中心统一规划，见 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)（扩展现有 `McpClientFactory` 入参容纳 url/headers，不新造 transport 接口——MCP SDK 已提供 `ClientTransport` 抽象，`StdioClientTransport` / `HttpClientTransport` / `SseClientTransport` 均为 SDK 自带实现）。
+
+### 5.4 插件管理中心（0.1.4 规划）
+
+把设置页「扩展工具」tab 从手填四框的工程师配置面板，升级为用户视角的「插件中心」：市场浏览 → 一键安装 → 已装管理。
+
+核心决策（详见 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)）：
+
+- **市场数据源**：阶段 1 内嵌静态 `marketplace.json`（随包、零网络依赖）；阶段 2 换远程 JSON（GitHub 托管，可热更新），fetch 失败回退内嵌。
+- **审核机制**：官方 curated，项目所有者人工收录，不开放上传接口；UI 显示「官方收录」标识。`command` 字段能在用户机器执行任意命令，安全责任在发行方，必须 curated。
+- **安装流程**：schema-driven，用户只填凭证（如 `GITHUB_TOKEN`），不碰 command/args；安装前检测运行时依赖（node/uvx/python）。
+- **传输**：阶段 1 不加远程，仅扩展 `McpClientFactory` 入参留口子（不新造 transport 接口）；阶段 3 加 SDK 自带的 HTTP/SSE transport。
+- **数据模型**：DB 层只给 `mcp_server` 加 `plugin_id`/`plugin_version` 两列（不重构 JPA 继承）；运行时层抽 `InstallablePlugin` 接口，为未来指令模板/模型预设留扩展点。
+- **约束**：0.1.3 冻结收口，插件中心作为 0.1.4 主功能从 main 拉新分支，不碰已验证的打包/schema 路径。
+
+保留「手动添加」作为高级入口（已装 tab 右上角），给本地自写 server 的用户用。
 
 ---
 
@@ -385,7 +401,7 @@ V15 已被邮箱唯一索引占用；Phase 4 的运行状态表已使用 **V16**
 3. 网页端虚拟工作区、代码 diff 和 zip 导出。
 4. 跨设备同步和两端账号打通；握手接口仅预留。
 5. 团队协作、组织权限和 SSO。
-6. 插件或规则市场。
+6. 开放用户提交的插件或规则市场（官方 curated 插件管理中心除外，见 0.1.4 规划 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)）。
 7. 移动端和私有化部署套件。
 
 ---

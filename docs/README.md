@@ -49,6 +49,7 @@
 | [phases/phase4/tasks.md](phases/phase4/tasks.md) | Phase 4 出境验收任务清单 |
 | [phases/phase5/plan.md](phases/phase5/plan.md) | Phase 5 计划：P5-01～P5-12 设计与验收 |
 | [phases/phase5/visual-ux-preview.html](phases/phase5/visual-ux-preview.html) | Phase 5 视觉与交互原型（可直接浏览器打开） |
+| [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md) | 0.1.4 插件管理中心：curated 市场、一键安装、传输与数据模型扩展规划 |
 
 ## 排障
 

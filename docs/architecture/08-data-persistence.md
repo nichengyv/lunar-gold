@@ -63,6 +63,7 @@ User ──< Project ──< ChatSession ──< ChatMessage
   ├──< UserApiKey
   ├──< UserSetting
   ├──< AgentRule
+  ├──< McpServer
   └──< Document ──< DocumentChunk（含 vector）
 Project ──< PendingFileChange
 ```
@@ -78,6 +79,7 @@ Project ──< PendingFileChange
 | `PendingFileChange` | 按轮文件变更，支持审查与撤回 |
 | `Document` / `DocumentChunk` | 知识库文档与向量分块 |
 | `AgentRule` | 用户自定义规则 |
+| `McpServer` | 用户自助 MCP server：command/args/env（AES-GCM 加密）/启停；0.1.4 加 `plugin_id`/`plugin_version` 列，见 [../phases/phase8/plugin-center.md](../phases/phase8/plugin-center.md) |
 
 ---
 
@@ -109,6 +111,7 @@ Project ──< PendingFileChange
 - 没有分区、归档或事件清理策略；长期运行的事件表会持续增长。
 - 没有真实大数据量下的索引与查询压测。
 - 双实例共享数据库时，审批互斥与内存 Future 唤醒未解决。
+- `mcp_server` 表 0.1.4 将新增 `plugin_id`/`plugin_version` 可空列（标记市场来源与版本，手填记录为 NULL），不改变现有表结构与数据；迁移版本需按 6.1 规则选未占用号，见 [../phases/phase8/plugin-center.md](../phases/phase8/plugin-center.md)。
 
 ---
 

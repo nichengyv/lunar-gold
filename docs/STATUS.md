@@ -1,7 +1,7 @@
 # Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
-> 更新日期：2026-11-22；基线提交 `3d38de8`（R7c 四项代码完成，位于 Gitee `origin/master` 的 `f825fc4` 之后）。
+> 更新日期：2026-11-23；基线提交 `3d38de8`（R7c 四项代码完成，位于 Gitee `origin/master` 的 `f825fc4` 之后）。0.1.3 已于 2026-11-20 发布（tag `v0.1.3` 已推 GitHub/Gitee）；0.1.4 插件管理中心已规划（见 UPDATE_PLAN 5.4）。
 > 后端 **625 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **117 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
 
 ## 一句话定位
@@ -27,8 +27,8 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 - 执行中可调用 `ask_user_question` 向用户提问（仅 root agent；等待上限 15 分钟；断线可还原卡片）
 - 崩溃后仅 `RUNNING` 可手动续跑；工具副作用按 at-least-once 语义可能重复执行
 - 尚未支持自动续跑；子智能体默认关闭，仅根 Run 可委派且深度固定为 1
-- 桌面端可在设置页添加本机 stdio MCP server；其命令等同本机进程执行，只应添加可信来源
-- 远程 HTTP/SSE MCP 列为后续可选深度优化（M2），本轮暂不排期，见 UPDATE_PLAN 5.3
+- 桌面端可在设置页添加本机 stdio MCP server；其命令等同本机进程执行，只应添加可信来源；0.1.4 规划升级为「插件管理中心」（官方 curated 市场 + 一键安装），见 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)
+- 远程 HTTP/SSE MCP（M2）暂缓，随插件中心阶段 3 统一规划，见 [UPDATE_PLAN 5.3](UPDATE_PLAN.md)
 
 ## 文档导航
 
@@ -51,7 +51,7 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 | 重启残局 | `RUNNING` 崩溃 → `FAILED/PROCESS_RESTARTED` + 保留 checkpoint，用户手动续跑；`WAITING_APPROVAL` / `WAITING_USER_INPUT` 终止且不可续跑 |
 | 审批 | 挂起 120s 自动拒绝；残留审批随 Run 终止，不再接受批准 |
 | 撤销 | `revert-run` / `revert-session` 只回滚平台记录的文件改动，命令等外部副作用不撤销 |
-| MCP | 仅支持 stdio；MCP 进程失败不阻塞主流程；用户自助 server 仅桌面端，命令以当前用户权限运行，环境变量 AES-GCM 加密后存本地库 |
+| MCP | 仅支持 stdio；MCP 进程失败不阻塞主流程；用户自助 server 仅桌面端，命令以当前用户权限运行，环境变量 AES-GCM 加密后存本地库；0.1.4 规划插件中心（市场/一键安装），见 UPDATE_PLAN 5.4 |
 | 平台 | 当前只适配 Windows；PowerShell 5 与 NSIS 打包限制见 operations.md |
 | 完成判定 | 计划收口已强制（R7b 口径），验证命令支持自动探测；纯 Java 裸源码支持有界全量编译；计划步骤可声明确定性工件/验证证据契约，候选完成与收口都重新核对，证据不满足的 completed 会降级 aborted（R7c 续）；父 Run 只有在全部子 Run SUCCEEDED 后才允许 COMPLETED |
 | 子智能体 | `agent.subtasks.enabled=false` 默认关闭；开启后根 Run 可调用 `delegate_subtasks`，单次最多 4 个、串行、深度 1；子 Run 独立 state/plan/checkpoint/event，父 SSE 只转发 `subtask` 轻量状态与带 childRunId 的审批/询问 |

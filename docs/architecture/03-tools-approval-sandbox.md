@@ -106,6 +106,8 @@ Runtime 发现 tool 需要审批
 - **健康熔断**：`DOWN` 且在冷却期内直接拒绝，冷却后放行一次探测，避免每次调用都等超时。
 - **去重与失败提示**：同名工具注册时去重，失败返回可读原因。
 
+> **扩展规划（0.1.4 插件管理中心）**：当前 MCP 接入仅支持 stdio，由用户在设置页手填 command/args/env。0.1.4 规划升级为「插件中心」：传输层扩展现有 `McpClientFactory` 入参容纳 url/headers（不新造 transport 接口，MCP SDK 已提供 `ClientTransport` 抽象及 `StdioClientTransport`/`HttpClientTransport`/`SseClientTransport` 实现）；数据层 `mcp_server` 表加 `plugin_id`/`plugin_version` 两列（不重构 JPA 继承）；运行时抽 `InstallablePlugin` 接口，为未来指令模板/模型预设留扩展点；安装流程 schema-driven，用户只填凭证。详见 [../phases/phase8/plugin-center.md](../phases/phase8/plugin-center.md)。
+
 ---
 
 ## 6. 工具执行时序（单轮多工具）

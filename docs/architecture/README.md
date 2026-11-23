@@ -64,7 +64,7 @@ Lunar Gold（金月）是**本地优先、可控、可验证的 AI 编程工作�
 |---|---|---|---|---|
 | 01 | Agent Runtime | ReAct 循环、工具分发、完成判定、无进展检测 | `ReActAgentService` | [01-agent-runtime.md](01-agent-runtime.md) |
 | 02 | 模型接入 | 客户端抽象、流式调用、超时重试熔断、token 计量 | `AgentClient`、`SpringAiAgentClient` | [02-model-gateway.md](02-model-gateway.md) |
-| 03 | 工具与审批 | 内置工具、审批注册表、命令/文件沙箱、MCP | `ToolRegistry`、`ToolApprovalRegistry` | [03-tools-approval-sandbox.md](03-tools-approval-sandbox.md) |
+| 03 | 工具与审批 | 内置工具、审批注册表、命令/文件沙箱、MCP；插件中心扩展规划见 [phases/phase8/plugin-center.md](../phases/phase8/plugin-center.md) | `ToolRegistry`、`ToolApprovalRegistry` | [03-tools-approval-sandbox.md](03-tools-approval-sandbox.md) |
 | 04 | 上下文与 RAG | 文档入库、向量检索、上下文组装、提示词版本化 | `DocumentService`、`PromptCatalog` | [04-context-rag.md](04-context-rag.md) |
 | 05 | API 与事件流 | 控制器、SSE 协议、断线续传、请求鉴权 | `AgentChatController` | [05-api-sse.md](05-api-sse.md) |
 | 06 | 前端工作台 | 页面、状态管理、SSE 消费、任务恢复与展示 | `frontend/src` | [06-frontend.md](06-frontend.md) |
