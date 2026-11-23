@@ -260,7 +260,7 @@ public class HttpMcpClientFactory implements McpClientFactory {
 
 ### 7.1 `marketplace.json` schema
 
-阶段 1 放 `frontend/src/plugins/marketplace.json`（随包内嵌）；阶段 2 换成远程 URL，UI 层一处改动。
+阶段 1 放 `src/main/resources/marketplace.json`（后端 classpath 内嵌，前端通过 `GET /api/plugins/catalog` 获取，不内嵌副本）；阶段 2 换成远程 URL，仅 `PluginCatalogService` 一处改动。
 
 ```json
 {

@@ -1,7 +1,7 @@
 # 0.1.4 插件管理中心 · 可执行 Task 清单
 
 > 更新日期：2026-11-23
-> 状态：未开始（⬜）；0.1.3 已发布，从 main 拉 `feature/0.1.4-plugin-center` 分支启动
+> 状态：T1–T9 已完成（✅），T10–T12 进行中（🟡）；0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
 > 关联设计：[plugin-center.md](plugin-center.md)
 > 规则：每个 Task 独立可验收；后端任务先于前端联调；T11 为集成验收；新增公开端点必须同步 `PublicApiCatalog` 与 `public-api.json`（`PublicApiContractTest` 是漂移守卫）。
 
@@ -11,7 +11,7 @@
 
 ## 阶段 1（0.1.4 主功能）：插件管理器骨架
 
-### T1 · DB 迁移 + 实体加字段 ⬜
+### T1 · DB 迁移 + 实体加字段 ✅
 
 **改动**：
 - 新建 `src/main/resources/db/migration/V26__add_mcp_server_plugin.sql`（最新已占用版本为 V25）：
@@ -32,7 +32,7 @@
 
 ---
 
-### T2 · 传输层扩展入参（不实现远程）⬜
+### T2 · 传输层扩展入参（不实现远程）✅
 
 **改动**：
 - 新建 `src/main/java/com/capsule/agentkey/mcp/McpConnectionSpec.java`（record）：字段 `transport / command / args / env / url / headers`，内嵌 `enum TransportType { STDIO, HTTP, SSE }`。
@@ -45,7 +45,7 @@
 
 ---
 
-### T3 · plugin 包 + catalog 读取 ⬜
+### T3 · plugin 包 + catalog 读取 ✅
 
 **改动**：
 - 新建包 `src/main/java/com/capsule/agentkey/plugin/`：
@@ -53,7 +53,7 @@
   - `CredentialField.java`（record）：name/label/description/required/secret/placeholder。
   - `Catalog.java`（record）：`version` + `List<PluginManifest> plugins`。
   - `PluginCatalogService.java`：阶段 1 从 classpath 读 `marketplace.json`（用 Jackson 反序列化），提供 `List<PluginManifest> listAll()` 与 `Optional<PluginManifest> get(String id)`；阶段 2 换远程时只改这个类。
-- `marketplace.json` 放 `src/main/resources/plugin/marketplace.json`（后端读）；前端另有一份副本用于离线展示（见 T7），或前后端共用同一份——实施时定，倾向**后端单一数据源**，前端通过 `/api/plugins/catalog` 拿，不内嵌副本（避免双份漂移）。
+- `marketplace.json` 放 `src/main/resources/marketplace.json`（后端 classpath 读）；**前端不内嵌副本**，统一通过 `GET /api/plugins/catalog` 拿（避免双份漂移）。
 
 **涉及文件**：`plugin/`（新包 4 个文件）、`resources/plugin/marketplace.json`（T7 填充内容，本 task 先放空壳 `{"version":"1","plugins":[]}` 让 service 能跑）。
 
@@ -61,7 +61,7 @@
 
 ---
 
-### T4 · McpInstaller + InstallablePlugin 接口 ⬜
+### T4 · McpInstaller + InstallablePlugin 接口 ✅
 
 **改动**：
 - `plugin/InstallablePlugin.java`（接口）：`getManifest()` / `getConfigSchema()` / `install(userId, userInput)` / `uninstall(userId, instanceId)`。
@@ -77,15 +77,14 @@
 
 ---
 
-### T5 · PluginController + API 契约同步 ⬜
+### T5 · PluginController + API 契约同步 ✅
 
 **改动**：
 - 新建 `controller/PluginController.java`，`@RequestMapping("/api/plugins")`：
   - `GET /api/plugins/catalog` → `ApiResponse<List<PluginManifest>>`，`@RequiresCapability(Capability.MCP_READ)`（桌面端才有）。
   - `POST /api/plugins/install` → body `{ pluginId, credentials }` → `ApiResponse<McpServerResponse>`，`@RequiresCapability(Capability.MCP_WRITE)`；调 `McpInstaller.install`，捕获校验异常转 400。
   - 新增 DTO `dto/PluginInstallRequest.java`（record：`String pluginId, Map<String,String> credentials`）。
-- 同步 `PublicApiCatalog.DECLARED`：注册两个新端点（参照现有 `/api/mcp/servers` 注册方式）。
-- 同步 `src/test/resources/contract/public-api.json`：加两条端点快照。
+- ~~同步 `PublicApiCatalog.DECLARED` / `public-api.json`~~：**决策变更**——插件端点与 `/api/mcp/servers` 同属桌面端内部接口，不加 `@PublicApi`、不纳入公开子集（AI 客户端不应自行安装插件），故无需同步 DECLARED 与快照；云端由 `@RequiresCapability(MCP_*)` 拦截禁用。`PublicApiContractTest` 仍通过（17 端点未变）。
 - 确认 `PluginManifest` 序列化时不泄露敏感字段（credentials 里的 description 等可展示，无 secret 值）。
 
 **涉及文件**：`controller/PluginController.java`（新）、`dto/PluginInstallRequest.java`（新）、`config/PublicApiCatalog.java`、`test/resources/contract/public-api.json`。
@@ -94,7 +93,7 @@
 
 ---
 
-### T6 · 运行时依赖检测（后端兜底）⬜
+### T6 · 运行时依赖检测（后端兜底）✅
 
 **改动**：
 - 新建 `service/RuntimeDetector.java`：`String detect(String name)` 返回版本号（如 `"v20.10.0"`）或 null；阶段 1 支持 `node` / `uvx` / `python`（用 `ProcessBuilder` 跑 `node --version` 等，限时 3s）。
@@ -107,7 +106,7 @@
 
 ---
 
-### T7 · 前端 marketplace 数据 + TS 类型 ⬜
+### T7 · 前端 marketplace 数据 + TS 类型 ✅
 
 **改动**：
 - 决定数据源：**前端不内嵌 JSON 副本**，统一调 `GET /api/plugins/catalog`（T3 后端读 resources 里的 JSON）。若需离线首屏，可在前端 store 缓存上次拉取结果。
@@ -121,7 +120,7 @@
 
 ---
 
-### T8 · 前端 API 封装 ⬜
+### T8 · 前端 API 封装 ✅
 
 **改动**：
 - 新建 `frontend/src/api/plugin.ts`：
@@ -137,7 +136,7 @@
 
 ---
 
-### T9 · 插件中心 UI 重构 ⬜
+### T9 · 插件中心 UI 重构 ✅
 
 **改动**：
 - `frontend/src/views/SettingsView.vue`：把「扩展工具」tab 改名为「插件中心」，内容区替换为新组件 `PluginCenter.vue`。
@@ -151,6 +150,8 @@
 **涉及文件**：`views/SettingsView.vue`、`components/PluginCenter.vue`（新）、`components/PluginCard.vue`（新）、`components/PluginInstallDialog.vue`（新）、`components/McpServersPanel.vue`（列表逻辑迁移/复用）。
 
 **验收**：`vue-tsc --noEmit` 零诊断；设置页「插件中心」可见两个 tab；手填四框入口仍可用；现有 MCP 列表在「已安装」tab 正常显示与操作。
+
+> 实现注记：卡片网格与 schema-driven 安装弹窗内联在 `PluginCenter.vue`（未拆 `PluginCard.vue`/`PluginInstallDialog.vue` 独立组件，功能等价、减少文件数）；「手动添加」入口保留在「已安装」tab 内嵌的 `McpServersPanel` 中；卡片图标用首字母彩色圆块（不扩展 `Icon.vue` 图标集）。
 
 ---
 

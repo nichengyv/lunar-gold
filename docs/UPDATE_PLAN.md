@@ -293,6 +293,8 @@ M1 已交付用户自助 stdio MCP（设置页增删改、启停、重连、环�
 
 保留「手动添加」作为高级入口（已装 tab 右上角），给本地自写 server 的用户用。
 
+**开发进度**（2026-11-23）：在 `feature/0.1.4-plugin-center` 分支开发。T1–T9 已完成（V26 迁移、`McpConnectionSpec` 传输抽象、`plugin` 包与 `PluginCatalogService`、`InstallablePlugin`/`McpInstaller`、`PluginController`、`RuntimeDetector`、6 个 curated 插件的 `marketplace.json`、前端 `types/plugin.ts` + `api/plugin.ts` + `PluginCenter.vue`），后端单测（`PluginCatalogServiceTest`/`McpInstallerTest`/`RuntimeDetectorTest`/`PublicApiContractTest`）与前端 `vue-tsc --noEmit` 均通过。T10（前端运行时检测引导）、T11（端到端集成验收）、T12（文档同步，进行中）。
+
 ---
 
 ## 6. 后续数据库与接口契约
