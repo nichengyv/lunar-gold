@@ -34,11 +34,22 @@
         <h3><Icon name="plus" :size="15" /> 添加新 Key</h3>
         <div class="form-row">
           <label>提供商</label>
-          <select v-model="provider">
-            <option value="DEEPSEEK">DeepSeek（对话）</option>
-            <option value="SILICONFLOW">SiliconFlow（向量）</option>
-            <option value="TAVILY">Tavily（联网搜索）</option>
-          </select>
+          <input
+            v-model.trim="provider"
+            type="text"
+            placeholder="DEEPSEEK / SILICONFLOW / 自定义名称"
+            list="provider-suggestions"
+          >
+          <datalist id="provider-suggestions">
+            <option value="DEEPSEEK"></option>
+            <option value="SILICONFLOW"></option>
+            <option value="OPENAI"></option>
+            <option value="ANTHROPIC"></option>
+            <option value="OLLAMA"></option>
+          </datalist>
+          <small style="color: var(--text-muted); display: block; margin-top: 4px">
+            自由输入 provider 名称；保存后在「对话」页可从该 provider 已存 Key 对应的可用模型里选择
+          </small>
         </div>
         <div class="form-row">
           <label>API Key</label>

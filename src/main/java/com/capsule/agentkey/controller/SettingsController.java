@@ -78,9 +78,14 @@ public class SettingsController {
     // ========== 模型列表 ==========
 
     /**
-     * 模型列表：DeepSeek 部分优先用已存 Key 实时拉取（GET /models），
-     * 避免硬编码目录与账号实际可用模型脱节；拉取失败/未配置 Key 时回退静态目录。
-     * available 取决于当前用户是否为该 provider 配置了 API Key。
+     * 模型列表：只返回"用户自己配过 API Key 的 provider"下可用的模型。
+     *
+     * <p>规则：
+     * <ul>
+     *   <li>有 Key 的 provider → 优先尝试远端拉 /models 实时列表；拉不到时只返回空（不硬编码兜底）</li>
+     *   <li>Ollama 本地 → 不需要 Key 也算 available（但也不硬编码具体模型名，由用户自己配）</li>
+     *   <li>没有任何 Key → 返回空数组，前端据此提示"请先添加 API Key"</li>
+     * </ul>
      */
     @GetMapping("/models")
     public ResponseEntity<List<Map<String, Object>>> listModels() {
@@ -94,40 +99,27 @@ public class SettingsController {
         }
 
         List<Map<String, Object>> models = new ArrayList<>();
-        // DeepSeek —— AgentKey 主要 provider：有 Key 时以账号实际可用模型为准
-        List<String> liveDeepSeekModels = List.of();
-        if (configuredProviders.contains("DEEPSEEK")) {
+        for (String provider : configuredProviders) {
             try {
-                liveDeepSeekModels = apiKeyService.listRemoteModels(userId, "DEEPSEEK");
+                List<String> liveModels = apiKeyService.listRemoteModels(userId, provider);
+                for (String id : liveModels) {
+                    addModel(models, id, id, provider, true);
+                }
             } catch (Exception e) {
-                log.warn("实时拉取 DeepSeek 模型列表失败，回退静态目录 [userId={}]: {}", userId, e.getMessage());
+                log.warn("拉取 provider={} 的模型列表失败 [userId={}]: {}", provider, userId, e.getMessage());
             }
         }
-        if (!liveDeepSeekModels.isEmpty()) {
-            for (String id : liveDeepSeekModels) {
-                addModel(models, id, id, "DEEPSEEK", configuredProviders);
-            }
-        } else {
-            addModel(models, "deepseek-chat", "DeepSeek Chat", "DEEPSEEK", configuredProviders);
-            addModel(models, "deepseek-reasoner", "DeepSeek Reasoner", "DEEPSEEK", configuredProviders);
-        }
-        // OpenAI 兼容通用 —— 给用户留扩展空间
-        addModel(models, "gpt-4o-mini", "GPT-4o Mini", "OPENAI", configuredProviders);
-        addModel(models, "gpt-4o", "GPT-4o", "OPENAI", configuredProviders);
-        // Ollama 本地 —— available 不看 API Key（本地起了就有）
-        addModel(models, "qwen2.5:7b", "Qwen2.5 7B (Ollama)", "OLLAMA", configuredProviders);
-
+        // Ollama 本地是特例：不需要 Key，也不硬编码模型名，只提示前端可配置
         return ResponseEntity.ok(models);
     }
 
     private void addModel(List<Map<String, Object>> list, String id, String name,
-                          String provider, Set<String> configuredProviders) {
+                          String provider, boolean available) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", id);
         m.put("name", name);
         m.put("provider", provider);
-        // Ollama 是本地，不需要 API Key 也算 available
-        m.put("available", "OLLAMA".equals(provider) || configuredProviders.contains(provider));
+        m.put("available", available);
         list.add(m);
     }
 }

@@ -5,7 +5,11 @@
  * P3-06：主进程、渲染进程、Java 与内嵌 PostgreSQL 故障统一进入本地诊断卡片。
  */
 
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron');
+// Windows 下 Electron 43 默认 sandbox 与本机安全策略冲突（child process spawn 被拦），
+// 统一关主进程 sandbox。渲染进程 sandbox 由 BrowserWindow 配置控制。
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-gpu');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -17,6 +21,10 @@ const APP_TITLE = 'Lunar Gold';
 const JAR_NAME = 'agent-gateway-1.0.0.jar';
 const HEALTH_TIMEOUT_MS = 120000;
 
+// 开发态开关：跳过 sidecar 拉起，加载 vite dev server（需要手动启动后端 + 前端）
+const DEV_MODE = process.env.LUNARGOLD_DEV === '1';
+const DEV_FRONTEND_URL = process.env.LUNARGOLD_DEV_FRONTEND || 'http://localhost:5173';
+
 let mainWindow = null;
 let sidecar = null;
 // 主动退出期间不触发“崩溃”提示
@@ -24,6 +32,12 @@ let quitting = false;
 let sidecarRestarting = false;
 let starting = false;
 let runtime = null; // { jarPath, dataDir, env, logPath }，供崩溃后重启复用
+
+// ---- preload IPC：窗口状态查询 ----
+ipcMain.handle('win:is-maximized', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  return mainWindow.isMaximized();
+});
 
 if (!app.requestSingleInstanceLock()) {
   // 已有实例：直接退出，由已有实例把窗口拉到前台
@@ -39,7 +53,10 @@ if (!app.requestSingleInstanceLock()) {
     fail('启动失败', err);
   });
 
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => {
+    // macOS 惯例：关窗口 App 仍在 Dock 里；Windows 开发态也留着方便调试渲染进程崩溃
+    if (process.platform !== 'darwin' && !DEV_MODE) app.quit();
+  });
   app.on('before-quit', () => {
     quitting = true;
     stopSidecar(sidecar);
@@ -126,7 +143,12 @@ async function startLocalServices() {
   try {
     ensureWindow();
     await mainWindow.loadURL(loadingPage());
-    await launchSidecar();
+    if (DEV_MODE) {
+      // 开发态：sidecar 由外部手动启动（Spring Boot 固定端口 + 内嵌 PG），只加载前端
+      console.log('[dev] 跳过 sidecar 拉起，直接加载 vite dev server');
+    } else {
+      await launchSidecar();
+    }
     await mainWindow.loadURL(mainWindowUrl());
     // 升级后的首次成功启动：确认进程稳定存活几秒再清标记，
     // 避免启动后秒崩（如新版本初始化异常）却误判为升级成功
@@ -246,16 +268,22 @@ function createWindow() {
     title: APP_TITLE,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#111827',
+    backgroundColor: '#101012',
+    // 开发态先用原生标题栏，打包再开 titleBarStyle:'hidden'
+    // 避免开发调试时 preload / titleBarOverlay 问题阻塞
+    ...(DEV_MODE ? {} : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#101012', symbolColor: '#e6e6e8', height: 36 } }),
     webPreferences: {
-      // 页面只跑前端 bundle，不需要 Node 能力
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: DEV_MODE ? false : true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
   win.once('ready-to-show', () => win.show());
+  // titleBarOverlay 最大化状态广播：让前端更新按钮图标
+  win.on('maximize', () => win.webContents.send('win:maximize-changed', true));
+  win.on('unmaximize', () => win.webContents.send('win:maximize-changed', false));
   // 新窗口一律交给系统浏览器，避免在应用内打开外部页面
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
@@ -287,6 +315,7 @@ function createWindow() {
 }
 
 function mainWindowUrl() {
+  if (DEV_MODE) return DEV_FRONTEND_URL;
   const target = new URL(sidecar.url);
   target.searchParams.set('appVersion', app.getVersion());
   return target.toString();
@@ -296,15 +325,15 @@ function loadingPage() {
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
   <title>${APP_TITLE}</title>
   <style>
-    html,body{height:100%;margin:0;background:#111827;color:#e5e7eb;
+    html,body{height:100%;margin:0;background:#101012;color:#e6e6e8;
       font-family:"Microsoft YaHei",system-ui,sans-serif}
     .box{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-    .dot{width:8px;height:8px;border-radius:50%;background:#60a5fa;animation:p 1.2s infinite ease-in-out}
+    .dot{width:8px;height:8px;border-radius:50%;background:#58a6ff;animation:p 1.2s infinite ease-in-out}
     .dots{display:flex;gap:6px}
     .dots .dot:nth-child(2){animation-delay:.15s}
     .dots .dot:nth-child(3){animation-delay:.3s}
     @keyframes p{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
-    p{margin:0;font-size:13px;color:#9ca3af}
+    p{margin:0;font-size:13px;color:#9a9aa0}
   </style></head>
   <body><div class="box"><div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
   <p>正在启动本地服务…</p></div></body></html>`;

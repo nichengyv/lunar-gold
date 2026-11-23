@@ -1,76 +1,81 @@
 {
-  "name": "lunargold-desktop",
-  "version": "0.1.3",
-  "private": true,
-  "description": "Lunar Gold（金月）桌面壳（Electron）",
-  "author": "Lunar Gold Project",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "smoke:real-sse": "node real-sse-smoke.cjs",
-    "pack": "electron-builder --dir --publish never --config.directories.output=../build/desktop-pack",
-    "dist": "npm run pack && electron-builder --prepackaged ../build/desktop-pack/win-unpacked --publish never"
-  },
-  "devDependencies": {
-    "electron": "^43.3.0",
-    "electron-builder": "^26.18.0"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.11"
-  },
-  "build": {
-    "appId": "com.lunargold.desktop",
-    "productName": "Lunar Gold",
-    "executableName": "lunar-gold",
-    "artifactName": "LunarGold-Setup-${version}.${ext}",
-    "electronDist": "node_modules/electron/dist",
-    "electronLanguages": ["en-US", "zh-CN", "zh-TW"],
-    "directories": {
-      "output": "../build/installer"
-    },
-    "files": [
-      "main.js",
-      "sidecar.js",
-      "updater.js",
-      "diagnostics.js",
-      "package.json"
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "nichengyv",
-        "repo": "lunar-gold",
-        "releaseType": "draft"
-      }
-    ],
-    "extraResources": [
-      {
-        "from": "../target/agent-gateway-1.0.0.jar",
-        "to": "sidecar/agent-gateway-1.0.0.jar"
-      },
-      {
-        "from": "../build/desktop-runtime/jre",
-        "to": "jre"
-      },
-      {
-        "from": "../build/legal",
-        "to": "legal"
-      }
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "app-icon/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "include": "nsis/include.nsh",
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Lunar Gold",
-      "deleteAppDataOnUninstall": false
-    }
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.11"
-  }
+    "name":  "lunargold-desktop",
+    "version":  "0.1.3",
+    "private":  true,
+    "description":  "Lunar Gold（金月）桌面壳（Electron）",
+    "author":  "Lunar Gold Project",
+    "main":  "main.js",
+    "scripts":  {
+                    "start":  "electron .",
+                    "smoke:real-sse":  "node real-sse-smoke.cjs",
+                    "pack":  "electron-builder --dir --publish never --config.directories.output=../build/desktop-pack",
+                    "dist":  "npm run pack \u0026\u0026 electron-builder --prepackaged ../build/desktop-pack/win-unpacked --publish never"
+                },
+    "devDependencies":  {
+                            "electron":  "^43.3.0",
+                            "electron-builder":  "^26.18.0"
+                        },
+    "dependencies":  {
+                         "electron-updater":  "^6.8.11"
+                     },
+    "build":  {
+                  "appId":  "com.lunargold.desktop",
+                  "productName":  "Lunar Gold",
+                  "executableName":  "lunar-gold",
+                  "artifactName":  "LunarGold-Setup-${version}.${ext}",
+                  "electronDist":  "node_modules/electron/dist",
+                  "electronLanguages":  [
+                                            "en-US",
+                                            "zh-CN",
+                                            "zh-TW"
+                                        ],
+                  "directories":  {
+                                      "output":  "../build/installer"
+                                  },
+                  "files":  [
+                                "main.js",
+                                "preload.js",
+                                "sidecar.js",
+                                "updater.js",
+                                "diagnostics.js",
+                                "package.json"
+                            ],
+                  "publish":  [
+                                  {
+                                      "provider":  "github",
+                                      "owner":  "nichengyv",
+                                      "repo":  "lunar-gold",
+                                      "releaseType":  "draft"
+                                  }
+                              ],
+                  "extraResources":  [
+                                         {
+                                             "from":  "../target/agent-gateway-1.0.0.jar",
+                                             "to":  "sidecar/agent-gateway-1.0.0.jar"
+                                         },
+                                         {
+                                             "from":  "../build/desktop-runtime/jre",
+                                             "to":  "jre"
+                                         },
+                                         {
+                                             "from":  "../build/legal",
+                                             "to":  "legal"
+                                         }
+                                     ],
+                  "win":  {
+                              "target":  "nsis",
+                              "icon":  "app-icon/icon.ico"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "include":  "nsis/include.nsh",
+                               "perMachine":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "shortcutName":  "Lunar Gold",
+                               "deleteAppDataOnUninstall":  false
+                           }
+              },
+    "allowScripts":  {
+                         "electron@43.3.0":  true
+                     }
 }

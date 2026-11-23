@@ -20,8 +20,8 @@
         </router-link>
       </nav>
 
-      <button v-if="!isExplorerMode" class="new-session-btn" title="新任务" @click="onNewSession">
-        <Icon name="plus" :size="14" /> <span class="new-session-text">新任务</span>
+      <button v-if="!isExplorerMode" class="new-session-btn" title="新建工作区" @click="onCreateWorkspace">
+        <Icon name="plus" :size="14" /> <span class="new-session-text">新建工作区</span>
       </button>
 
       <!-- 工作区区域：任务列表 / 资源管理器，同一层级切换 -->
@@ -31,9 +31,6 @@
           <div v-if="sideTab === 'sessions'" class="ws-section-actions">
             <button class="ws-action" title="搜索工作区/任务" aria-label="搜索工作区或任务" @click="wsSearchOpen = !wsSearchOpen">
               <Icon name="search" :size="14" />
-            </button>
-            <button v-if="hasLocalWorkspace" class="ws-action" title="新建工作区" @click="onCreateWorkspace">
-              <Icon name="plus" :size="14" />
             </button>
           </div>
         </div>
@@ -1105,7 +1102,7 @@ async function onLogout() {
     .sidebar.collapsed .new-session-text,
     .sidebar.collapsed .footer-text { display: none; }
     .sidebar.collapsed .ws-section { display: none; }
-    .sidebar.collapsed .sidebar-header { justify-content: center; gap: 4px; padding: 0 4px; }
+    .sidebar.collapsed .sidebar-header { justify-content: center; gap: 4px; padding: 0 4px; width: 56px; right: auto; }
     .sidebar.collapsed .sidebar-nav { padding: 10px 6px; }
     .sidebar.collapsed .new-session-btn { margin: 0 6px 8px; }
     .sidebar.collapsed .sidebar-footer { padding: 12px 6px; }

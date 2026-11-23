@@ -108,7 +108,11 @@ body {
 
 /* ========== 布局框架 ========== */
 /* 底色取顶层色：区域之间的留白与顶栏、主导航同色，三者连成一体，顶层因此不被竖缝切断 */
-.app { display: flex; height: 100vh; background: var(--surface); }
+/* titleBarStyle:'hidden' 下用 sidebar-header 兼作自绘标题栏：
+   - 全窗口顶部 36px 高 absolute 覆盖
+   - 设 -webkit-app-region: drag 让原生拖动行为生效
+   - 右 140px 留给 titleBarOverlay 自绘的系统窗口按钮 */
+.app { display: flex; height: 100vh; background: var(--surface); padding-top: 36px; }
 
 /* 主导航：与顶层同色，右边缘的 8px 留白也同色，所以看上去没有分界线 */
 .sidebar {
@@ -123,14 +127,23 @@ body {
 }
 
 .sidebar-header {
-    height: var(--header-height);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 140px;
+    height: 36px;
     display: flex; align-items: center;
     padding: 0 20px;
-    /* 与顶栏同色同高，接成一条连续的顶层；不画横线 */
-    font-size: 18px;
+    -webkit-app-region: drag;
+    /* 与 var(--surface) 同色，与右侧 main 背景融为一体 */
+    background: var(--surface);
+    font-size: 14px;
     font-weight: 600;
     gap: 10px;
     flex-shrink: 0;
+    z-index: 1000;
+    /* 折叠时收窄到 sidebar 宽度，内容居中时不跑到屏幕中央 */
+    transition: width .2s ease, padding .2s ease, justify-content .2s ease, right .2s ease;
 }
 
 .sidebar-nav {

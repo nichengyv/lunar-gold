@@ -426,11 +426,8 @@ async function loadModels() {
   try {
     models.value = await settingsApi.listModels();
   } catch {
-    // 后端未就绪时兜底硬编码
-    models.value = [
-      { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'DEEPSEEK', available: true },
-      { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', provider: 'DEEPSEEK', available: true },
-    ];
+    // 后端未就绪：保持空列表，界面会提示用户先添加 API Key
+    models.value = [];
   } finally {
     modelsLoading.value = false;
   }

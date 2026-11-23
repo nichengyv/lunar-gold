@@ -961,8 +961,10 @@ async function closeTab(path: string) {
 <style scoped>
 .workbench {
     flex-shrink: 0;
-    /* 底色与会话区一致；区域之间靠 8px 顶层色留白分隔，不画线 */
-    background: var(--bg);
+    /* 工作台与主侧边栏做色差分层：sidebar 用 --surface，workbench 用更深的底色
+       这样收起侧边栏再展开工作台时，两个面板一眼能区分层级 */
+    background: var(--workbench-bg, #0d0d0f);
+    border-left: 1px solid var(--border);
     /* 面板换成底色后，原先「浮在浅色面板上」的 surface-2 层级改用 surface 才浮得起来，
        覆盖只在本面板内生效 */
     --surface-2: var(--surface);

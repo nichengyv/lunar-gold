@@ -329,9 +329,9 @@
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="FAST">快速 · 少轮次</el-dropdown-item>
-                      <el-dropdown-item command="STANDARD">标准 · 常规</el-dropdown-item>
-                      <el-dropdown-item command="DEEP">深度 · 多步</el-dropdown-item>
+                      <el-dropdown-item command="FAST">快速</el-dropdown-item>
+                      <el-dropdown-item command="STANDARD">标准</el-dropdown-item>
+                      <el-dropdown-item command="DEEP">深度</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -342,9 +342,9 @@
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="MANUAL">手动审批 · 写文件/命令都确认</el-dropdown-item>
-                      <el-dropdown-item command="AUTO">自动审批 · 仅破坏性命令确认</el-dropdown-item>
-                      <el-dropdown-item command="FULL">完全权限 · 全部自动通过</el-dropdown-item>
+                      <el-dropdown-item command="MANUAL">手动审批</el-dropdown-item>
+                      <el-dropdown-item command="AUTO">自动审批</el-dropdown-item>
+                      <el-dropdown-item command="FULL">完全权限</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -500,27 +500,20 @@ interface SlashCommand {
   run: (args: string) => void;
 }
 
-// 模型目录：与设置页共用 /api/settings/models（有 Key 时是账号实际可用模型），后端未就绪时回退静态两项
-const FALLBACK_MODELS: ModelInfo[] = [
-  { id: 'deepseek-chat', name: '通用对话', provider: 'DEEPSEEK', available: true },
-  { id: 'deepseek-reasoner', name: '深度推理', provider: 'DEEPSEEK', available: true }
-];
+// 模型目录：全部从后端 /api/settings/models 拉取；拉不到时显示空列表让界面提示先配 Key
+const FALLBACK_MODELS: ModelInfo[] = [];
 const modelOptions = ref<ModelInfo[]>(FALLBACK_MODELS);
 
 async function loadModelOptions() {
   try {
     const list = await settingsApi.listModels();
-    const usable = list.filter((m) => m.available);
-    if (usable.length > 0) modelOptions.value = usable;
+    modelOptions.value = list.filter((m) => m.available);
   } catch {
-    // 后端未就绪：保留静态兜底，不阻塞聊天页
+    // 后端未就绪：保持空列表，不阻塞聊天页
   }
 }
 
-const MODEL_ALIASES: Record<string, string> = {
-  chat: 'deepseek-chat',
-  reasoner: 'deepseek-reasoner'
-};
+const MODEL_ALIASES: Record<string, string> = {};
 
 const PERMISSION_ALIASES: Record<string, PermissionLevel> = {
   manual: 'MANUAL',

@@ -160,12 +160,13 @@ export const useChatStore = defineStore('chat', {
     // 各会话未发送的附件元信息（localStorage 持久化），键与 drafts 相同
     draftChips: loadDraftChips(),
     // 会话头可切换的运行参数：新会话沿用当前选择，切回旧会话时恢复该会话已存的配置
-    model: 'deepseek-chat' as string,
+    model: '' as string,
     reasoning: 'STANDARD' as ReasoningLevel,
     permission: 'MANUAL' as PermissionLevel,
     // 全局默认值（设置页"对话默认"tab 修改这里）
     // 新会话启动时用 default 字段，用户不改就沿用；改了就覆盖 default
-    defaultModel: 'deepseek-chat' as string,
+    // 为空表示尚未配置，界面应提示用户先在「模型服务」添加 API Key
+    defaultModel: '' as string,
     defaultReasoning: 'STANDARD' as ReasoningLevel,
     defaultPermission: 'MANUAL' as PermissionLevel,
     /** P5-12-2：仍在运行 / 等待审批的轮次，按会话 id 索引，侧栏与空态共用 */

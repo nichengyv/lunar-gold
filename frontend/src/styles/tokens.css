@@ -8,7 +8,7 @@
 
 :root {
     /* ---- 布局 ---- */
-    --sidebar-width: 280px;
+    --sidebar-width: 252px;
     --header-height: 46px;
 
     /* ---- 消息密度（P5-09）：舒适为默认，紧凑在下方覆盖 ---- */
@@ -95,23 +95,23 @@
 }
 
 [data-theme="dark"] {
-    /* ---- 基础色（暗色） ---- */
-    --bg: #0d1117;
-    --surface: #161b22;
-    --surface-hover: #1f242c;
-    --surface-2: #0d1117;
-    --surface-3: #262c35;
-    --border: #30363d;
-    --border-strong: #484f58;
+    /* ---- 基础色（暗色，纯黑灰系，VS Code / Cursor 风格） ---- */
+    --bg: #101012;
+    --surface: #1a1a1d;
+    --surface-hover: #222226;
+    --surface-2: #151517;
+    --surface-3: #2c2c30;
+    --border: #3a3a40;
+    --border-strong: #4a4a50;
 
     /* ---- 品牌与语义色（暗色，逐项对应亮色） ---- */
     --primary: #58a6ff;
     --primary-hover: #79b8ff;
     --primary-light: #1f6feb33;
     --on-primary: #ffffff;
-    --text: #c9d1d9;
-    --text-secondary: #8b949e;
-    --text-tertiary: #7d8590;
+    --text: #e6e6e8;
+    --text-secondary: #9a9aa0;
+    --text-tertiary: #6e6e74;
     --danger: #f85149;
     --danger-bg: #381a1a;
     --success: #3fb950;
@@ -121,16 +121,16 @@
     --accent: #a78bfa;
 
     /* ---- 代码 / diff / 骨架屏（暗色） ---- */
-    --code-bg: #0d1117;
-    --code-border: #30363d;
+    --code-bg: #151517;
+    --code-border: #3a3a40;
     --diff-add-bg: #12301f;
     --diff-del-bg: #3d1e1e;
-    --skeleton-a: #1b2129;
-    --skeleton-b: #242c35;
+    --skeleton-a: #1e1e21;
+    --skeleton-b: #26262a;
 
     /* ---- 阴影 ---- */
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.6);
 }
 
 /* P5-09：紧凑档只覆盖密度 token，组件结构不变 */
