@@ -1,0 +1,31 @@
+{
+  "version": "1",
+  "plugins": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "管理 issue、PR、仓库，搜索代码与用户",
+      "icon": "github",
+      "category": "开发协作",
+      "type": "MCP",
+      "transport": "stdio",
+      "command": "npx.cmd",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "runtime": ["node>=18"],
+      "toolCount": 18,
+      "requiredPermissions": ["发起到 api.github.com 的网络请求"],
+      "credentials": [
+        {
+          "name": "GITHUB_TOKEN",
+          "label": "GitHub Token",
+          "description": "在 github.com/settings/tokens 创建，勾选 repo 权限",
+          "required": true,
+          "secret": true,
+          "placeholder": "ghp_xxxxxxxxxxxx"
+        }
+      ],
+      "homepageUrl": "https://github.com/modelcontextprotocol/servers",
+      "version": "1.0.0"
+    }
+  ]
+}

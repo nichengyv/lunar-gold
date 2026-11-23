@@ -61,9 +61,17 @@ public class McpServerService {
     }
 
     public McpServerResponse create(Long userId, McpServerRequest request) {
+        return createWithPlugin(userId, request, null, null);
+    }
+
+    /** 从市场安装：额外写入 pluginId/pluginVersion 标记来源；手填路径传 null。 */
+    public McpServerResponse createWithPlugin(Long userId, McpServerRequest request,
+                                              String pluginId, String pluginVersion) {
         Validated validated = validate(request, userId, null, null);
         McpServer server = new McpServer();
         server.setUserId(userId);
+        server.setPluginId(pluginId);
+        server.setPluginVersion(pluginVersion);
         apply(server, validated);
         McpServer saved = repository.save(server);
         runtime.reload(saved);
@@ -224,7 +232,7 @@ public class McpServerService {
         McpServerRuntime.Status status = runtime.status(server.getId());
         return new McpServerResponse(server.getId(), server.getName(), server.getCommand(),
                 args, envKeys, server.isEnabled(), status.connected(), status.toolCount(),
-                status.lastError());
+                status.lastError(), server.getPluginId(), server.getPluginVersion());
     }
 
     private record Validated(String name, String command, List<String> args,

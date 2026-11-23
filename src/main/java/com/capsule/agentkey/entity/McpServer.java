@@ -45,6 +45,14 @@ public class McpServer {
     @Column(columnDefinition = "TEXT")
     private String envEncrypted;
 
+    /** 来源插件 id（市场安装时写入，手动添加为 null） */
+    @Column(length = 128)
+    private String pluginId;
+
+    /** 来源插件版本，用于更新检查 */
+    @Column(length = 32)
+    private String pluginVersion;
+
     @Column(nullable = false)
     private boolean enabled = true;
 

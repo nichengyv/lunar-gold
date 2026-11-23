@@ -14,6 +14,8 @@ public record McpServerResponse(
         boolean enabled,
         boolean connected,
         int toolCount,
-        String lastError
+        String lastError,
+        String pluginId,
+        String pluginVersion
 ) {
 }

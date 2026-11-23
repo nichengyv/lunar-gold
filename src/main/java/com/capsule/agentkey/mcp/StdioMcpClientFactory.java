@@ -38,10 +38,15 @@ public class StdioMcpClientFactory implements McpClientFactory {
     }
 
     @Override
-    public McpSyncClient create(String command, List<String> args, Map<String, String> env) {
-        ServerParameters parameters = ServerParameters.builder(command)
-                .args(args == null ? List.of() : args)
-                .env(env == null ? Map.of() : env)
+    public McpSyncClient create(McpConnectionSpec spec) {
+        if (spec.transportType() != McpConnectionSpec.TransportType.STDIO) {
+            throw new UnsupportedOperationException(
+                    "StdioMcpClientFactory 仅支持 STDIO，不支持 " + spec.transportType()
+                            + "；远程传输（HTTP/SSE）尚未实现");
+        }
+        ServerParameters parameters = ServerParameters.builder(spec.command())
+                .args(spec.args() == null ? List.of() : spec.args())
+                .env(spec.env() == null ? Map.of() : spec.env())
                 .build();
         StdioClientTransport transport = new StdioClientTransport(
                 parameters, new JacksonMcpJsonMapper(jsonMapper));
