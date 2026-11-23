@@ -41,6 +41,9 @@ export interface McpServerConfig {
   connected: boolean;
   toolCount: number;
   lastError?: string;
+  /** 来自市场安装时标记的插件 id / 版本；手填则为空 */
+  pluginId?: string;
+  pluginVersion?: string;
 }
 
 export interface McpServerInput {

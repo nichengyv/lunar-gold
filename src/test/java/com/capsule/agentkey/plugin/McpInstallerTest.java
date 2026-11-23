@@ -100,4 +100,30 @@ class McpInstallerTest {
         installer.uninstall(1L, 7L);
         verify(mockService).delete(1L, 7L);
     }
+
+    @Test
+    void installResolvesArgPlaceholdersAndKeepsThemOutOfEnv() {
+        when(mockService.createWithPlugin(any(), any(), eq("filesystem"), eq("1.0.0")))
+                .thenReturn(new McpServerResponse(9L, "filesystem", "npx.cmd", List.of(),
+                        List.of(), true, true, 6, null, "filesystem", "1.0.0"));
+        PluginManifest fs = new PluginManifest(
+                "filesystem", "Filesystem", "读写指定目录", "folder", "工具",
+                PluginType.MCP, "stdio", "npx.cmd",
+                List.of("-y", "@modelcontextprotocol/server-filesystem", "${DIRECTORIES}"),
+                null, List.of("node>=18"), 6,
+                List.of("读写你授权的本地目录"),
+                List.of(new CredentialField("DIRECTORIES", "允许的目录", "逗号分隔多个目录",
+                        true, false, "/home/user/docs")),
+                "https://github.com/modelcontextprotocol/servers", "1.0.0");
+
+        McpInstaller installer = new McpInstaller(fs, mockService, mockDetector);
+        installer.install(1L, Map.of("DIRECTORIES", "/home/a, /home/b"));
+
+        ArgumentCaptor<McpServerRequest> captor = ArgumentCaptor.forClass(McpServerRequest.class);
+        verify(mockService).createWithPlugin(eq(1L), captor.capture(), eq("filesystem"), eq("1.0.0"));
+        McpServerRequest req = captor.getValue();
+        assertEquals(List.of("-y", "@modelcontextprotocol/server-filesystem", "/home/a", "/home/b"),
+                req.args());
+        assertFalse(req.env().containsKey("DIRECTORIES"), "占位符参数不应进入 env");
+    }
 }

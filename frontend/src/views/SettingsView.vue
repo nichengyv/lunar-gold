@@ -137,7 +137,7 @@
             </div>
 
             <div class="card">
-              <McpServersPanel v-if="meta.has('MCP_READ')" />
+              <PluginCenter v-if="meta.has('MCP_READ')" />
               <p v-else class="hint">当前部署模式不支持 MCP server 管理。</p>
             </div>
           </div>
@@ -319,7 +319,7 @@ import * as settingsApi from '../api/settings';
 import * as mcpApi from '../api/mcp';
 import { encryptPassword } from '../utils/crypto';
 import RulesPanel from '../components/RulesPanel.vue';
-import McpServersPanel from '../components/McpServersPanel.vue';
+import PluginCenter from '../components/PluginCenter.vue';
 import ExperienceDiagnosticsPanel from '../components/ExperienceDiagnosticsPanel.vue';
 import MetricsPanel from '../components/MetricsPanel.vue';
 import KeysView from './KeysView.vue';
@@ -347,7 +347,7 @@ const BASE_TABS = [
   { id: 'chat', label: '对话默认', icon: 'cpu' },
   { id: 'models', label: '模型服务', icon: 'key' },
   { id: 'rules', label: 'Agent 指令', icon: 'file-text' },
-  { id: 'mcp', label: 'MCP 工具', icon: 'plug' },
+  { id: 'mcp', label: '插件中心', icon: 'cpu' },
   { id: 'appearance', label: '外观', icon: 'palette' },
   { id: 'account', label: '账号安全', icon: 'user' },
   { id: 'about', label: '应用信息', icon: 'info' },
