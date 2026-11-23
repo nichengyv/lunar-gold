@@ -1,7 +1,7 @@
 # 0.1.4 插件管理中心 · 可执行 Task 清单
 
 > 更新日期：2026-11-23
-> 状态：T1–T9 已完成（✅），T10–T12 进行中（🟡）；0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
+> 状态：T1–T10、T12 已完成（✅），T11 集成验收进行中（🟡：后端/浏览器端到端已过，桌面真机与云端门控待发版前补测）；0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
 > 关联设计：[plugin-center.md](plugin-center.md)
 > 规则：每个 Task 独立可验收；后端任务先于前端联调；T11 为集成验收；新增公开端点必须同步 `PublicApiCatalog` 与 `public-api.json`（`PublicApiContractTest` 是漂移守卫）。
 
@@ -155,7 +155,7 @@
 
 ---
 
-### T10 · 运行时依赖检测前端 + 缺依赖引导 ⬜
+### T10 · 运行时依赖检测前端 + 缺依赖引导 ✅
 
 **改动**：
 - `PluginInstallDialog` 打开时，按 manifest.runtime 调检测（前端优先 `desktop/preload.js` 暴露的 `window.lunargold.detectRuntime`，无则调后端 `GET /api/plugins/runtime`）。
@@ -166,9 +166,11 @@
 
 **验收**：缺 node 的机器上安装按钮禁用并提示；有 node 的机器正常安装；`vue-tsc` 通过；preload 改动不破坏现有上下文隔离。
 
+> 实现注记：未走 preload，统一用后端预检端点 `GET /api/plugins/runtime-check?requirements=node>=18`（复用 `RuntimeDetector.checkAll`，不抛异常只报告结果），保证浏览器 dev 与桌面端同一路径、单一实现；缺失时「确认安装」置灰并给 node/python/uv 下载链接；install 时后端 `requireAll` 兜底拦截不变。
+
 ---
 
-### T11 · 集成验收 + 测试补齐 ⬜
+### T11 · 集成验收 + 测试补齐 🟡
 
 **改动**：
 - 后端：`mvn clean test` 全绿；新增 `PluginInstallTest`（端到端：catalog → install → server 创建 → 进程启动 → 工具注册）。
@@ -180,7 +182,7 @@
 
 ---
 
-### T12 · 文档同步 ⬜
+### T12 · 文档同步 ✅
 
 **改动**：
 - [plugin-center.md](plugin-center.md)：把第 12 节分期表的阶段 1 状态从「未开始」更新为实际进度。

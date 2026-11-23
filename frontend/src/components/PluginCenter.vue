@@ -78,13 +78,31 @@
           </el-form-item>
         </el-form>
         <div v-else class="pc-no-cred">该插件无需配置，确认后立即安装并连接。</div>
-        <div v-if="installing.runtime?.length" class="pc-runtime-hint">
-          <Icon name="alert" :size="12" /> 安装前会检测运行时：{{ installing.runtime.join(', ') }}
+        <div v-if="installing.runtime?.length" class="pc-runtime">
+          <div v-if="runtimeChecking" class="pc-runtime-line">检测运行时…</div>
+          <template v-else>
+            <div
+              v-for="c in runtimeChecks"
+              :key="c.spec"
+              class="pc-runtime-line"
+              :class="{ ok: c.satisfied, bad: !c.satisfied }"
+            >
+              <span class="pc-runtime-icon">{{ c.satisfied ? '✓' : '✗' }}</span>
+              <span>{{ c.message }}</span>
+              <a
+                v-if="!c.satisfied && downloadUrl(c.name)"
+                :href="downloadUrl(c.name)"
+                target="_blank"
+                rel="noopener"
+                class="pc-runtime-download"
+              >去下载 ↗</a>
+            </div>
+          </template>
         </div>
       </div>
       <template #footer>
         <el-button @click="installVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="confirmInstall">确认安装</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="!runtimeSatisfied" @click="confirmInstall">确认安装</el-button>
       </template>
     </el-dialog>
   </div>
@@ -97,7 +115,7 @@ import Icon from './Icon.vue';
 import McpServersPanel from './McpServersPanel.vue';
 import * as pluginApi from '../api/plugin';
 import { listMcpServers } from '../api/mcp';
-import type { Catalog, PluginManifest } from '../types/plugin';
+import type { Catalog, PluginManifest, RuntimeCheckResult } from '../types/plugin';
 
 const activeTab = ref<'market' | 'installed'>('market');
 const catalog = ref<Catalog>({ version: '', plugins: [] });
@@ -110,10 +128,26 @@ const installVisible = ref(false);
 const installing = ref<PluginManifest | null>(null);
 const submitting = ref(false);
 const formValues = reactive<Record<string, string>>({});
+const runtimeChecks = ref<RuntimeCheckResult[]>([]);
+const runtimeChecking = ref(false);
 
 const hasCredentials = computed(
   () => !!installing.value?.credentials && installing.value.credentials.length > 0
 );
+
+/** 运行时预检全部满足（无要求/检测中/检测失败时默认放行，交由后端兜底） */
+const runtimeSatisfied = computed(
+  () => runtimeChecks.value.length === 0 || runtimeChecks.value.every(c => c.satisfied)
+);
+
+const RUNTIME_DOWNLOAD_URLS: Record<string, string> = {
+  node: 'https://nodejs.org/',
+  python: 'https://www.python.org/downloads/',
+  uvx: 'https://github.com/astral-sh/uv',
+};
+function downloadUrl(name: string): string {
+  return RUNTIME_DOWNLOAD_URLS[name] || '';
+}
 
 async function load() {
   loading.value = true;
@@ -131,10 +165,22 @@ async function load() {
   }
 }
 
-function openInstall(p: PluginManifest) {
+async function openInstall(p: PluginManifest) {
   installing.value = p;
   Object.keys(formValues).forEach(k => delete formValues[k]);
+  runtimeChecks.value = [];
   installVisible.value = true;
+  if (p.runtime?.length) {
+    runtimeChecking.value = true;
+    try {
+      runtimeChecks.value = await pluginApi.checkRuntime(p.runtime);
+    } catch {
+      // 预检失败不阻塞安装，交由后端兜底校验
+      runtimeChecks.value = [];
+    } finally {
+      runtimeChecking.value = false;
+    }
+  }
 }
 
 async function confirmInstall() {
@@ -333,12 +379,30 @@ onMounted(load);
   color: var(--text-muted);
   background: var(--surface-2, transparent);
 }
-.pc-runtime-hint {
+.pc-runtime {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pc-runtime-line {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-top: 10px;
   font-size: 11px;
   color: var(--text-muted);
+}
+.pc-runtime-line.ok {
+  color: #1a7f37;
+}
+.pc-runtime-line.bad {
+  color: #cf222e;
+}
+.pc-runtime-icon {
+  font-weight: 700;
+}
+.pc-runtime-download {
+  color: var(--el-color-primary, #409eff);
+  text-decoration: none;
 }
 </style>

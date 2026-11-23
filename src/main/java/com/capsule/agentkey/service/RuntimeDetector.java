@@ -106,6 +106,42 @@ public class RuntimeDetector {
         }
     }
 
+    /** 单条运行时检测结果（不抛异常，供前端预检展示） */
+    public record RuntimeCheckResult(
+            String spec, String name, boolean satisfied, String detectedVersion, String message) {
+    }
+
+    /**
+     * 批量检测，返回每条的满足情况与消息；不抛异常（前端安装弹窗预检用）。
+     * 与 {@link #requireAll} 的区别：这里只报告结果，由前端决定是否禁用安装按钮，
+     * 真正的拦截仍在 {@link #requireAll}（install 时后端兜底，防前端绕过）。
+     */
+    public List<RuntimeCheckResult> checkAll(List<String> specs) {
+        if (specs == null || specs.isEmpty()) {
+            return List.of();
+        }
+        return specs.stream().map(spec -> {
+            RuntimeRequirement req;
+            try {
+                req = parse(spec);
+            } catch (IllegalArgumentException e) {
+                return new RuntimeCheckResult(spec, spec, false, null,
+                        "无法解析运行时要求: " + spec);
+            }
+            String detected = detect(req.name());
+            if (detected == null) {
+                return new RuntimeCheckResult(spec, req.name(), false, null,
+                        "缺少运行时依赖：需要 " + req.name() + formatConstraint(req));
+            }
+            boolean ok = satisfies(detected, req);
+            String msg = ok
+                    ? "已检测到 " + req.name() + " " + detected
+                    : "运行时版本过低：需要 " + req.name() + formatConstraint(req)
+                            + "，当前 " + detected;
+            return new RuntimeCheckResult(spec, req.name(), ok, detected, msg);
+        }).toList();
+    }
+
     private boolean satisfies(String detected, RuntimeRequirement req) {
         if (req.op().isEmpty() || req.version().isEmpty()) {
             return true; // 只要求存在

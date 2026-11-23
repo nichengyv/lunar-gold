@@ -41,3 +41,12 @@ export interface PluginInstallRequest {
   pluginId: string;
   credentials: Record<string, string>;
 }
+
+/** 运行时预检结果（对应后端 RuntimeDetector.RuntimeCheckResult） */
+export interface RuntimeCheckResult {
+  spec: string;
+  name: string;
+  satisfied: boolean;
+  detectedVersion: string | null;
+  message: string;
+}

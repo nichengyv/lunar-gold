@@ -1,7 +1,7 @@
 # 插件管理中心（Plugin Center）· 0.1.4 细化设计
 
 > 更新日期：2026-11-23
-> 状态：规划中（未开始）；0.1.3 已发布，从 main 拉新分支实施
+> 状态：阶段 1 已完成（0.1.4，T1–T12 落地）；0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
 > 关联：[当前状态](../../STATUS.md)、[更新规划 5.4 节](../../UPDATE_PLAN.md)、[工具与 MCP 架构](../../architecture/03-tools-approval-sandbox.md)、[数据持久化](../../architecture/08-data-persistence.md)
 > 用途：把设置页「扩展工具」从手填四框的工程师配置面板，升级为用户视角的「插件中心」（市场浏览 → 一键安装 → 已装管理）。本文是实施依据，覆盖数据模型、传输抽象、市场目录、安装流程、UI 与分期；单一事实源，其他文档只保留结论与链接。
 
@@ -70,11 +70,11 @@
 
 | 阶段 | 数据源 | 理由 |
 |---|---|---|
-| 阶段 1 | 前端内嵌静态 `marketplace.json`（随包） | 零网络依赖、零证书问题、零白屏降级；Electron 打包后随包走，内网/代理环境也能用；先跑通 UI 与安装流程 |
+| 阶段 1 | 后端 classpath 内嵌静态 `src/main/resources/marketplace.json`（前端经 `/api/plugins/catalog` 获取，不内嵌副本） | 零网络依赖、零证书问题、零白屏降级；Electron 打包后随包走，内网/代理环境也能用；先跑通 UI 与安装流程；单一数据源避免前后端双份漂移 |
 | 阶段 2 | fetch 远程 JSON（GitHub raw 托管） | 可热更新插件列表，不用发版；fetch 失败回退内嵌 JSON；加可信来源提示 |
 | 阶段 3 | （可选）自建服务端 | 用户量起来后再考虑审核/统计/版本管理，当前不做 |
 
-内嵌换远程的成本极低：UI 层 `import data from './marketplace.json'` → `await fetch(url)`，一行改动，组件不动。
+内嵌换远程的成本极低：只改 `PluginCatalogService` 的加载逻辑（读 classpath → fetch 远程 + 缓存），Controller 与前端组件均不动。
 
 ### 4.2 远程传输：阶段 1 不加，扩展 `McpClientFactory` 留口子（不新造 transport 接口）
 
@@ -505,7 +505,7 @@ Response: ApiResponse<McpServerResponse>  // 返回创建好的 server（含状�
 | 「不做开放插件市场」边界 | [UPDATE_PLAN.md](../../UPDATE_PLAN.md) 第 1 节 / 第 10 节 | 本文只引用结论 |
 | MCP 现有架构 | [architecture/03-tools-approval-sandbox.md](../../architecture/03-tools-approval-sandbox.md) | 本文只描述扩展点 |
 | `mcp_server` 加列 | [architecture/08-data-persistence.md](../../architecture/08-data-persistence.md) | 本文给出迁移 SQL，表结构事实归 08 |
-| 当前状态 | [STATUS.md](../../STATUS.md) | 本文标注「规划中」 |
+| 当前状态 | [STATUS.md](../../STATUS.md) | 本文标注「阶段 1 已完成」 |
 
 其他文档提及插件中心时，写结论并链接到本文，不复制细节。
 

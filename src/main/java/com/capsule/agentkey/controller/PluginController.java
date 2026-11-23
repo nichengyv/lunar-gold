@@ -1,5 +1,7 @@
 package com.capsule.agentkey.controller;
 
+import java.util.List;
+
 import com.capsule.agentkey.config.Capability;
 import com.capsule.agentkey.config.RequiresCapability;
 import com.capsule.agentkey.dto.ApiResponse;
@@ -10,6 +12,7 @@ import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.plugin.Catalog;
 import com.capsule.agentkey.plugin.InstallablePlugin;
 import com.capsule.agentkey.plugin.PluginInstallerFactory;
+import com.capsule.agentkey.service.RuntimeDetector;
 import com.capsule.agentkey.util.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,11 +33,23 @@ public class PluginController {
 
     private final PluginInstallerFactory installerFactory;
     private final com.capsule.agentkey.plugin.PluginCatalogService catalogService;
+    private final RuntimeDetector runtimeDetector;
 
     @GetMapping("/catalog")
     @RequiresCapability(Capability.MCP_READ)
     public ApiResponse<Catalog> catalog() {
         return ApiResponse.success(catalogService.catalog());
+    }
+
+    /**
+     * 运行时预检：前端打开安装弹窗时调用，报告每条 runtime 要求是否满足，
+     * 不抛异常、不拦截；真正的安装拦截仍在 install 时由后端兜底。
+     */
+    @GetMapping("/runtime-check")
+    @RequiresCapability(Capability.MCP_READ)
+    public ApiResponse<List<RuntimeDetector.RuntimeCheckResult>> runtimeCheck(
+            @RequestParam(name = "requirements", required = false) List<String> requirements) {
+        return ApiResponse.success(runtimeDetector.checkAll(requirements));
     }
 
     @PostMapping("/install")
