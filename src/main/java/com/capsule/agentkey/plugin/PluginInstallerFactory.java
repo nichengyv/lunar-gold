@@ -3,6 +3,7 @@ package com.capsule.agentkey.plugin;
 import org.springframework.stereotype.Component;
 
 import com.capsule.agentkey.service.McpServerService;
+import com.capsule.agentkey.service.RuntimeDetector;
 
 import java.util.Optional;
 
@@ -15,11 +16,14 @@ public class PluginInstallerFactory {
 
     private final PluginCatalogService catalogService;
     private final McpServerService mcpServerService;
+    private final RuntimeDetector runtimeDetector;
 
     public PluginInstallerFactory(PluginCatalogService catalogService,
-                                  McpServerService mcpServerService) {
+                                  McpServerService mcpServerService,
+                                  RuntimeDetector runtimeDetector) {
         this.catalogService = catalogService;
         this.mcpServerService = mcpServerService;
+        this.runtimeDetector = runtimeDetector;
     }
 
     public InstallablePlugin create(PluginManifest manifest) {
@@ -27,7 +31,7 @@ public class PluginInstallerFactory {
         if (type != PluginType.MCP) {
             throw new IllegalArgumentException("暂不支持安装插件类型: " + type);
         }
-        return new McpInstaller(manifest, mcpServerService);
+        return new McpInstaller(manifest, mcpServerService, runtimeDetector);
     }
 
     public Optional<InstallablePlugin> forId(String pluginId) {

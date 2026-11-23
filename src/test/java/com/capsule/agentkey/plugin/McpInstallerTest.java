@@ -5,6 +5,7 @@ import com.capsule.agentkey.dto.McpServerResponse;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.service.McpServerService;
+import com.capsule.agentkey.service.RuntimeDetector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -23,11 +24,13 @@ import static org.mockito.Mockito.*;
 class McpInstallerTest {
 
     private McpServerService mockService;
+    private RuntimeDetector mockDetector;
     private PluginManifest github;
 
     @BeforeEach
     void setUp() {
         mockService = mock(McpServerService.class);
+        mockDetector = mock(RuntimeDetector.class);
         github = new PluginManifest(
                 "github", "GitHub", "管理 issue/PR", "github", "开发协作",
                 PluginType.MCP, "stdio", "npx.cmd",
@@ -47,7 +50,7 @@ class McpInstallerTest {
                         List.of("GITHUB_TOKEN", "NODE_ENV"), true, true, 18, null,
                         "github", "1.0.0"));
 
-        McpInstaller installer = new McpInstaller(github, mockService);
+        McpInstaller installer = new McpInstaller(github, mockService, mockDetector);
         McpServerResponse resp = installer.install(1L, Map.of("GITHUB_TOKEN", "ghp_test"));
 
         assertEquals(7L, resp.id());
@@ -66,7 +69,7 @@ class McpInstallerTest {
 
     @Test
     void installMissingRequiredCredentialThrows() {
-        McpInstaller installer = new McpInstaller(github, mockService);
+        McpInstaller installer = new McpInstaller(github, mockService, mockDetector);
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> installer.install(1L, Map.of()));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
@@ -75,7 +78,7 @@ class McpInstallerTest {
 
     @Test
     void installWithUnknownCredentialFieldThrows() {
-        McpInstaller installer = new McpInstaller(github, mockService);
+        McpInstaller installer = new McpInstaller(github, mockService, mockDetector);
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> installer.install(1L, Map.of("GITHUB_TOKEN", "ghp_test", "EVIL_KEY", "x")));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
@@ -85,7 +88,7 @@ class McpInstallerTest {
 
     @Test
     void getConfigSchemaAndManifest() {
-        McpInstaller installer = new McpInstaller(github, mockService);
+        McpInstaller installer = new McpInstaller(github, mockService, mockDetector);
         assertSame(github, installer.getManifest());
         assertEquals(1, installer.getConfigSchema().size());
         assertEquals("GITHUB_TOKEN", installer.getConfigSchema().get(0).name());
@@ -93,7 +96,7 @@ class McpInstallerTest {
 
     @Test
     void uninstallDelegatesToService() {
-        McpInstaller installer = new McpInstaller(github, mockService);
+        McpInstaller installer = new McpInstaller(github, mockService, mockDetector);
         installer.uninstall(1L, 7L);
         verify(mockService).delete(1L, 7L);
     }

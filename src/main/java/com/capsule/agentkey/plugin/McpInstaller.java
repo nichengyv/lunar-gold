@@ -5,6 +5,7 @@ import com.capsule.agentkey.dto.McpServerResponse;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
 import com.capsule.agentkey.service.McpServerService;
+import com.capsule.agentkey.service.RuntimeDetector;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,10 +20,13 @@ public class McpInstaller implements InstallablePlugin<McpServerResponse> {
 
     private final PluginManifest manifest;
     private final McpServerService mcpServerService;
+    private final RuntimeDetector runtimeDetector;
 
-    public McpInstaller(PluginManifest manifest, McpServerService mcpServerService) {
+    public McpInstaller(PluginManifest manifest, McpServerService mcpServerService,
+                        RuntimeDetector runtimeDetector) {
         this.manifest = manifest;
         this.mcpServerService = mcpServerService;
+        this.runtimeDetector = runtimeDetector;
     }
 
     @Override
@@ -37,6 +41,7 @@ public class McpInstaller implements InstallablePlugin<McpServerResponse> {
 
     @Override
     public McpServerResponse install(Long userId, Map<String, String> userInput) {
+        runtimeDetector.requireAll(manifest.runtime());
         validateCredentials(userInput);
 
         // env = manifest 预置模板 + 用户填写的凭证（用户值覆盖模板同名 key）
