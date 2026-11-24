@@ -60,9 +60,9 @@
     --border-strong: #c9ccd1;
 
     /* ---- 品牌与语义色（亮色） ---- */
-    --primary: #ea580c;
-    --primary-hover: #c2410c;
-    --primary-light: #fff1e6;
+    --primary: #d9520a;
+    --primary-hover: #b74407;
+    --primary-light: #fff0e6;
     --on-primary: #ffffff;
     --text: #202124;
     --text-secondary: #5f6368;
@@ -107,9 +107,9 @@
     --border-strong: #4a4a50;
 
     /* ---- 品牌与语义色（暗色，逐项对应亮色） ---- */
-    --primary: #fb923c;
-    --primary-hover: #fdba74;
-    --primary-light: #ea580c33;
+    --primary: #f28a3c;
+    --primary-hover: #f8b47c;
+    --primary-light: #d9520a33;
     --on-primary: #ffffff;
     --text: #e6e6e8;
     --text-secondary: #9a9aa0;
