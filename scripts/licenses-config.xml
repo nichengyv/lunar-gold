@@ -114,6 +114,17 @@
                 </license>
             </licenses>
         </dependency>
+        <!-- 上游 URL 指向 repository.jboss.org，CI 上返回 503 / 读取超时（2026-11-24 两次） -->
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <licenses>
+                <license>
+                    <name>Apache-2.0</name>
+                    <url>https://cdn.jsdelivr.net/gh/spdx/license-list-data@v3.27.0/text/Apache-2.0.txt</url>
+                </license>
+            </licenses>
+        </dependency>
 
         <!-- 上游 URL 指向 gnu.org（旧版 LGPL / Classpath Exception），当前环境返回 403 -->
         <dependency>
