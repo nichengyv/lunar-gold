@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,9 +46,42 @@ public class StdioMcpClientFactory implements McpClientFactory {
                     "StdioMcpClientFactory 仅支持 STDIO，不支持 " + spec.transportType()
                             + "；远程传输（HTTP/SSE）尚未实现");
         }
-        ServerParameters parameters = ServerParameters.builder(normalizeCommand(spec.command()))
-                .args(spec.args() == null ? List.of() : spec.args())
-                .env(spec.env() == null ? Map.of() : spec.env())
+        List<String> args = spec.args() == null ? List.of() : spec.args();
+        Map<String, String> env = new HashMap<>(spec.env() == null ? Map.of() : spec.env());
+        String base = McpNodeRuntime.baseName(spec.command());
+        // 隔离 npm 缓存，避免与用户全局缓存互相锁
+        if (("npx".equals(base) || "npm".equals(base)) && !env.containsKey("NPM_CONFIG_CACHE")) {
+            String cache = McpNodeRuntime.npmCacheDir();
+            if (cache != null) {
+                env.put("NPM_CONFIG_CACHE", cache);
+            }
+        }
+        String command = null;
+        // 内置 Node 优先：npx/npm 走 node <cli.js>，不依赖系统 PATH 与 .cmd 包装
+        if (McpNodeRuntime.home() != null) {
+            if ("npx".equals(base) || "npm".equals(base)) {
+                var cli = McpNodeRuntime.cli(base);
+                var node = McpNodeRuntime.executable();
+                if (cli != null && node != null) {
+                    command = node.toString();
+                    List<String> merged = new ArrayList<>(args.size() + 1);
+                    merged.add(cli.toString());
+                    merged.addAll(args);
+                    args = merged;
+                }
+            } else if ("node".equals(base)) {
+                var node = McpNodeRuntime.executable();
+                if (node != null) {
+                    command = node.toString();
+                }
+            }
+        }
+        if (command == null) {
+            command = normalizeCommand(spec.command());
+        }
+        ServerParameters parameters = ServerParameters.builder(command)
+                .args(args)
+                .env(env)
                 .build();
         StdioClientTransport transport = new StdioClientTransport(
                 parameters, new JacksonMcpJsonMapper(jsonMapper));

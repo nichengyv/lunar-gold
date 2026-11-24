@@ -1,7 +1,7 @@
 # 插件管理中心（Plugin Center）· 0.1.4 细化设计
 
 > 更新日期：2026-11-23
-> 状态：阶段 1 已完成（0.1.4，T1–T12 落地）；0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
+> 状态：阶段 1 已完成（0.1.4，T1–T12 落地）；方向调整为「插件管理器」：市场 UI 与安装指引页已移除，引导压缩到「手动配置」弹窗与「从哪获取配置？」浮层；安装包内置 Node 运行时（`resources/node-runtime`），用户无需自装 Node。0.1.3 已发布，在 `feature/0.1.4-plugin-center` 分支开发
 > 关联：[当前状态](../../STATUS.md)、[更新规划 5.4 节](../../UPDATE_PLAN.md)、[工具与 MCP 架构](../../architecture/03-tools-approval-sandbox.md)、[数据持久化](../../architecture/08-data-persistence.md)
 > 用途：把设置页「扩展工具」从手填四框的工程师配置面板，升级为用户视角的「插件中心」（市场浏览 → 一键安装 → 已装管理）。本文是实施依据，覆盖数据模型、传输抽象、市场目录、安装流程、UI 与分期；单一事实源，其他文档只保留结论与链接。
 
@@ -14,7 +14,7 @@
 | 输入框 | 后端字段 | 用户痛点 |
 |---|---|---|
 | 名称 | `mcp_server.name` | 要自己想名字，且是工具前缀，填错不能改 |
-| 命令 | `mcp_server.command` | Windows 下 `npx` 要写 `npx.cmd`，否则 `Cannot run program` |
+| 命令 | `mcp_server.command` | 内置 Node 时 `npx`/`npm` 走内置运行时（`node <npx-cli.js>`）；无内置时 Windows 下 npx/npm/pnpm/yarn 自动补 `.cmd` |
 | 启动参数 | `mcp_server.args_json` | 每行一个参数，要会拆 `npx -y @xxx/server` |
 | 环境变量 | `mcp_server.env_encrypted` | 要知道哪个插件需要哪个 token |
 
@@ -31,7 +31,7 @@
 1. 设置页「扩展工具」重构为「插件中心」：市场 tab（卡片网格）+ 已安装 tab（现有列表迁移）。
 2. 市场内置 5–10 个官方 curated 插件，点卡片 → 弹窗只填凭证 → 一键安装并启动。
 3. 安装弹窗 schema-driven：由插件元数据的 `credentials` 数组动态渲染表单，新增插件不改前端代码。
-4. 安装前检测运行时依赖（node/uvx/python 等），缺失时引导安装，不出现「装了但用不了」。
+4. 运行时：安装包内置 Node 运行时，`npx` 类 server 开箱可用；uvx/python 类仍检测系统环境，缺失时在连接失败信息里给出原因。
 5. 保留「手动添加」高级入口（已装 tab 右上角），兼容本地自写 server 与手填场景。
 6. 已装插件可启停、更新、卸载，状态与现有 MCP 健康监控打通。
 

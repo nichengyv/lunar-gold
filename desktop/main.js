@@ -77,12 +77,15 @@ async function bootstrap() {
   const dataDir = process.env.DESKTOP_DATA_DIR || path.join(app.getPath('home'), '.lunargold', 'desktop');
   fs.mkdirSync(dataDir, { recursive: true });
 
+  const nodeHome = resolveNodeHome();
   runtime = {
     jarPath: null,
     dataDir,
     env: {
       ...process.env,
-      AES_MASTER_KEY: process.env.AES_MASTER_KEY || readOrCreateAesKey(dataDir)
+      AES_MASTER_KEY: process.env.AES_MASTER_KEY || readOrCreateAesKey(dataDir),
+      ...(nodeHome ? { LUNAR_MCP_NODE_HOME: nodeHome } : {}),
+      LUNAR_MCP_NPM_CACHE: path.join(dataDir, 'mcp-npm-cache')
     },
     logPath: path.join(dataDir, 'sidecar.log')
   };
@@ -371,6 +374,17 @@ function resolveJava() {
     if (fs.existsSync(exe)) return exe;
   }
   return process.platform === 'win32' ? 'java.exe' : 'java';
+}
+
+/** 内置 Node 运行时目录：打包态 resources/node-runtime，开发态 build/node-runtime */
+function resolveNodeHome() {
+  const candidates = [];
+  if (process.env.LUNAR_MCP_NODE_HOME) candidates.push(process.env.LUNAR_MCP_NODE_HOME);
+  if (app.isPackaged) candidates.push(path.join(process.resourcesPath, 'node-runtime'));
+  candidates.push(path.join(__dirname, '..', 'build', 'node-runtime'));
+  return candidates.find((dir) => dir && (
+    fs.existsSync(path.join(dir, 'node.exe')) || fs.existsSync(path.join(dir, 'bin', 'node'))
+  )) || null;
 }
 
 /** AES 主密钥必须跨启动稳定，否则已保存的模型 Key 会解不开 */

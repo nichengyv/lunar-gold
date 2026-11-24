@@ -111,6 +111,13 @@ Write-Step '裁剪桌面端私有 JRE'
 Assert-NativeSuccess 'JRE 裁剪失败'
 Assert-File $jreJava '裁剪 JRE 缺少 java.exe'
 
+$nodeRuntimeDir = Join-Path $buildDir 'node-runtime'
+if (-not (Test-Path (Join-Path $nodeRuntimeDir 'node.exe'))) {
+    Write-Step '缺少内置 Node 运行时，开始下载'
+    & (Join-Path $PSScriptRoot 'fetch-node-runtime.ps1')
+    Assert-NativeSuccess 'Node 运行时下载失败'
+}
+
 Write-Step '生成 unpacked 应用'
 Push-Location (Join-Path $repo 'desktop')
 try {
@@ -215,6 +222,7 @@ $packagedJar = Join-Path $unpacked 'resources\sidecar\agent-gateway-1.0.0.jar'
 Assert-File $installer 'NSIS 安装包未生成'
 Assert-File $packagedJar 'unpacked 应用缺少后端 jar'
 Assert-File (Join-Path $unpacked 'resources\jre\bin\java.exe') 'unpacked 应用缺少私有 JRE'
+Assert-File (Join-Path $unpacked 'resources\node-runtime\node.exe') 'unpacked 应用缺少内置 Node 运行时'
 Assert-File (Join-Path $unpacked 'resources\app.asar') 'unpacked 应用缺少桌面壳'
 if ((Get-FileHash -LiteralPath $jarPath).Hash -ne (Get-FileHash -LiteralPath $packagedJar).Hash) {
     throw 'unpacked 内的后端 jar 与 Maven 产物哈希不一致'

@@ -2,9 +2,25 @@
   <div class="mcp-panel">
     <div class="mcp-panel-header">
       <div>
-        <div class="mcp-panel-title">MCP Servers</div>
+        <div class="mcp-panel-title">
+          MCP Servers
+          <el-popover placement="bottom-start" trigger="click" width="300">
+            <template #reference>
+              <button class="mcp-help-link">从哪获取配置？</button>
+            </template>
+            <div class="mcp-help">
+              <p>从 server 介绍页复制配置 JSON，粘贴到「添加」里即可。</p>
+              <p>
+                <a href="https://github.com/modelcontextprotocol/servers" target="_blank" rel="noopener">官方参考实现</a> ·
+                <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a> ·
+                <a href="https://smithery.ai" target="_blank" rel="noopener">Smithery</a> ·
+                <a href="https://glama.ai/mcp/servers" target="_blank" rel="noopener">Glama</a>
+              </p>
+            </div>
+          </el-popover>
+        </div>
         <div class="mcp-panel-desc">
-          接入本机 stdio MCP server。命令会在本机启动进程，只添加你信任的 server。
+          接入本机 stdio MCP server，命令以当前用户权限在本机执行。
         </div>
       </div>
       <div class="mcp-header-actions">
@@ -25,7 +41,7 @@
 
     <div v-if="loading" class="mcp-empty">加载中…</div>
     <div v-else-if="servers.length === 0" class="mcp-empty">
-      还没有配置 MCP server。添加后 Agent 会自动发现它提供的工具。
+      还没有配置 MCP server。粘贴配置 JSON 即可接入，配置可从 mcp.so 等目录获取。
     </div>
 
     <div v-for="server in servers" :key="server.id" class="mcp-server">
@@ -86,7 +102,7 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId == null ? '添加 MCP Server' : '编辑 MCP Server'"
+      :title="editingId == null ? '手动配置' : '编辑 MCP Server'"
       width="560px"
       :close-on-click-modal="false"
     >
@@ -98,8 +114,12 @@
           <el-button size="small" :type="addMode === 'form' ? 'primary' : undefined" @click="addMode = 'form'">
             表单填写
           </el-button>
-          <span v-if="addMode === 'json'" class="mcp-mode-hint">从 MCP Server 介绍页复制配置 JSON 粘贴即可</span>
+          <span class="mcp-mode-hint">也可以切到表单逐项填写</span>
         </div>
+
+        <p v-if="isJsonMode" class="mcp-dialog-desc">
+          请从 MCP Server 的介绍页复制配置 JSON（优先使用 npx 或 uvx 配置），粘贴到下方输入框。
+        </p>
 
         <template v-if="isJsonMode">
           <el-input
@@ -115,7 +135,7 @@
           </div>
           <div class="mcp-warning">
             <Icon name="alert" :size="13" />
-            命令会以当前用户权限在本机执行。只添加可信来源，并要求其通过审批后才会被模型调用。
+            配置前请确认来源，甄别风险。
           </div>
         </template>
 
@@ -206,11 +226,15 @@ const jsonInputStyle = {
 };
 
 const jsonPlaceholder = [
-  '粘贴配置 JSON，支持以下写法：',
-  '1) Claude Desktop 风格',
-  '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_TOKEN": "ghp_xxx" } } } }',
-  '2) 单个 server',
-  '{ "name": "github", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }',
+  '// 示例：',
+  '// {',
+  '//   "mcpServers": {',
+  '//     "example-server": {',
+  '//       "command": "npx",',
+  '//       "args": ["-y", "mcp-server-example"]',
+  '//     }',
+  '//   }',
+  '// }',
 ].join('\n');
 
 const form = reactive({
@@ -792,6 +816,35 @@ function errorText(error: unknown) {
 }
 .mcp-tool-empty {
   font-size: 11px;
+  color: var(--text-muted);
+}
+.mcp-help-link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--el-color-primary, #409eff);
+  cursor: pointer;
+}
+.mcp-help p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.mcp-help p:last-child {
+  margin-bottom: 0;
+}
+.mcp-help a {
+  color: var(--el-color-primary, #409eff);
+  text-decoration: none;
+}
+.mcp-dialog-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--text-muted);
 }
 </style>

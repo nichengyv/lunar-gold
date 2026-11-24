@@ -2,7 +2,10 @@ package com.capsule.agentkey.service;
 
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
+import com.capsule.agentkey.mcp.McpNodeRuntime;
 import org.springframework.stereotype.Service;
+
+import java.nio.file.Path;
 
 import java.time.Duration;
 import java.util.List;
@@ -42,6 +45,13 @@ public class RuntimeDetector {
         String[] cmd = VERSION_COMMANDS.get(name);
         if (cmd == null) {
             return null;
+        }
+        // 内置 Node 优先：打包后即使系统没装 node，也能通过检测
+        if ("node".equals(name)) {
+            Path bundled = McpNodeRuntime.executable();
+            if (bundled != null) {
+                cmd = new String[]{bundled.toString(), "--version"};
+            }
         }
         Process process = null;
         try {

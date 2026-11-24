@@ -58,6 +58,10 @@
                                              "to":  "jre"
                                          },
                                          {
+                                             "from":  "../build/node-runtime",
+                                             "to":  "node-runtime"
+                                         },
+                                         {
                                              "from":  "../build/legal",
                                              "to":  "legal"
                                          }

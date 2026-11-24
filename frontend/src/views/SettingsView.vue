@@ -137,7 +137,7 @@
             </div>
 
             <div class="card">
-              <PluginCenter v-if="meta.has('MCP_READ')" />
+              <McpServersPanel v-if="meta.has('MCP_READ')" />
               <p v-else class="hint">当前部署模式不支持 MCP server 管理。</p>
             </div>
           </div>
@@ -319,7 +319,7 @@ import * as settingsApi from '../api/settings';
 import * as mcpApi from '../api/mcp';
 import { encryptPassword } from '../utils/crypto';
 import RulesPanel from '../components/RulesPanel.vue';
-import PluginCenter from '../components/PluginCenter.vue';
+import McpServersPanel from '../components/McpServersPanel.vue';
 import ExperienceDiagnosticsPanel from '../components/ExperienceDiagnosticsPanel.vue';
 import MetricsPanel from '../components/MetricsPanel.vue';
 import KeysView from './KeysView.vue';
