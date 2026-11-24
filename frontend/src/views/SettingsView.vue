@@ -50,18 +50,18 @@
             <div class="card">
               <h3><Icon name="sparkles" :size="15" /> 默认推理档位</h3>
               <el-radio-group v-model="local.defaultReasoning" @change="saveChatDefaults">
-                <el-radio value="FAST">快速 · 少轮次，回答快</el-radio>
-                <el-radio value="STANDARD">标准 · 常规平衡</el-radio>
-                <el-radio value="DEEP">深度 · 多步思考，质量高</el-radio>
+                <el-radio value="FAST">快速</el-radio>
+                <el-radio value="STANDARD">标准</el-radio>
+                <el-radio value="DEEP">深度</el-radio>
               </el-radio-group>
             </div>
 
             <div class="card">
               <h3><Icon name="shield" :size="15" /> 默认工作权限</h3>
               <el-radio-group v-model="local.defaultPermission" @change="saveChatDefaults">
-                <el-radio value="MANUAL">手动审批 · 写文件和执行命令都要确认</el-radio>
-                <el-radio value="AUTO">自动审批 · 写文件和普通命令自动通过，仅破坏性命令需确认</el-radio>
-                <el-radio value="FULL">完全权限 · 全部自动通过</el-radio>
+                <el-radio value="MANUAL">手动审批</el-radio>
+                <el-radio value="AUTO">自动审批</el-radio>
+                <el-radio value="FULL">完全权限</el-radio>
               </el-radio-group>
               <p class="hint">项目级默认权限优先于此处——如果在某个工作区设置过默认权限，新项目还是会继承那个值</p>
             </div>

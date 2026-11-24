@@ -276,10 +276,10 @@
             新任务默认继承这里的权限；单个任务仍可临时调整。未设置时按「手动审批」处理。
           </p>
           <el-select v-model="permissionDraft" style="width:100%">
-            <el-option label="未设置（按手动审批）" value="" />
-            <el-option label="手动审批 · 写文件和执行命令都要确认" value="MANUAL" />
-            <el-option label="自动审批 · 写文件和普通命令自动通过，仅破坏性命令需确认" value="AUTO" />
-            <el-option label="完全权限 · 全部自动通过" value="FULL" />
+            <el-option label="未设置" value="" />
+            <el-option label="手动审批" value="MANUAL" />
+            <el-option label="自动审批" value="AUTO" />
+            <el-option label="完全权限" value="FULL" />
           </el-select>
         </div>
 
