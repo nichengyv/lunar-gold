@@ -61,7 +61,9 @@ describe('AskUserCard', () => {
     expect(spy).toHaveBeenCalledWith(7, 'scope', ['加 wrapper'], undefined);
   });
 
-  it('单选：再点同一项可取消选中，此时不能提交', async () => {
+  it('单选：再点同一项可取消选中，提交时回退到默认推荐项', async () => {
+    const chat = useChatStore();
+    const spy = vi.spyOn(chat, 'answerUserQuestion').mockResolvedValue();
     const wrapper = mountCard(withOptions);
     const first = wrapper.findAll('.userq-option')[0];
 
@@ -69,7 +71,10 @@ describe('AskUserCard', () => {
     expect(first.classes()).toContain('selected');
     await first.trigger('click');
     expect(first.classes()).not.toContain('selected');
-    expect(wrapper.find('.userq-submit').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('.userq-submit').attributes('disabled')).toBeUndefined();
+
+    await wrapper.find('.userq-submit').trigger('click');
+    expect(spy).toHaveBeenCalledWith(7, 'scope', ['改接口定义 (Recommended)'], undefined);
   });
 
   it('多选：可同时选中多个选项', async () => {
