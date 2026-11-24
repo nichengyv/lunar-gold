@@ -128,7 +128,7 @@
           <label class="mcp-field">
             <span>命令</span>
             <el-input v-model="form.command" placeholder="例如 npx、uvx、node" />
-            <small>Windows 下 .cmd 需要写全名，例如 npx.cmd。</small>
+            <small>Windows 下 npx / npm / pnpm / yarn 会自动补 .cmd，其他命令请写完整名称。</small>
           </label>
           <label class="mcp-field">
             <span>启动参数</span>

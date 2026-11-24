@@ -15,11 +15,18 @@
         <div class="pc-guide">
           <section class="pc-section">
             <h3>1. 去哪里找 MCP Server</h3>
-            <p>本应用不内置在线插件市场，来源由你自己决定。以下目录收录了大量现成 server：</p>
+            <p>
+              本应用采用开放接入方式，不绑定特定插件源。你可以从任意目录或文档获取 MCP Server 配置，
+              粘贴即可使用。以下目录收录了大量现成 server：
+            </p>
             <ul class="pc-links">
               <li>
                 <a href="https://github.com/modelcontextprotocol/servers" target="_blank" rel="noopener">官方参考实现</a>
                 — 官方维护，质量最稳
+              </li>
+              <li>
+                <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a>
+                — 纯目录，配置格式规范，复制即可用
               </li>
               <li>
                 <a href="https://smithery.ai" target="_blank" rel="noopener">Smithery</a>
@@ -28,10 +35,6 @@
               <li>
                 <a href="https://glama.ai/mcp/servers" target="_blank" rel="noopener">Glama</a>
                 — 带评分与安全提示
-              </li>
-              <li>
-                <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a>
-                — 社区目录
               </li>
             </ul>
           </section>
@@ -64,14 +67,40 @@
                 <a href="https://github.com/astral-sh/uv" target="_blank" rel="noopener">下载 uv</a>
               </li>
             </ul>
-            <p class="pc-muted">Windows 下命令照抄 npx 即可，程序会自动补 .cmd。</p>
+            <p class="pc-muted">
+              Windows 下 npx / npm / pnpm / yarn 会自动补 .cmd；uvx、python 或自定义程序请写完整命令名（含扩展名）。
+            </p>
+          </section>
+
+          <section class="pc-section">
+            <h3>4. 验证是否成功</h3>
+            <p>
+              添加后回到「已安装」列表，状态显示「已连接」即表示成功，点击工具数可展开确认它提供的工具。
+              如果显示「连接失败」，错误原因会直接显示在条目下方，也可以点「测试连接」重新探测。
+            </p>
+            <ul class="pc-links">
+              <li>未安装 Node.js：npx 启动的 server 需要 Node.js ≥ 18</li>
+              <li>未安装 uv / Python：uvx 或 python 启动的 server 需要</li>
+              <li>包名拼写错误或版本不存在：核对 args 里的包名</li>
+              <li>缺少 API Key：检查 env 中是否填了必需凭证</li>
+            </ul>
+          </section>
+
+          <section class="pc-section">
+            <h3>5. 配置存储</h3>
+            <p>
+              所有配置保存在本机用户数据目录，不会上传。换机器时用「导出配置」生成 JSON 文件，
+              在新机器上「导入文件」即可迁移；环境变量值不会导出，需要在导入后重新填写。
+            </p>
           </section>
 
           <section class="pc-section pc-section-warn">
-            <h3>4. 安全提示</h3>
+            <h3>6. 安全提示</h3>
             <p>
-              添加的命令会以当前用户权限在本机执行，能读写你的文件。只添加可信来源；
-              每个工具调用都会走审批，不需要时随时用开关停用或删除。
+              添加的命令会以当前用户权限在本机执行，能读写你的文件。只添加可信来源。
+              内置的写文件与命令执行按当前权限档位审批；MCP 的写入、删除类工具强制审批，
+              只读工具不会弹窗；同一会话内可以「始终允许」某个工具，也支持批量批准。
+              不需要时随时用开关停用或删除。
             </p>
           </section>
         </div>
