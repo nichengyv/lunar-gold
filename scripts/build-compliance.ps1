@@ -217,9 +217,13 @@ Assert-File $vectorDll 'pgvector 运行时文件缺失'
 
 $pgLicense = Join-Path $work 'postgresql-COPYRIGHT'
 $vectorLicense = Join-Path $work 'pgvector-LICENSE'
-# 使用固定版本的上游文本镜像；GitHub 直连在部分网络环境不可达。
+# 使用固定版本的上游文本镜像；jsDelivr 对超大仓库（postgres）返回 403，回退到 GitHub raw。
 $pgBranch = 'REL_' + ($pgVersion -replace '\.', '_')
-Invoke-Download "https://cdn.jsdelivr.net/gh/postgres/postgres@$pgBranch/COPYRIGHT" $pgLicense '无法获取 PostgreSQL COPYRIGHT'
+try {
+    Invoke-Download "https://cdn.jsdelivr.net/gh/postgres/postgres@$pgBranch/COPYRIGHT" $pgLicense '无法获取 PostgreSQL COPYRIGHT'
+} catch {
+    Invoke-Download "https://raw.githubusercontent.com/postgres/postgres/$pgBranch/COPYRIGHT" $pgLicense '无法获取 PostgreSQL COPYRIGHT'
+}
 Invoke-Download "https://cdn.jsdelivr.net/gh/pgvector/pgvector@v$vectorVersion/LICENSE" $vectorLicense '无法获取 pgvector LICENSE'
 Add-LicenseText 'runtime' "PostgreSQL $pgVersion" (Get-Content -LiteralPath $pgLicense -Raw)
 Add-LicenseText 'runtime' "pgvector $vectorVersion" (Get-Content -LiteralPath $vectorLicense -Raw)
