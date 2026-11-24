@@ -223,7 +223,13 @@
           <div class="input-bar">
             <!-- 上排：textarea + 右侧紧凑按钮 -->
             <div class="input-bar-row-top">
-              <div class="input-wrapper">
+              <div
+                class="input-wrapper"
+                @dragenter="onDragEnter"
+                @dragover="onDragOver"
+                @dragleave="onDragLeave"
+                @drop="onDrop"
+              >
                 <div v-if="chat.pendingChips.length" class="attachment-list">
                   <div
                     v-for="chip in chat.pendingChips"
@@ -293,16 +299,21 @@
                   @click="onInputClick"
                   @blur="closeMention"
                 ></textarea>
+                <!-- 拖拽文件到输入框：整块高亮并提示松手，pointer-events 穿透避免打断拖拽事件 -->
+                <div v-if="dragActive" class="drop-overlay" aria-hidden="true">
+                  <Icon name="paperclip" :size="16" />
+                  <span>松开即可上传文件</span>
+                </div>
               </div>
               <input ref="fileEl" type="file" style="display: none" @change="onFileChange">
               <button class="btn-attach btn-mini" title="上传文件" aria-label="上传文件" @click="fileEl?.click()">
-                <Icon name="paperclip" :size="14" />
+                <Icon name="paperclip" :size="12" />
               </button>
               <button v-if="chat.isProcessing" class="btn-stop btn-mini" title="停止" aria-label="停止生成" @click="chat.stopGenerating()">
-                <Icon name="stop" :size="13" />
+                <Icon name="stop" :size="11" />
               </button>
               <button v-else class="btn-send btn-mini" title="发送" aria-label="发送消息" @click="onSend">
-                <Icon name="send" :size="13" />
+                <Icon name="send" :size="11" />
               </button>
             </div>
 
@@ -1511,6 +1522,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
+  // 拖拽上传：拦掉输入框以外的文件投放，避免窗口直接打开文件而不是留在应用内
+  window.addEventListener('dragenter', preventStrayFileDrop);
+  window.addEventListener('dragover', preventStrayFileDrop);
+  window.addEventListener('drop', preventStrayFileDrop);
   // 侧栏任务列表与空态概览共用 store 里的运行态，这里刷新一次
   chat.refreshRunningRuns();
   // 首屏回填的草稿可能是多行，等 DOM 就绪后按内容撑高输入框
@@ -1525,6 +1540,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
+  window.removeEventListener('dragenter', preventStrayFileDrop);
+  window.removeEventListener('dragover', preventStrayFileDrop);
+  window.removeEventListener('drop', preventStrayFileDrop);
   if (streamNoticeTimer) window.clearTimeout(streamNoticeTimer);
   if (approvalFlashTimer) window.clearTimeout(approvalFlashTimer);
 });
@@ -1593,6 +1611,54 @@ function onFileChange(e: Event) {
 function removeChip(key: string) {
   chat.removeChip(key);
   chat.saveDraftChips(draftKey.value);
+}
+
+// ——— 拖拽文件到输入框上传 ———
+/** 是否正处于「文件拖到输入框上方」的状态 */
+const dragActive = ref(false);
+/** 进出子元素会反复触发 dragenter/dragleave，用深度计数判断是否真的离开输入框 */
+let dragDepth = 0;
+
+function hasFilePayload(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes('Files');
+}
+
+function onDragEnter(e: DragEvent) {
+  // 只有拖文件才拦默认行为：拖选中的文字仍可正常落入输入框
+  if (!hasFilePayload(e)) return;
+  e.preventDefault();
+  dragDepth += 1;
+  dragActive.value = true;
+}
+
+function onDragOver(e: DragEvent) {
+  if (!hasFilePayload(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+}
+
+function onDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dragActive.value = false;
+}
+
+async function onDrop(e: DragEvent) {
+  dragDepth = 0;
+  dragActive.value = false;
+  if (!hasFilePayload(e)) return;
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  if (!files.length) return;
+  // 一次拖多个文件时逐个上传；用发起时的草稿键，避免上传途中切会话串到别的会话
+  const key = draftKey.value;
+  for (const file of files) await chat.uploadAttachment(file);
+  chat.saveDraftChips(key);
+}
+
+/** 文件丢在输入框以外时，阻止浏览器默认的「直接用窗口打开该文件」行为 */
+function preventStrayFileDrop(e: DragEvent) {
+  if (e.defaultPrevented || !hasFilePayload(e)) return;
+  e.preventDefault();
 }
 </script>
 
@@ -1790,6 +1856,23 @@ function removeChip(key: string) {
 /* 命令 / @ 引用弹出面板：浮在输入框上方（含附件区），不挤动消息列表 */
 .input-wrapper {
     position: relative;
+}
+
+/* 拖拽文件到输入框：整块虚线高亮 + 居中提示；pointer-events 穿透，避免打断拖拽事件 */
+.drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px dashed var(--primary);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+    color: var(--primary);
+    font-size: var(--fs-sm);
+    pointer-events: none;
 }
 
 .pop-palette {
