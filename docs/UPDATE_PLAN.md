@@ -16,6 +16,8 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 
 **当前产品主线：Phase 5（2026-11-16）、Phase 6（2026-11-17）、Phase 7（2026-11-20）均已收口。2026-11-21 完成全量架构审计后重规划：R0～R6 架构重构已完成；R7 长任务能力进行中（R7a 评测扩容、R7b 断点续跑已完成，R7b-live 真实模型续跑完成率仅完成 n=1 冒烟，R7c 进行中：L5 验证自动探测、纯 Java 裸源码有界全量编译、计划证据契约与检索型记忆已完成），随后做 P3-08 干净机器验收。详见第 14 节与 `ARCHITECTURE_AUDIT_20261121.md`。**
 
+**2026-11-24 新立项 R8（会话状态与上下文治理），优先于 R7 剩余项执行。** 实测故障：用户停止旧任务后在同一会话问「1+1等于几」，模型第 1 轮仍调用 `git status` 并弹审批，两分钟后才回答新问题。根因是任务生命周期只存在于 `agent_run.state`，从未进入模型上下文；历史按字符硬切且不按任务边界对齐；原文窗口、会话摘要、计划快照三套机制各管一段。方案与业界对照见 14.12。
+
 1. **智能体能力增强轨道**：P5-13 真实 ReAct 端到端评测与完成控制、P5-05 LSP 诊断闭环、P5-06 验证回路、P5-04 代码索引（repo map + 符号索引/增量缓存）、P5-07 RAG 混合检索/RRF/引用与检索质量量化、P5-08 并行只读工具均已完成；P5-07-2 用 24 切片 / 22 查询的标注语料实测 hybrid Recall@5 100% vs vector 68.42%（exact 类 0%→100%），按预写规则判定不启用模型 reranker。P5-04 已于 2026-11-16 用 deepseek-chat 完成 96 run A/B：repo map 开成功率 100% vs 关 62.5%，prompt tokens 4,126 vs 25,072，耗时 1.76s vs 10.17s，B1～B5 全过，判定保持默认开启；持久缓存按 C2 判定不建。**Phase 5 出口条件四条已全部满足，本阶段收口。**
 2. **工作台体验增强轨道**：P5-14 任务级 ChangeSet 与交付已完成基础交付（矩阵见第 5 节），P5-11-1 前端 Vitest/Playwright 基线、P5-11-2 体验可观测性、P5-11-3 长会话性能、P5-10-3 长任务进度、P5-10-2 审批效率、P5-10-4 键盘与无障碍与 P5-09 视觉体系已落地；剩余未勾选项（三态覆盖、长回答折叠、三档宽度、断网实测、J/K 与批量审批、axe 校验、500 会话性能）为打磨与合规加固，不阻塞 Phase 5 出口，转入后续批次。
 3. **并行 Windows 发布收尾**：签名、诊断 ZIP 导出人工复核、干净机器完整任务验收和 P3-08 所有者确认项单独跟踪，不阻塞 Phase 5。
@@ -50,7 +52,8 @@ Phase 0～2、P3-00～03 已完成；Windows 安装/卸载、GitHub Release、�
 | Phase 7 | 长会话：三数据集正式基线 ×3 + 记忆摘要 + 工具输出分档 + ask_user_question + SSE 真机链路 | **已收口（2026-11-20）**：P7-01 重启残局 ✅ / P7-02 统计切片 + 三数据集 ×3 正式基线（L1/L2/L3 均 2/3 成功率，LLM 固有表现）✅ / P7-04 记忆摘要升级（L3 memoryProbe 0/3→3/3）✅ / P7-04b 工具输出分档（FAST=500 / STANDARD=1000 / DEEP=2000）✅ / P7-05 SSE 真机 ✅ / P7-06 ask_user_question ✅ / P7-04c plan 注入尝试失败已回滚；P7-03 plan-first 不立项；详见 COMPLETED_WORK.md Phase 7 章节 |
 | Phase 7 收尾改进 | P7-07 计划持久化与软回注、P7-08 停滞渐进式恢复、P7-09 长会话上下文压缩 | 三项均按 L1～L3 数据集 A/B + 预注册阈值验证；完成率不降、token/耗时退化 <15% 才保留；不引入 plan-first 控制流 |
 | Phase 8（候选） | 长任务能力建设：Run 级持久化续跑、完成强校验、大任务分解、评测扩容、检索型记忆 | **未立项**；P7-07～P7-09 收口且 L1～L4 达标后启动；8 条验收标准（L1～L8）与排期见 13.12；2026-11-21 重规划后并入 R7 |
-| Phase 9 架构重构 | R0 安全网 → R1 状态地基 → R2 Context 瘦身 → R3 工具接缝 → R4 编排接缝 → R5 上下文接缝 → R6 前端拆分 → R7 长任务能力 | **当前主线**；每批行为保持/可回滚，先补测试再动代码；目标与验收见第 14 节 |
+| Phase 9 架构重构 | R0 安全网 → R1 状态地基 → R2 Context 瘦身 → R3 工具接缝 → R4 编排接缝 → R5 上下文接缝 → R6 前端拆分 → R7 长任务能力 | **已完成 R0～R6**；每批行为保持/可回滚，先补测试再动代码；目标与验收见第 14 节 |
+| R8 会话状态与上下文治理 | R8a 任务边界进入上下文（停止/失败/换话题）→ R8b 结构化任务态与按 turn 裁剪 → R8c 统一上下文管线与可观测 | 停止后同会话换话题不再续跑旧任务（硬性）；L2/L3 成功率不降、token 不涨超 15%；每轮上下文组成可回放。见 14.12 |
 | 0.1.4 插件管理中心 | 设置页 MCP tab 升级为「插件中心」：官方 curated 市场浏览 + schema-driven 一键安装 + 已装管理；阶段 1 内嵌静态目录，阶段 2 远程 JSON，阶段 3 远程传输 | 见 [phases/phase8/plugin-center.md](phases/phase8/plugin-center.md)；0.1.3 收口后从 main 拉新分支启动，不动已验证的打包/schema 路径 |
 
 ---
@@ -889,6 +892,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 | 文件变更 | 单 turn | `FileChangeService` | `pending_file_change` |
 | 审批 | 跨线程 | `ApprovalGate` | `tool_approval` |
 | SSE 连接 | 单连接 | `StreamPublisher` | 否 |
+| 会话任务态（最近任务、是否已停止） | 跨 turn | 由 `agent_run` 推导（R8a 前无归属，模型不可见） | `agent_run.state`（R8a 增加 stop_reason） |
 
 ### 14.5 重构批次（R0～R7）
 
@@ -1172,3 +1176,70 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 - **预算与用量**：父子共享 `RunBudget`，子任务不能重置父预算；子 Run 到达终态后把它自己的 token 用量一次性汇总进父 Run，会话用量查询仍只统计顶层 Run，避免双计。
 - **默认行为**：`agent.subtasks.enabled=false`、`agent.subtasks.max-subtasks=4`；关闭时模型看不到委派工具，行为与改造前一致。
 - **验证**：后端新增 `SubtaskSpecTest`、`SubtaskRunCoordinatorTest`、`AgentOrchestratorSubtaskResumeTest`、`AgentRunServiceTest` 子 Run 幂等/父子关系用例、`ChatStreamBridgeTest` 轻量 `SUBTASK` 事件用例与 `RunTerminationTest` 子任务收口用例；前端新增 `subtask` SSE 解析、`runRecovery` 按 `subtaskId` 去重、ChatView 子任务状态条与对应单测。**本次未运行真实模型**，没有子智能体完成率或 A/B 结论，只有离线/脚本化验证。
+
+---
+
+### 14.12 R8 会话状态与上下文治理（2026-11-24 立项）
+
+#### 14.12.1 故障与根因
+
+- **现象**：用户停止旧任务后，在同一会话问「1+1等于几」，模型第 1 轮仍发起 `git status` 并弹审批，约两分钟后才回答新问题。
+- **实测证据**：旧 Run 已置 `CANCELLED`；新 Run 的 prompt 确为新问题，工具排序第一名是 `calculator`，但第 1 轮先调用旧任务的 `run_command`。说明执行层正常，故障在「会话状态 → 上下文」的映射。
+- **根因三层**：
+  1. 任务生命周期只存在于 `agent_run.state`，停止只改枚举，模型看到的上下文里没有任何「上一轮已取消」的信号；
+  2. 历史按条数 + 字符预算硬切，只有 `role + content`，没有 turn 边界，也不回放工具轨迹；
+  3. 原文窗口、`contextSummary`、计划快照三套机制各管一段，没有统一优先级与预算，靠症状补丁维持。
+
+#### 14.12.2 现状盘点
+
+| 能力 | 现状 | 缺口 |
+|---|---|---|
+| Run 级状态 | `agent_run` 7 态状态机 + `plan_json` + `checkpoint_json`，完整 | 不进入模型上下文 |
+| 会话级任务态 | 无 | 无法表达「当前任务是什么、是否已取消、进行到哪」 |
+| 历史 | 条数 + 字符预算，只回放 `role + content` | 不按 turn 边界；工具轨迹丢失；截断可能落在任务中间 |
+| 计划 | Run 内 `plan_json`，按 run 注入 | 不跨任务；停止后仍留在库中 |
+| 压缩 | `ContextCondenser`：12 万字符窗口、8.4 万触发、保留末尾 6 条 | 以字符计；摘要是自然语言，不可校验 |
+| 挂起态 | 审批 120s、提问 15min，均在内存 | 重启丢失，但 UI 仍可能给出「继续」 |
+| 可观测 | 事件流可回放 | 无「每轮上下文由哪些段组成、裁掉了什么」 |
+
+#### 14.12.3 业界对照（2026-11 调研）
+
+| 项目 | 做法 | 可迁移点 |
+|---|---|---|
+| OpenHands | 事件溯源：所有交互作为不可变事件追加；`ConversationState` 字段变更即自动持久化；Condenser 以滚动窗口 + 压缩事件控制 token | 停止/失败应写成事件，而不是只改枚举；压缩结果仍保留事件源，可回溯 |
+| Cline | Auto Compact 接近上限时用摘要替换历史并继续；截断按优先级保留「原始任务描述、近期工具执行与结果、当前代码与错误」；另有 `/smol` 手动压缩与 Memory Bank | 裁剪按「任务描述 + 近期工具结果」优先级排序，而不是纯字符数 |
+| LangGraph | Checkpointer 持久化完整图状态，`thread_id` 为指针；interrupt 载荷显式化，按 interrupt id resume | 会话即 thread；任务边界与中断语义必须显式、可恢复 |
+
+参考：<https://docs.openhands.dev/sdk/arch/condenser>、<https://docs.openhands.dev/sdk/guides/convo-persistence>、<https://docs.cline.bot/features/auto-compact>、<https://docs.cline.bot/prompting/understanding-context-management>、<https://docs.langchain.com/oss/python/langgraph/checkpointers>
+
+本项目的 R1/R5 已完成 Run 级状态地基与压缩，但缺「会话级任务态」与「中断语义」，这正是 R8 的范围。
+
+#### 14.12.4 目标与非目标
+
+**目标（可验收）**：
+
+1. 停止/失败后在同一会话换话题，**不得调用旧任务工具**（硬性，100%）；
+2. 历史裁剪不切断 turn 边界，工具轨迹以「动作 + 结果摘要」保留；
+3. 每轮上下文组成可回放（各段 token、裁剪条数）；
+4. R7 L2/L3 数据集 A/B：成功率不下降，token 与耗时退化 <15%。
+
+**非目标**：不引入外部编排框架（LangGraph/AutoGen）；不改 ReAct 主循环与工具协议；不做开放记忆库（复用现有 RAG）；不做自动续跑。
+
+#### 14.12.5 分批
+
+| 批次 | 内容 | 出口 |
+|---|---|---|
+| **R8a 任务边界（P0）** | `agent_run` 增加 `stop_reason`（V27，可空，USER_STOP/FAILED/TIMEOUT）；停止链路写入；新 Run 装载历史前查同会话上一条顶层 Run，若 `CANCELLED/FAILED`：在历史尾部插入 system 段「上一轮已停止/失败，未完成，不要自动续跑，只回答本轮消息」，并仅在「最后一条 assistant 带未回填 tool_call」时裁掉该条；前端「继续」只在有 checkpoint 时显示 | 复现脚本 100% 不调旧工具；`ScriptedAgentLoopTest` 新增 2 例（停止→新话题、正常追问仍可继续）；全量测试绿 |
+| **R8b 结构化任务态（P1）** | `TaskState{objective,status,steps,filesTouched,decisions,openQuestions}` 作为只读投影，来源为 `plan_json` + 工具结果 + 终止原因；拼装顺序固定为 system → TaskState → 摘要 → 最近原文 → 本轮；历史按 `turn_id` 裁剪；工具轨迹压缩为动作+结果摘要 | R7 L2/L3 A/B 达标；任务边界抽检 0 切断 |
+| **R8c 统一管线（P2）** | `ContextPipeline` 单一入口，固定各段预算比例；token 估算替代字符；摘要改为四字段结构；新增 `CONTEXT_REPORT` 事件与只读诊断接口 | 每轮上下文组成 100% 可回放；默认行为可开关回滚 |
+
+R8a 不改主循环、不动工具协议，可独立提交与回滚；R8b/R8c 必须复用 R7 数据集与预注册阈值，不新造评测。
+
+#### 14.12.6 风险与缓解
+
+| 风险 | 缓解 |
+|---|---|
+| 注入 system 段破坏 provider 前缀缓存 | 只插在历史尾部、仅停止后的首轮注入，影响面限于尾部 |
+| 裁掉尾消息丢失有效信息 | 仅裁「无 tool 结果回填」的半截 assistant 消息，其余保留并加停止标记 |
+| TaskState 与 plan 双写不一致 | TaskState 只读投影，写入仍以 `plan_json` / 事件流为唯一事实源 |
+| 与 R7 评测口径冲突 | 复用同一数据集与预注册阈值，单独提交口径变更并说明理由 |
