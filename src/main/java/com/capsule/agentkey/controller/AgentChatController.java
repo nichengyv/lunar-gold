@@ -516,6 +516,9 @@ public class AgentChatController {
         String previousState = agentRunService.findLatestTerminalRun(userId, sessionId)
                 .map(run -> run.getState().name())
                 .orElse(null);
+        if ("CANCELLED".equals(previousState) || "FAILED".equals(previousState)) {
+            log.info("R8a 任务边界：sessionId={}, previousState={}, 已注入停止提示", sessionId, previousState);
+        }
         return com.capsule.agentkey.agent.run.TaskBoundaryNote
                 .appendIfUnfinished(history, userId, sessionId, previousState);
     }

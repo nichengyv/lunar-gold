@@ -393,6 +393,8 @@ const progressSummary = computed(() => {
   }
   if (props.msg.streaming) return `正在执行 · 已完成 ${props.msg.tools.length} 个步骤`;
   const duration = formatDuration(props.msg.durationMs);
+  // 被用户中断时不能显示「已完成」：这是任务边界，不是成功收口
+  if (props.msg.stopped) return duration ? `已停止，用时 ${duration}` : '已停止';
   const completionLabel = props.msg.completion?.status === 'UNVERIFIED'
     ? '未验证'
     : props.msg.completion?.status === 'INCOMPLETE'

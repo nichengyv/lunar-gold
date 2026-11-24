@@ -51,6 +51,18 @@ describe('ChatMessage P5-10-3', () => {
     expect(spy).toHaveBeenCalledWith(5);
   });
 
+  it('停止后思考链摘要显示「已停止」，不能显示「已完成」', () => {
+    const wrapper = mountMessage(message({
+      id: 7,
+      content: '半截',
+      stopped: true,
+      durationMs: 18000,
+      tools: [{ name: 'list_dir', args: '{}', status: 'success' }]
+    }));
+
+    expect(wrapper.find('.progress-text').text()).toBe('已停止，用时 18 秒');
+  });
+
   it('配置类失败给出「需配置」和「去设置」', async () => {
     const wrapper = mountMessage(
       message({ failed: true, errorText: '401 Unauthorized: API Key 未配置' })
