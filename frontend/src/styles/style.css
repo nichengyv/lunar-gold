@@ -598,8 +598,9 @@ body {
     max-width: 76%;
     margin-right: 6%;
     padding: 10px 16px;
-    background: var(--primary-strong);
-    color: white;
+    /* 与输入框（textarea）同色，不再用主色填充 */
+    background: var(--surface);
+    color: var(--text);
     border-radius: 16px;
     border-bottom-right-radius: 4px;
     white-space: pre-wrap;
