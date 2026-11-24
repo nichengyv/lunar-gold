@@ -1,7 +1,7 @@
 # Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
-> 更新日期：2026-11-24；基线提交 `31f1fef`（master，已推 GitHub/Gitee）。0.1.3 于 2026-11-20 发布（tag `v0.1.3` + Release 已公开）；**0.1.4 于 2026-11-24 发布**（tag `v0.1.4`，GitHub Release 为草稿，待所有者确认后公开）：插件中心/插件管理器（T1–T12）、安装包内置 Node 运行时、R8a 任务边界与停止原因、决策询问推荐项、拖拽上传与橙色主题等。设计与 task 清单见 [phase8](phases/phase8/plugin-center.md) 与 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)；T11 剩余「桌面真机全功能核对」随发版后统一执行。
+> 更新日期：2026-11-24；基线提交 `31f1fef`（master，已推 GitHub/Gitee）。0.1.3 于 2026-11-20 发布（tag `v0.1.3` + Release 已公开）；**0.1.4 于 2026-11-24 发布**（tag `v0.1.4`，GitHub Release 已公开，自动更新清单已生效）：插件中心/插件管理器（T1–T12）、安装包内置 Node 运行时、R8a 任务边界与停止原因、决策询问推荐项、拖拽上传与橙色主题等。设计与 task 清单见 [phase8](phases/phase8/plugin-center.md) 与 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)；T11 剩余「桌面真机全功能核对」随发版后统一执行。
 > 后端 **625 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **117 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
 
 ## 一句话定位
