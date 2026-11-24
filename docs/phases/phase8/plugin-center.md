@@ -32,6 +32,7 @@
 2. 市场内置 5–10 个官方 curated 插件，点卡片 → 弹窗只填凭证 → 一键安装并启动。
 3. 安装弹窗 schema-driven：由插件元数据的 `credentials` 数组动态渲染表单，新增插件不改前端代码。
 4. 运行时：安装包内置 Node 运行时，`npx` 类 server 开箱可用；uvx/python 类仍检测系统环境，缺失时在连接失败信息里给出原因。
+   - 不复用 Electron 自带 Node 的取舍（2026-11-24 决策）：MCP 进程由 Java 后端 spawn，Electron 的 Node 需以 `ELECTRON_RUN_AS_NODE=1` 启动应用主程序才可用，且不含 npm/npx；npx 的子进程也未必继承该环境变量。为稳定性与「npm 官方支持」内置独立 node.exe，安装包约 +80MB；瘦身留作后续优化。
 5. 保留「手动添加」高级入口（已装 tab 右上角），兼容本地自写 server 与手填场景。
 6. 已装插件可启停、更新、卸载，状态与现有 MCP 健康监控打通。
 
