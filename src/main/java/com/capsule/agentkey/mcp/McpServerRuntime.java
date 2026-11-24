@@ -1,6 +1,7 @@
 package com.capsule.agentkey.mcp;
 
 import com.capsule.agentkey.config.Capability;
+import com.capsule.agentkey.dto.McpToolInfo;
 import com.capsule.agentkey.entity.McpServer;
 import com.capsule.agentkey.repository.McpServerRepository;
 import com.capsule.agentkey.service.CapabilityService;
@@ -125,6 +126,15 @@ public class McpServerRuntime {
     public boolean isConnected(Long id) {
         Managed current = managed.get(id);
         return current != null && current.client() != null;
+    }
+
+    /** 已注册工具的清单（远端原名 + 描述）；未连接或无工具时返回空列表 */
+    public List<McpToolInfo> tools(Long id) {
+        Managed current = managed.get(id);
+        if (current == null || current.toolNames().isEmpty()) {
+            return List.of();
+        }
+        return toolBridge.summarize(current.name(), current.toolNames());
     }
 
     @PreDestroy

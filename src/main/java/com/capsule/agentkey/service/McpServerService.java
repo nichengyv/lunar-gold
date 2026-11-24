@@ -2,6 +2,7 @@ package com.capsule.agentkey.service;
 
 import com.capsule.agentkey.dto.McpServerRequest;
 import com.capsule.agentkey.dto.McpServerResponse;
+import com.capsule.agentkey.dto.McpToolInfo;
 import com.capsule.agentkey.entity.McpServer;
 import com.capsule.agentkey.exception.BusinessException;
 import com.capsule.agentkey.exception.ErrorCode;
@@ -110,6 +111,12 @@ public class McpServerService {
         McpServer server = owned(userId, id);
         runtime.reload(server);
         return toResponse(server);
+    }
+
+    /** 工具清单预览：返回该 server 当前注册到工具链的远端工具名与描述 */
+    public List<McpToolInfo> tools(Long userId, Long id) {
+        McpServer server = owned(userId, id);
+        return runtime.tools(server.getId());
     }
 
     private McpServer owned(Long userId, Long id) {

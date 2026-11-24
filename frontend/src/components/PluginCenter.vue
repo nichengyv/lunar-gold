@@ -1,224 +1,150 @@
 <template>
   <div class="plugin-center">
     <el-tabs v-model="activeTab" class="pc-tabs">
-      <!-- 插件市场 -->
-      <el-tab-pane name="market">
-        <template #label>
-          <span class="pc-tab-label"><Icon name="sparkles" :size="13" /> 插件市场</span>
-        </template>
-        <div v-if="loading" class="pc-empty">加载插件目录…</div>
-        <div v-else-if="error" class="pc-empty">
-          加载失败：{{ error }}
-          <button class="pc-link-btn" @click="load">重试</button>
-        </div>
-        <div v-else-if="catalog.plugins.length === 0" class="pc-empty">暂无可用插件</div>
-        <div v-else class="pc-grid">
-          <div v-for="p in catalog.plugins" :key="p.id" class="pc-card">
-            <div class="pc-card-head">
-              <span class="pc-avatar" :style="{ background: colorOf(p.category) }">{{ initial(p.name) }}</span>
-              <div class="pc-card-title">
-                <div class="pc-name">{{ p.name }}</div>
-                <div class="pc-sub">{{ p.category }}<span v-if="p.toolCount != null"> · {{ p.toolCount }} 工具</span></div>
-              </div>
-            </div>
-            <p class="pc-desc">{{ p.description }}</p>
-            <div class="pc-tags">
-              <span v-if="p.runtime?.length" class="pc-tag">需要 {{ p.runtime.join(', ') }}</span>
-              <span v-if="p.credentials && p.credentials.length > 0" class="pc-tag">需填 {{ p.credentials.length }} 项</span>
-              <span v-else class="pc-tag pc-tag-free">免配置</span>
-            </div>
-            <div class="pc-actions">
-              <button
-                class="pc-install"
-                :class="{ installed: installedIds.has(p.id) }"
-                :disabled="installedIds.has(p.id)"
-                @click="openInstall(p)"
-              >
-                {{ installedIds.has(p.id) ? '已安装' : '安装' }}
-              </button>
-              <a v-if="p.homepageUrl" :href="p.homepageUrl" target="_blank" rel="noopener" class="pc-detail">详情 ↗</a>
-            </div>
-          </div>
-        </div>
-      </el-tab-pane>
-
-      <!-- 已安装 -->
       <el-tab-pane name="installed">
         <template #label>
           <span class="pc-tab-label"><Icon name="cpu" :size="13" /> 已安装</span>
         </template>
-        <McpServersPanel :key="panelKey" />
+        <McpServersPanel />
+      </el-tab-pane>
+
+      <el-tab-pane name="guide">
+        <template #label>
+          <span class="pc-tab-label"><Icon name="sparkles" :size="13" /> 安装指引</span>
+        </template>
+        <div class="pc-guide">
+          <section class="pc-section">
+            <h3>1. 去哪里找 MCP Server</h3>
+            <p>本应用不内置在线插件市场，来源由你自己决定。以下目录收录了大量现成 server：</p>
+            <ul class="pc-links">
+              <li>
+                <a href="https://github.com/modelcontextprotocol/servers" target="_blank" rel="noopener">官方参考实现</a>
+                — 官方维护，质量最稳
+              </li>
+              <li>
+                <a href="https://smithery.ai" target="_blank" rel="noopener">Smithery</a>
+                — 条目最多，支持在线试用
+              </li>
+              <li>
+                <a href="https://glama.ai/mcp/servers" target="_blank" rel="noopener">Glama</a>
+                — 带评分与安全提示
+              </li>
+              <li>
+                <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a>
+                — 社区目录
+              </li>
+            </ul>
+          </section>
+
+          <section class="pc-section">
+            <h3>2. 怎么添加</h3>
+            <p>
+              在 server 的介绍页复制配置 JSON，回到「已安装」点「添加」粘贴即可。支持三种写法，
+              也支持一次粘贴多个 server。
+            </p>
+            <div v-for="ex in examples" :key="ex.title" class="pc-example">
+              <div class="pc-example-head">
+                <span class="pc-example-title">{{ ex.title }}</span>
+                <button class="pc-copy" @click="copy(ex.json, ex.title)">复制</button>
+              </div>
+              <pre class="pc-code">{{ ex.json }}</pre>
+              <div class="pc-example-note">{{ ex.note }}</div>
+            </div>
+          </section>
+
+          <section class="pc-section">
+            <h3>3. 运行环境</h3>
+            <ul class="pc-links">
+              <li>
+                Node.js ≥ 18（npx 启动的 server 需要）—
+                <a href="https://nodejs.org/" target="_blank" rel="noopener">下载</a>
+              </li>
+              <li>
+                uv / Python（uvx 或 python 启动的 server 需要）—
+                <a href="https://github.com/astral-sh/uv" target="_blank" rel="noopener">下载 uv</a>
+              </li>
+            </ul>
+            <p class="pc-muted">Windows 下命令照抄 npx 即可，程序会自动补 .cmd。</p>
+          </section>
+
+          <section class="pc-section pc-section-warn">
+            <h3>4. 安全提示</h3>
+            <p>
+              添加的命令会以当前用户权限在本机执行，能读写你的文件。只添加可信来源；
+              每个工具调用都会走审批，不需要时随时用开关停用或删除。
+            </p>
+          </section>
+        </div>
       </el-tab-pane>
     </el-tabs>
-
-    <!-- 安装弹窗：按 credentials schema 渲染表单 -->
-    <el-dialog
-      v-model="installVisible"
-      :title="installing ? `安装 ${installing.name}` : '安装插件'"
-      width="500px"
-      :close-on-click-modal="false"
-    >
-      <div v-if="installing">
-        <p class="pc-install-desc">{{ installing.description }}</p>
-        <el-form v-if="hasCredentials" label-position="top" @submit.prevent="confirmInstall">
-          <el-form-item
-            v-for="f in installing.credentials"
-            :key="f.name"
-            :label="f.label"
-            :required="f.required"
-          >
-            <el-input
-              v-model="formValues[f.name]"
-              :type="f.secret ? 'password' : 'text'"
-              :placeholder="f.placeholder"
-              :show-password="f.secret"
-              @keyup.enter="confirmInstall"
-            />
-            <div v-if="f.description" class="pc-field-hint">{{ f.description }}</div>
-          </el-form-item>
-        </el-form>
-        <div v-else class="pc-no-cred">该插件无需配置，确认后立即安装并连接。</div>
-        <div v-if="installing.runtime?.length" class="pc-runtime">
-          <div v-if="runtimeChecking" class="pc-runtime-line">检测运行时…</div>
-          <template v-else>
-            <div
-              v-for="c in runtimeChecks"
-              :key="c.spec"
-              class="pc-runtime-line"
-              :class="{ ok: c.satisfied, bad: !c.satisfied }"
-            >
-              <span class="pc-runtime-icon">{{ c.satisfied ? '✓' : '✗' }}</span>
-              <span>{{ c.message }}</span>
-              <a
-                v-if="!c.satisfied && downloadUrl(c.name)"
-                :href="downloadUrl(c.name)"
-                target="_blank"
-                rel="noopener"
-                class="pc-runtime-download"
-              >去下载 ↗</a>
-            </div>
-          </template>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="installVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="!runtimeSatisfied" @click="confirmInstall">确认安装</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed } from 'vue';
+import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import Icon from './Icon.vue';
 import McpServersPanel from './McpServersPanel.vue';
-import * as pluginApi from '../api/plugin';
-import { listMcpServers } from '../api/mcp';
-import type { Catalog, PluginManifest, RuntimeCheckResult } from '../types/plugin';
 
-const activeTab = ref<'market' | 'installed'>('market');
-const catalog = ref<Catalog>({ version: '', plugins: [] });
-const loading = ref(false);
-const error = ref('');
-const installedIds = ref<Set<string>>(new Set());
-const panelKey = ref(0);
+const activeTab = ref<'installed' | 'guide'>('installed');
 
-const installVisible = ref(false);
-const installing = ref<PluginManifest | null>(null);
-const submitting = ref(false);
-const formValues = reactive<Record<string, string>>({});
-const runtimeChecks = ref<RuntimeCheckResult[]>([]);
-const runtimeChecking = ref(false);
-
-const hasCredentials = computed(
-  () => !!installing.value?.credentials && installing.value.credentials.length > 0
-);
-
-/** 运行时预检全部满足（无要求/检测中/检测失败时默认放行，交由后端兜底） */
-const runtimeSatisfied = computed(
-  () => runtimeChecks.value.length === 0 || runtimeChecks.value.every(c => c.satisfied)
-);
-
-const RUNTIME_DOWNLOAD_URLS: Record<string, string> = {
-  node: 'https://nodejs.org/',
-  python: 'https://www.python.org/downloads/',
-  uvx: 'https://github.com/astral-sh/uv',
-};
-function downloadUrl(name: string): string {
-  return RUNTIME_DOWNLOAD_URLS[name] || '';
-}
-
-async function load() {
-  loading.value = true;
-  error.value = '';
-  try {
-    catalog.value = await pluginApi.fetchCatalog();
-    const servers = await listMcpServers();
-    installedIds.value = new Set(
-      servers.map(s => s.pluginId).filter((id): id is string => !!id)
-    );
-  } catch (e) {
-    error.value = errorText(e);
-  } finally {
-    loading.value = false;
+const examples = [
+  {
+    title: '标准 mcpServers 格式（推荐）',
+    note: '大多数 server 的介绍页给的就是这种，支持一次粘贴多个。',
+    json: JSON.stringify(
+      {
+        mcpServers: {
+          everything: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-everything']
+          }
+        }
+      },
+      null,
+      2
+    )
+  },
+  {
+    title: '需要凭证的 server',
+    note: '凭证写在 env 里，保存后只回显变量名，不回显值。',
+    json: JSON.stringify(
+      {
+        mcpServers: {
+          github: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-github'],
+            env: { GITHUB_TOKEN: 'ghp_xxxxxxxxxxxx' }
+          }
+        }
+      },
+      null,
+      2
+    )
+  },
+  {
+    title: '单个 server 平铺',
+    note: '不想用 mcpServers 包裹时，也可以直接给 name / command / args。',
+    json: JSON.stringify(
+      {
+        name: 'everything',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-everything']
+      },
+      null,
+      2
+    )
   }
-}
+];
 
-async function openInstall(p: PluginManifest) {
-  installing.value = p;
-  Object.keys(formValues).forEach(k => delete formValues[k]);
-  runtimeChecks.value = [];
-  installVisible.value = true;
-  if (p.runtime?.length) {
-    runtimeChecking.value = true;
-    try {
-      runtimeChecks.value = await pluginApi.checkRuntime(p.runtime);
-    } catch {
-      // 预检失败不阻塞安装，交由后端兜底校验
-      runtimeChecks.value = [];
-    } finally {
-      runtimeChecking.value = false;
-    }
-  }
-}
-
-async function confirmInstall() {
-  if (!installing.value || submitting.value) return;
-  submitting.value = true;
-  const target = installing.value;
+async function copy(text: string, label: string) {
   try {
-    await pluginApi.installPlugin(target.id, { ...formValues });
-    ElMessage.success(`已安装 ${target.name}，正在连接`);
-    installVisible.value = false;
-    activeTab.value = 'installed';
-    panelKey.value++; // 强制 McpServersPanel 重挂载刷新列表
-    await load();
+    await navigator.clipboard.writeText(text);
+    ElMessage.success(`已复制：${label}`);
   } catch {
-    // 错误已由 axios 拦截器统一提示
-  } finally {
-    submitting.value = false;
+    ElMessage.warning('复制失败，请手动选择文本');
   }
 }
-
-function initial(name: string): string {
-  return name?.charAt(0).toUpperCase() || '?';
-}
-
-const AVATAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
-function colorOf(category?: string): string {
-  if (!category) return AVATAR_COLORS[0];
-  let hash = 0;
-  for (let i = 0; i < category.length; i++) hash = (hash * 31 + category.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
-}
-
-function errorText(err: unknown): string {
-  const anyError = err as { response?: { data?: { message?: string } }; message?: string };
-  return anyError?.response?.data?.message || anyError?.message || '加载失败';
-}
-
-onMounted(load);
 </script>
 
 <style scoped>
@@ -235,174 +161,99 @@ onMounted(load);
   gap: 5px;
   font-size: 13px;
 }
-.pc-empty {
-  padding: 24px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.pc-link-btn {
-  margin-left: 6px;
-  border: none;
-  background: none;
-  color: var(--el-color-primary, #409eff);
-  cursor: pointer;
-  text-decoration: underline;
-}
-.pc-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-}
-.pc-card {
+.pc-guide {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  gap: 14px;
+  padding-top: 4px;
+}
+.pc-section {
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.pc-card:hover {
-  border-color: var(--el-color-primary-light-5, #a0cfff);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-.pc-card-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.pc-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  color: #fff;
-  font-weight: 700;
-  font-size: 15px;
-  flex-shrink: 0;
-}
-.pc-card-title {
-  min-width: 0;
-}
-.pc-name {
-  font-size: 14px;
+.pc-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
 }
-.pc-sub {
-  margin-top: 2px;
-  font-size: 11px;
+.pc-section p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.7;
   color: var(--text-muted);
 }
-.pc-desc {
+.pc-links {
   margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+}
+.pc-links a {
+  color: var(--el-color-primary, #409eff);
+  text-decoration: none;
+}
+.pc-muted {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+.pc-example {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   overflow: hidden;
 }
-.pc-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.pc-tag {
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  background: var(--surface-2, transparent);
-}
-.pc-tag-free {
-  color: #1a7f37;
-  border-color: #1a7f3755;
-  background: #1a7f3712;
-}
-.pc-actions {
+.pc-example-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: auto;
   gap: 8px;
+  padding: 7px 12px;
+  background: var(--surface-2, transparent);
+  border-bottom: 1px solid var(--border);
 }
-.pc-install {
-  padding: 5px 14px;
-  border: 1px solid var(--el-color-primary, #409eff);
-  border-radius: 6px;
-  background: var(--el-color-primary, #409eff);
-  color: #fff;
+.pc-example-title {
   font-size: 12px;
-  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
 }
-.pc-install:hover:not(:disabled) {
-  opacity: 0.9;
-}
-.pc-install:disabled,
-.pc-install.installed {
+.pc-copy {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
-  border-color: var(--border);
-  cursor: default;
-}
-.pc-detail {
   font-size: 11px;
-  color: var(--el-color-primary, #409eff);
-  text-decoration: none;
+  cursor: pointer;
 }
-.pc-install-desc {
-  margin: 0 0 12px;
-  font-size: 12px;
+.pc-copy:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.pc-code {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
   line-height: 1.6;
-  color: var(--text-muted);
+  color: var(--text);
+  overflow: auto;
+  background: transparent;
 }
-.pc-field-hint {
-  margin-top: 3px;
+.pc-example-note {
+  padding: 0 12px 10px;
   font-size: 11px;
-  color: var(--text-muted);
   line-height: 1.5;
-}
-.pc-no-cred {
-  padding: 10px 12px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--surface-2, transparent);
-}
-.pc-runtime {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.pc-runtime-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
   color: var(--text-muted);
 }
-.pc-runtime-line.ok {
-  color: #1a7f37;
-}
-.pc-runtime-line.bad {
-  color: #cf222e;
-}
-.pc-runtime-icon {
-  font-weight: 700;
-}
-.pc-runtime-download {
-  color: var(--el-color-primary, #409eff);
-  text-decoration: none;
+.pc-section-warn {
+  border-color: #c2410c44;
+  background: #c2410c08;
 }
 </style>

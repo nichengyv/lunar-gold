@@ -55,6 +55,12 @@ export interface McpServerInput {
   enabled: boolean;
 }
 
+/** 工具清单预览项：远端工具原名 + 描述 */
+export interface McpToolInfo {
+  name: string;
+  description: string;
+}
+
 export async function listMcpServers(): Promise<McpServerConfig[]> {
   return http.get<never, ApiResponse<McpServerConfig[]>>('/api/mcp/servers').then(unwrap);
 }
@@ -74,6 +80,11 @@ export async function setMcpServerEnabled(id: number, enabled: boolean): Promise
 
 export async function reloadMcpServer(id: number): Promise<McpServerConfig> {
   return http.post<never, ApiResponse<McpServerConfig>>(`/api/mcp/servers/${id}/reload`).then(unwrap);
+}
+
+/** 工具清单预览：当前注册到工具链的远端工具名与描述 */
+export async function getMcpServerTools(id: number): Promise<McpToolInfo[]> {
+  return http.get<never, ApiResponse<McpToolInfo[]>>(`/api/mcp/servers/${id}/tools`).then(unwrap);
 }
 
 export async function deleteMcpServer(id: number): Promise<void> {

@@ -347,7 +347,7 @@ const BASE_TABS = [
   { id: 'chat', label: '对话默认', icon: 'cpu' },
   { id: 'models', label: '模型服务', icon: 'key' },
   { id: 'rules', label: 'Agent 指令', icon: 'file-text' },
-  { id: 'mcp', label: '插件中心', icon: 'cpu' },
+  { id: 'mcp', label: '插件管理', icon: 'cpu' },
   { id: 'appearance', label: '外观', icon: 'palette' },
   { id: 'account', label: '账号安全', icon: 'user' },
   { id: 'about', label: '应用信息', icon: 'info' },

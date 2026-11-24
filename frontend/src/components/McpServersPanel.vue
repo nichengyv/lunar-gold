@@ -7,9 +7,20 @@
           接入本机 stdio MCP server。命令会在本机启动进程，只添加你信任的 server。
         </div>
       </div>
-      <el-button type="primary" size="small" @click="openCreate">
-        <Icon name="plus" :size="13" /> 添加
-      </el-button>
+      <div class="mcp-header-actions">
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".json,application/json"
+          class="mcp-file-input"
+          @change="importFile"
+        />
+        <el-button size="small" @click="triggerImport">导入文件</el-button>
+        <el-button size="small" :disabled="servers.length === 0" @click="exportConfig">导出配置</el-button>
+        <el-button type="primary" size="small" @click="openCreate">
+          <Icon name="plus" :size="13" /> 添加
+        </el-button>
+      </div>
     </div>
 
     <div v-if="loading" class="mcp-empty">加载中…</div>
@@ -22,7 +33,14 @@
         <div class="mcp-server-title">
           <span class="mcp-name">{{ server.name }}</span>
           <span class="mcp-state" :class="stateClass(server)">{{ stateLabel(server) }}</span>
-          <span v-if="server.connected" class="mcp-tools">{{ server.toolCount }} 个工具</span>
+          <button
+            v-if="server.connected"
+            class="mcp-tools mcp-tools-btn"
+            :class="{ open: expandedId === server.id }"
+            @click="toggleTools(server)"
+          >
+            {{ server.toolCount }} 个工具 {{ expandedId === server.id ? '▴' : '▾' }}
+          </button>
         </div>
         <div class="mcp-command">{{ server.command }} {{ server.args.join(' ') }}</div>
         <div v-if="server.envKeys.length" class="mcp-env">
@@ -30,6 +48,16 @@
         </div>
         <div v-if="server.lastError" class="mcp-error">
           <Icon name="alert" :size="12" /> {{ server.lastError }}
+        </div>
+        <div v-if="expandedId === server.id" class="mcp-tool-list">
+          <div v-if="toolsLoading" class="mcp-tool-empty">加载中…</div>
+          <div v-else-if="toolCache[server.id]?.length" class="mcp-tool-rows">
+            <div v-for="t in toolCache[server.id]" :key="t.name" class="mcp-tool-row">
+              <span class="mcp-tool-name">{{ t.name }}</span>
+              <span class="mcp-tool-desc">{{ t.description || '无描述' }}</span>
+            </div>
+          </div>
+          <div v-else class="mcp-tool-empty">没有可用工具，或连接尚未就绪。</div>
         </div>
       </div>
 
@@ -39,7 +67,12 @@
           :disabled="busyId === server.id"
           @change="(value: boolean) => toggle(server, value)"
         />
-        <button class="mcp-icon-btn" title="重连" :disabled="busyId === server.id" @click="reload(server)">
+        <button
+          class="mcp-icon-btn"
+          title="测试连接"
+          :disabled="busyId === server.id"
+          @click="reload(server)"
+        >
           <Icon name="refresh" :size="13" />
         </button>
         <button class="mcp-icon-btn" title="编辑" @click="openEdit(server)">
@@ -158,6 +191,10 @@ const clearEnv = ref(false);
 const addMode = ref<'json' | 'form'>('json');
 const jsonText = ref('');
 const jsonError = ref('');
+const fileInput = ref<HTMLInputElement | null>(null);
+const expandedId = ref<number | null>(null);
+const toolsLoading = ref(false);
+const toolCache = reactive<Record<number, mcpApi.McpToolInfo[]>>({});
 
 /** 仅「新增」支持 JSON 粘贴；编辑走表单（凭证值不回显，无法还原 JSON） */
 const isJsonMode = computed(() => editingId.value == null && addMode.value === 'json');
@@ -385,12 +422,84 @@ async function reload(server: McpServerConfig) {
   try {
     const updated = await mcpApi.reloadMcpServer(server.id);
     replace(updated);
-    ElMessage.success(updated.connected ? '已重连' : '重连失败，请查看错误信息');
+    delete toolCache[server.id];
+    if (expandedId.value === server.id) {
+      await loadTools(server.id);
+    }
+    if (updated.connected) {
+      ElMessage.success(`连接正常，共 ${updated.toolCount} 个工具`);
+    } else {
+      ElMessage.error(`连接失败：${updated.lastError || '请查看后端日志'}`);
+    }
   } catch (e) {
     ElMessage.error(errorText(e));
   } finally {
     busyId.value = null;
   }
+}
+
+async function loadTools(id: number) {
+  toolsLoading.value = true;
+  try {
+    toolCache[id] = await mcpApi.getMcpServerTools(id);
+  } catch (e) {
+    ElMessage.error(errorText(e));
+  } finally {
+    toolsLoading.value = false;
+  }
+}
+
+async function toggleTools(server: McpServerConfig) {
+  if (expandedId.value === server.id) {
+    expandedId.value = null;
+    return;
+  }
+  expandedId.value = server.id;
+  if (!toolCache[server.id]) {
+    await loadTools(server.id);
+  }
+}
+
+function triggerImport() {
+  fileInput.value?.click();
+}
+
+async function importFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    openCreate();
+    jsonText.value = text;
+    ElMessage.info('已读取配置，检查无误后点保存');
+  } catch {
+    ElMessage.error('读取文件失败');
+  }
+}
+
+function exportConfig() {
+  const mcpServers: Record<string, unknown> = {};
+  for (const server of servers.value) {
+    const env: Record<string, string> = {};
+    server.envKeys.forEach(key => {
+      env[key] = '';
+    });
+    mcpServers[server.name] = {
+      command: server.command,
+      args: server.args,
+      ...(server.envKeys.length ? { env } : {})
+    };
+  }
+  const blob = new Blob([JSON.stringify({ mcpServers }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'mcp-servers.json';
+  link.click();
+  URL.revokeObjectURL(url);
+  ElMessage.success('已导出（环境变量值不会导出，导入后需重新填写）');
 }
 
 async function remove(server: McpServerConfig) {
@@ -407,6 +516,10 @@ async function remove(server: McpServerConfig) {
   try {
     await mcpApi.deleteMcpServer(server.id);
     servers.value = servers.value.filter(item => item.id !== server.id);
+    delete toolCache[server.id];
+    if (expandedId.value === server.id) {
+      expandedId.value = null;
+    }
     ElMessage.success('已删除');
   } catch (e) {
     ElMessage.error(errorText(e));
@@ -632,5 +745,53 @@ function errorText(error: unknown) {
   line-height: 1.5;
   color: #c2410c;
   word-break: break-word;
+}
+.mcp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.mcp-file-input {
+  display: none;
+}
+.mcp-tools-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+.mcp-tools-btn:hover,
+.mcp-tools-btn.open {
+  color: var(--el-color-primary, #409eff);
+}
+.mcp-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  max-height: 220px;
+  overflow: auto;
+}
+.mcp-tool-row {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.mcp-tool-name {
+  flex-shrink: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text);
+}
+.mcp-tool-desc {
+  color: var(--text-muted);
+}
+.mcp-tool-empty {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 </style>

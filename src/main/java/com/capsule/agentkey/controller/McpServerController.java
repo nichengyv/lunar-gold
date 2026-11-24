@@ -5,6 +5,7 @@ import com.capsule.agentkey.config.RequiresCapability;
 import com.capsule.agentkey.dto.ApiResponse;
 import com.capsule.agentkey.dto.McpServerRequest;
 import com.capsule.agentkey.dto.McpServerResponse;
+import com.capsule.agentkey.dto.McpToolInfo;
 import com.capsule.agentkey.service.McpServerService;
 import com.capsule.agentkey.util.CurrentUser;
 import lombok.RequiredArgsConstructor;
@@ -63,6 +64,13 @@ public class McpServerController {
     @RequiresCapability(Capability.MCP_WRITE)
     public ApiResponse<McpServerResponse> reload(@PathVariable Long id) {
         return ApiResponse.success(service.reload(CurrentUser.requireId(), id));
+    }
+
+    /** 工具清单预览：已注册工具的远端原名与描述 */
+    @GetMapping("/{id}/tools")
+    @RequiresCapability(Capability.MCP_READ)
+    public ApiResponse<List<McpToolInfo>> tools(@PathVariable Long id) {
+        return ApiResponse.success(service.tools(CurrentUser.requireId(), id));
     }
 
     @DeleteMapping("/{id}")

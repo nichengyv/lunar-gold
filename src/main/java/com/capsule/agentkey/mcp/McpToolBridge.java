@@ -1,10 +1,12 @@
 package com.capsule.agentkey.mcp;
 
 import com.capsule.agentkey.config.Capability;
+import com.capsule.agentkey.dto.McpToolInfo;
 import com.capsule.agentkey.entity.Project;
 import com.capsule.agentkey.service.ProjectService;
 import com.capsule.agentkey.service.ToolApprovalRegistry;
 import com.capsule.agentkey.service.WorkspaceFileService;
+import com.capsule.agentkey.tool.BaseTool;
 import com.capsule.agentkey.tool.FileChange;
 import com.capsule.agentkey.tool.ToolRegistry;
 import com.capsule.agentkey.tool.ToolResult;
@@ -138,6 +140,16 @@ public class McpToolBridge implements ApplicationRunner {
      */
     public Registration registerManagedServer(McpSyncClient client, String serverName) {
         return registerServer(client, serverName, false);
+    }
+
+    /** 把已注册的完整工具名还原成「远端原名 + 描述」，供 UI 工具清单预览 */
+    public List<McpToolInfo> summarize(String serverName, List<String> fullNames) {
+        String prefix = TOOL_PREFIX + sanitize(serverName) + "_";
+        return fullNames.stream().map(fullName -> {
+            BaseTool tool = toolRegistry.getTool(fullName);
+            String name = fullName.startsWith(prefix) ? fullName.substring(prefix.length()) : fullName;
+            return new McpToolInfo(name, tool == null ? "" : tool.getDescription());
+        }).toList();
     }
 
     /**
