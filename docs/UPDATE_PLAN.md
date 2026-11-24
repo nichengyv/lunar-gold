@@ -1223,23 +1223,31 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 3. 每轮上下文组成可回放（各段 token、裁剪条数）；
 4. R7 L2/L3 数据集 A/B：成功率不下降，token 与耗时退化 <15%。
 
-**非目标**：不引入外部编排框架（LangGraph/AutoGen）；不改 ReAct 主循环与工具协议；不做开放记忆库（复用现有 RAG）；不做自动续跑。
+**非目标与边界（2026-11-24 修订）**：
+
+- 不引入外部编排框架（LangGraph/AutoGen），只借鉴其 checkpointer / interrupt 语义；
+- **不重写 ReAct 控制流与工具协议**；允许在「上下文入口」和「停止链路」增加接入点（读取任务态、写入边界事件、标记中断消息）；
+- **不做启动时自动续跑**（不无感恢复、不自动消耗 token）；保留「显式续跑」：用户点击可继续 `CANCELLED`/`FAILED` 且带 checkpoint 的 Run；
+- 不做开放记忆库，复用现有 RAG；
+- **不新建真实模型评测数据集**；R8 的行为回归必须补 scripted/fixture 确定性用例。
 
 #### 14.12.5 分批
 
 | 批次 | 内容 | 出口 |
 |---|---|---|
-| **R8a 任务边界（P0）** | `agent_run` 增加 `stop_reason`（V27，可空，USER_STOP/FAILED/TIMEOUT）；停止链路写入；新 Run 装载历史前查同会话上一条顶层 Run，若 `CANCELLED/FAILED`：在历史尾部插入 system 段「上一轮已停止/失败，未完成，不要自动续跑，只回答本轮消息」，并仅在「最后一条 assistant 带未回填 tool_call」时裁掉该条；前端「继续」只在有 checkpoint 时显示 | 复现脚本 100% 不调旧工具；`ScriptedAgentLoopTest` 新增 2 例（停止→新话题、正常追问仍可继续）；全量测试绿 |
+| **R8a 任务边界（P0）** | `agent_run` 增加 `stop_reason`（V27，可空，USER_STOP/FAILED/TIMEOUT）；停止链路写入；被停止轮次的最后一条 assistant 消息加 `cancelled` 标记，回放时渲染为「（该轮已被用户中断）」而不是删除；新 Run 装载历史前查同会话上一条顶层 Run，若 `CANCELLED/FAILED`：在历史尾部插入 system 段「上一轮已停止/失败，未完成，不要自动续跑，只回答本轮消息」；`resume` 接受带 checkpoint 的 `CANCELLED`（仍仅手动触发）；前端「继续」只在有 checkpoint 时显示 | 复现脚本 100% 不调旧工具；`ScriptedAgentLoopTest` 新增 3 例（停止→新话题、正常追问仍可继续、CANCELLED 显式续跑）；全量测试绿 |
 | **R8b 结构化任务态（P1）** | `TaskState{objective,status,steps,filesTouched,decisions,openQuestions}` 作为只读投影，来源为 `plan_json` + 工具结果 + 终止原因；拼装顺序固定为 system → TaskState → 摘要 → 最近原文 → 本轮；历史按 `turn_id` 裁剪；工具轨迹压缩为动作+结果摘要 | R7 L2/L3 A/B 达标；任务边界抽检 0 切断 |
 | **R8c 统一管线（P2）** | `ContextPipeline` 单一入口，固定各段预算比例；token 估算替代字符；摘要改为四字段结构；新增 `CONTEXT_REPORT` 事件与只读诊断接口 | 每轮上下文组成 100% 可回放；默认行为可开关回滚 |
 
-R8a 不改主循环、不动工具协议，可独立提交与回滚；R8b/R8c 必须复用 R7 数据集与预注册阈值，不新造评测。
+R8a 不重写控制流、不动工具协议，可独立提交与回滚；R8b/R8c 必须复用 R7 数据集与预注册阈值，不新建真实模型评测。
 
 #### 14.12.6 风险与缓解
 
 | 风险 | 缓解 |
 |---|---|
 | 注入 system 段破坏 provider 前缀缓存 | 只插在历史尾部、仅停止后的首轮注入，影响面限于尾部 |
-| 裁掉尾消息丢失有效信息 | 仅裁「无 tool 结果回填」的半截 assistant 消息，其余保留并加停止标记 |
+| 停止后的半截消息诱导续跑 | 不删除，改为 `cancelled` 标记 + 中性文案「该轮已由用户中断」；仅当带未回填 tool_call 时才裁掉以免协议不完整 |
 | TaskState 与 plan 双写不一致 | TaskState 只读投影，写入仍以 `plan_json` / 事件流为唯一事实源 |
 | 与 R7 评测口径冲突 | 复用同一数据集与预注册阈值，单独提交口径变更并说明理由 |
+| `cancelled` 标记被模型误读为「失败需重试」 | 文案保持中性「该轮已由用户中断」；不提供错误码、不进入失败分级 |
+| 显式续跑 CANCELLED 与「停止」语义冲突 | 仅在用户主动点击时允许；续跑前明确提示将从断点继续，取消仍立即生效 |
