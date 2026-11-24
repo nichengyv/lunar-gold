@@ -1,7 +1,7 @@
 # Lunar Gold（金月）· 项目状态速查
 
 > 进入项目先读这一页；细节按「文档导航」跳转，本文只保留当前状态与产品边界。
-> 更新日期：2026-11-23；基线提交 `205e1d0`（master，已推 GitHub/Gitee）。0.1.3 已于 2026-11-20 发布（tag `v0.1.3` + Release 已公开）；2026-11-23 清理提交：桌面端启动修复/UI 微调/后端接口契约统一（`748e0b4`）+ 0.1.4 插件中心规划文档（`205e1d0`）。**0.1.4 插件管理中心已启动**，从 `feature/0.1.4-plugin-center` 分支开发，设计与 task 清单见 [phase8](phases/phase8/plugin-center.md) 与 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)；**T1–T9 已完成**（DB 字段/传输抽象/catalog/installer/controller/运行时检测/市场目录/前端 UI），后端单测与前端 vue-tsc 均通过，T10–T12 进行中。
+> 更新日期：2026-11-24；基线提交 `31f1fef`（master，已推 GitHub/Gitee）。0.1.3 于 2026-11-20 发布（tag `v0.1.3` + Release 已公开）；**0.1.4 于 2026-11-24 发布**（tag `v0.1.4`，GitHub Release 为草稿，待所有者确认后公开）：插件中心/插件管理器（T1–T12）、安装包内置 Node 运行时、R8a 任务边界与停止原因、决策询问推荐项、拖拽上传与橙色主题等。设计与 task 清单见 [phase8](phases/phase8/plugin-center.md) 与 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)；T11 剩余「桌面真机全功能核对」随发版后统一执行。
 > 后端 **625 tests / 0 failures / 18 skipped**（`mvn clean test`）；前端 **117 tests** 通过，`vue-tsc + vite build` 通过。本次未运行真实模型门禁（L1～L8 真实模型 A/B 仍需单独执行），只有离线/脚本化验证。
 
 ## 一句话定位
@@ -27,7 +27,7 @@ Lunar Gold 是本地优先、可控、可验证的 AI 编程工作台，桌面�
 - 执行中可调用 `ask_user_question` 向用户提问（仅 root agent；等待上限 15 分钟；断线可还原卡片）
 - 崩溃后仅 `RUNNING` 可手动续跑；工具副作用按 at-least-once 语义可能重复执行
 - 尚未支持自动续跑；子智能体默认关闭，仅根 Run 可委派且深度固定为 1
-- 桌面端可在设置页添加本机 stdio MCP server；其命令等同本机进程执行，只应添加可信来源；0.1.4 开发中，方向为「插件管理器」（已安装列表 + 工具清单预览 + 测试连接 + 配置导入导出，引导为弹窗内轻量提示，原在线市场与安装指引页已移除；安装包内置 Node 运行时，npx 类 server 免装环境），见 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)
+- 桌面端可在设置页添加本机 stdio MCP server；其命令等同本机进程执行，只应添加可信来源；0.1.4 起提供「插件管理器」（已安装列表 + 工具清单预览 + 测试连接 + 配置导入导出，引导为弹窗内轻量提示，原在线市场与安装指引页已移除；安装包内置 Node 运行时，npx 类 server 免装环境），见 [UPDATE_PLAN 5.4](UPDATE_PLAN.md)
 - 远程 HTTP/SSE MCP（M2）暂缓，随插件中心阶段 3 统一规划，见 [UPDATE_PLAN 5.3](UPDATE_PLAN.md)
 
 ## 文档导航
