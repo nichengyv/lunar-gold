@@ -609,10 +609,16 @@ public final class ChatStreamBridge implements ReActAgentService.StreamCallback 
                 s3.put("ms", answerMs);
                 segments.add(s3);
                 trace.put("segments", segments);
-                chatService.saveMessage(userId, chatSessionId,
+                ChatMessage savedAssistant = chatService.saveMessage(userId, chatSessionId,
                         ChatMessage.MessageRole.ASSISTANT,
                         fullResponse.toString(), null,
                         mapper.writeValueAsString(trace));
+                // R8a：被用户停止的轮次打标，回放历史时标注为「已由用户中断」
+                Map<String, Object> completionTrace = traceCompletion.get();
+                if (completionTrace != null && "CANCELLED".equals(completionTrace.get("reason"))
+                        && savedAssistant != null && savedAssistant.getId() != null) {
+                    chatService.markCancelled(savedAssistant.getId());
+                }
                 // 批次 B2：会话级自动记忆——每次助手消息后判断是否到了触发点
                 try {
                     memoryService.onAssistantMessage(chatSessionId, userId, apiKey, policy.model());

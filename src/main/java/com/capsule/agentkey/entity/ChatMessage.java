@@ -38,6 +38,10 @@ public class ChatMessage {
     @Column(columnDefinition = "TEXT")
     private String trace;
 
+    /** R8a：该轮被用户中断；回放历史时标注，避免模型把它当成未完成任务继续执行 */
+    @Column(nullable = false)
+    private boolean cancelled;
+
     @CreatedDate
     private LocalDateTime createTime;
 

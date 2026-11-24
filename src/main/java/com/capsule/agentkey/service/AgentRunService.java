@@ -387,7 +387,33 @@ public class AgentRunService {
     public AgentRun cancel(Long runId, String reason) {
         appendInternal(runId, EventType.CANCELED,
                 reason == null ? Map.of() : Map.of("reason", reason));
-        return transition(runId, RunState.CANCELLED, null, null);
+        AgentRun run = transition(runId, RunState.CANCELLED, null, null);
+        // R8a：停止原因只在缺失时补写，避免覆盖 /chat/stop 已写入的 USER_STOP
+        if (run.getStopReason() == null) {
+            run.setStopReason(normalizeStopReason(reason));
+            run = runRepo.save(run);
+        }
+        return run;
+    }
+
+    /** 用户主动停止：把会话内所有活跃 Run 的 stop_reason 立即落库 */
+    @Transactional
+    public int markStopReasonForSession(Long userId, Long sessionId, String stopReason) {
+        int marked = 0;
+        for (AgentRun run : runRepo
+                .findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId)) {
+            if (AgentRun.isTerminal(run.getState())) {
+                break;
+            }
+            run.setStopReason(stopReason);
+            runRepo.save(run);
+            marked++;
+        }
+        return marked;
+    }
+
+    private static String normalizeStopReason(String reason) {
+        return reason != null && reason.toUpperCase().contains("USER_STOP") ? "USER_STOP" : "CANCELLED";
     }
 
     // ---------------------------------------------------------------------
@@ -535,6 +561,29 @@ public class AgentRunService {
     }
 
     /**
+     * R8a：用户可见的续跑条件。
+     *
+     * <p>在「进程重启中断」之外，允许用户对主动停止（CANCELLED + USER_STOP）的 Run 显式续跑：
+     * 误点停止不必重头再来。仍然只接受手动触发，启动时不自动恢复。
+     */
+    public static boolean isResumableByUser(AgentRun run) {
+        if (run == null || run.getCheckpointJson() == null || run.getCheckpointJson().isBlank()) {
+            return false;
+        }
+        return isResumable(run)
+                || (run.getState() == RunState.CANCELLED && "USER_STOP".equals(run.getStopReason()));
+    }
+
+    /** 会话最近一条已终态的顶层 Run（供 R8a 判断上一轮是否已停止/失败） */
+    @Transactional(readOnly = true)
+    public Optional<AgentRun> findLatestTerminalRun(Long userId, Long sessionId) {
+        return runRepo.findByUserIdAndParentRunIdIsNullAndSessionIdOrderByCreateTimeDescIdDesc(userId, sessionId)
+                .stream()
+                .filter(run -> AgentRun.isTerminal(run.getState()))
+                .findFirst();
+    }
+
+    /**
      * R7b：会话最近一次 Run 若可续跑则返回它。
      *
      * <p>只看最近一条：用户已经继续对话后，不再提示续跑更早的中断任务，
@@ -548,7 +597,7 @@ public class AgentRunService {
             return Optional.empty();
         }
         AgentRun latest = runs.get(0);
-        return isResumable(latest) ? Optional.of(latest) : Optional.empty();
+        return isResumableByUser(latest) ? Optional.of(latest) : Optional.empty();
     }
 
     /**
@@ -565,7 +614,7 @@ public class AgentRunService {
     public AgentRun resumeInterrupted(Long runId) {
         AgentRun run = runRepo.findById(runId).orElseThrow(() ->
                 new IllegalArgumentException("run 不存在：id=" + runId));
-        if (!isResumable(run)) {
+        if (!isResumableByUser(run)) {
             throw new IllegalStateException(
                     String.format("运行不可续跑：runId=%d, state=%s, errorCode=%s",
                             runId, run.getState(), run.getErrorCode()));
@@ -584,7 +633,7 @@ public class AgentRunService {
         payload.put("targetState", RunState.RUNNING);
         payload.put("resumed", true);
         appendInternal(runId, EventType.STATE_CHANGED, payload);
-        log.info("显式续跑运行：runId={}, from=FAILED/PROCESS_RESTARTED", runId);
+        log.info("显式续跑运行：runId={}, from={}", runId, from);
         return saved;
     }
 }

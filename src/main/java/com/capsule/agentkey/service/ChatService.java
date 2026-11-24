@@ -309,6 +309,15 @@ public class ChatService {
         return messageRepo.save(msg);
     }
 
+    /** R8a：标记某条助手消息所在轮次被用户中断 */
+    @Transactional
+    public void markCancelled(Long messageId) {
+        messageRepo.findById(messageId).ifPresent(msg -> {
+            msg.setCancelled(true);
+            messageRepo.save(msg);
+        });
+    }
+
     @Transactional
     public void deleteSession(Long sessionId, Long userId) {
         ChatSession session = sessionRepo.findById(sessionId)

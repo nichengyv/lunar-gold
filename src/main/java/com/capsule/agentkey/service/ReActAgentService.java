@@ -1011,7 +1011,12 @@ public class ReActAgentService {
                 ChatMessage msg = history.get(i);
                 ObjectNode node = mapper.createObjectNode();//用JSON库创建json节点
                 node.put("role", msg.getRole().name().toLowerCase());//设置角色
-                node.put("content", msg.getContent());//设置消息内容
+                // R8a：被用户中断的轮次显式标注，避免模型当成未完成任务继续执行
+                String historyContent = msg.getContent();
+                if (msg.isCancelled()) {
+                    historyContent = (historyContent == null ? "" : historyContent) + "\n（该轮已由用户中断）";
+                }
+                node.put("content", historyContent);//设置消息内容
                 messages.add(node);
             }
         }

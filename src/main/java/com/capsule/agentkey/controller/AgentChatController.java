@@ -230,6 +230,8 @@ public class AgentChatController {
             log.error("加载历史消息失败", e);
             history = null;
         }
+        // R8a：上一轮被用户停止或失败时，显式告诉模型不要自动续跑旧任务
+        history = appendTaskBoundaryNote(history, userId, chatSessionId);
 
         try {
             String msgContent = (prompt != null && !prompt.isEmpty()) ? prompt : "[文件提问]";
@@ -360,8 +362,8 @@ public class AgentChatController {
         Long userId = CurrentUser.requireId();
         AgentRun run = agentRunService.findByIdAndUserId(runId, userId)
                 .orElseThrow(() -> new BusinessException("运行不存在或不属于当前用户"));
-        if (!AgentRunService.isResumable(run)) {
-            throw new BusinessException("该运行不可续跑：仅支持进程重启中断且已留下断点的任务");
+        if (!AgentRunService.isResumableByUser(run)) {
+            throw new BusinessException("该运行不可续跑：仅支持进程重启中断或用户主动停止且已留下断点的任务");
         }
         Long sessionId = run.getSessionId();
         if (sessionId == null) {
@@ -481,7 +483,7 @@ public class AgentChatController {
         result.put("promptTokens", run.getPromptTokens());
         result.put("completionTokens", run.getCompletionTokens());
         result.put("totalTokens", run.getTotalTokens());
-        result.put("resumable", AgentRunService.isResumable(run));
+        result.put("resumable", AgentRunService.isResumableByUser(run));
         result.put("events", events);
         return ApiResponse.success(result);
     }
@@ -507,6 +509,18 @@ public class AgentChatController {
     }
 
     /**
+     * R8a：上一轮已停止/失败时，在历史尾部补一条 system 段。
+     * 只影响本轮模型输入，不落库、不展示，避免把「任务已作废」误当成新的用户指令。
+     */
+    private List<ChatMessage> appendTaskBoundaryNote(List<ChatMessage> history, Long userId, Long sessionId) {
+        String previousState = agentRunService.findLatestTerminalRun(userId, sessionId)
+                .map(run -> run.getState().name())
+                .orElse(null);
+        return com.capsule.agentkey.agent.run.TaskBoundaryNote
+                .appendIfUnfinished(history, userId, sessionId, previousState);
+    }
+
+    /**
      * 停止生成：置位该会话全部活跃 Run 的取消标记。
      * P6-06：客户端断流已不再等于取消，长命令执行期间也没有 SSE 写出，
      * 所以必须通过这个接口显式停止，ReAct 循环与子进程才会尽快结束。
@@ -519,6 +533,8 @@ public class AgentChatController {
             //校验归属，避免用别人的 sessionId 打断别人的生成
             chatService.getOwnedSession(sessionId, userId);
             generationRegistry.cancel(sessionId);
+            // R8a：把「用户主动停止」立即落到 Run 上，供下一轮判断上一轮已作废
+            agentRunService.markStopReasonForSession(userId, sessionId, "USER_STOP");
             //第六十八批 A2：同时拒绝该会话所有待审批，唤醒 ReAct 线程
             toolApprovalRegistry.cancelSession(sessionId);
         }

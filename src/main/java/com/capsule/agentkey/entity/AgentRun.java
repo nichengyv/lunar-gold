@@ -104,6 +104,10 @@ public class AgentRun {
     @Column(columnDefinition = "TEXT")
     private String errorMessage;
 
+    /** R8a：停止原因（USER_STOP / CANCELLED），只对 CANCELLED 终态有意义 */
+    @Column(length = 32)
+    private String stopReason;
+
     /** P4-07：本 run 累计输入 token */
     private long promptTokens;
 

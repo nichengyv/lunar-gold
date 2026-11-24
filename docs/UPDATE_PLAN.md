@@ -1235,7 +1235,7 @@ views/        ChatView（布局与挂载；暂仍承担较多交互编排）
 
 | 批次 | 内容 | 出口 |
 |---|---|---|
-| **R8a 任务边界（P0）** | `agent_run` 增加 `stop_reason`（V27，可空，USER_STOP/FAILED/TIMEOUT）；停止链路写入；被停止轮次的最后一条 assistant 消息加 `cancelled` 标记，回放时渲染为「（该轮已被用户中断）」而不是删除；新 Run 装载历史前查同会话上一条顶层 Run，若 `CANCELLED/FAILED`：在历史尾部插入 system 段「上一轮已停止/失败，未完成，不要自动续跑，只回答本轮消息」；`resume` 接受带 checkpoint 的 `CANCELLED`（仍仅手动触发）；前端「继续」只在有 checkpoint 时显示 | 复现脚本 100% 不调旧工具；`ScriptedAgentLoopTest` 新增 3 例（停止→新话题、正常追问仍可继续、CANCELLED 显式续跑）；全量测试绿 |
+| **R8a 任务边界（P0）✅ 2026-11-24** | `agent_run` 增加 `stop_reason`（V27，可空，USER_STOP/FAILED/TIMEOUT）；停止链路写入；被停止轮次的最后一条 assistant 消息加 `cancelled` 标记，回放时渲染为「（该轮已被用户中断）」而不是删除；新 Run 装载历史前查同会话上一条顶层 Run，若 `CANCELLED/FAILED`：在历史尾部插入 system 段「上一轮已停止/失败，未完成，不要自动续跑，只回答本轮消息」；`resume` 接受带 checkpoint 的 `CANCELLED`（仍仅手动触发）；前端「继续」只在有 checkpoint 时显示 | 复现脚本 100% 不调旧工具；`ScriptedAgentLoopTest` 新增 3 例（停止→新话题、正常追问仍可继续、CANCELLED 显式续跑）；全量测试绿 |
 | **R8b 结构化任务态（P1）** | `TaskState{objective,status,steps,filesTouched,decisions,openQuestions}` 作为只读投影，来源为 `plan_json` + 工具结果 + 终止原因；拼装顺序固定为 system → TaskState → 摘要 → 最近原文 → 本轮；历史按 `turn_id` 裁剪；工具轨迹压缩为动作+结果摘要 | R7 L2/L3 A/B 达标；任务边界抽检 0 切断 |
 | **R8c 统一管线（P2）** | `ContextPipeline` 单一入口，固定各段预算比例；token 估算替代字符；摘要改为四字段结构；新增 `CONTEXT_REPORT` 事件与只读诊断接口 | 每轮上下文组成 100% 可回放；默认行为可开关回滚 |
 
@@ -1251,3 +1251,14 @@ R8a 不重写控制流、不动工具协议，可独立提交与回滚；R8b/R8c
 | 与 R7 评测口径冲突 | 复用同一数据集与预注册阈值，单独提交口径变更并说明理由 |
 | `cancelled` 标记被模型误读为「失败需重试」 | 文案保持中性「该轮已由用户中断」；不提供错误码、不进入失败分级 |
 | 显式续跑 CANCELLED 与「停止」语义冲突 | 仅在用户主动点击时允许；续跑前明确提示将从断点继续，取消仍立即生效 |
+
+#### 14.12.7 落地记录
+
+##### R8a 任务边界（2026-11-24）
+
+- **迁移 V27**：`agent_run.stop_reason`（可空）与 `chat_message.cancelled`（NOT NULL DEFAULT FALSE）；启动时 Flyway 已应用（schema 到 v27）。
+- **停止链路**：`/chat/stop` 立即把会话内活跃 Run 写为 `USER_STOP`；取消收尾走 `cancelIfActive` 时补写 stop_reason，且不覆盖已写入的 `USER_STOP`。
+- **上下文**：新一轮装载历史后由 `TaskBoundaryNote` 判断最近终态 Run，若为 `CANCELLED/FAILED` 则追加一条 system 段；被中断轮次的助手消息在 `buildMessages` 回放时追加「（该轮已由用户中断）」。
+- **显式续跑**：`isResumableByUser` 接受 `FAILED/PROCESS_RESTARTED` 或 `CANCELLED + USER_STOP`，且必须有 checkpoint；`/resume`、`resumable-run`、`runEvents.resumable` 同步切换；仍只由用户点击触发。
+- **验证**：新增 `AgentRunStopReasonTest`（4）、`TaskBoundaryNoteTest`（4）；连同 `ChatStreamBridgeTest`（8）、`AgentRunServiceTest`（19）、`ScriptedAgentLoopTest`（7）、`PublicApiContractTest`（5）共 **47 tests / 0 failures**；`mvn package` 与桌面后端启动通过。
+- **未验证**：真实模型「停止→换话题」端到端未跑；工具轨迹结构化回放归 R8b。
