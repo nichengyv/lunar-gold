@@ -598,7 +598,7 @@ body {
     max-width: 76%;
     margin-right: 6%;
     padding: 10px 16px;
-    background: var(--primary);
+    background: var(--primary-strong);
     color: white;
     border-radius: 16px;
     border-bottom-right-radius: 4px;
@@ -1359,7 +1359,7 @@ body {
 
 .btn-send {
     padding: 11px 24px;
-    background: var(--primary);
+    background: var(--primary-strong);
     color: white;
     border: none;
     border-radius: 12px;
@@ -1371,7 +1371,7 @@ body {
 }
 .btn-send.btn-mini {
   padding: 5px 8px;
-  background: var(--primary);
+  background: var(--primary-strong);
   color: white;
   font-size: 0;
   min-width: 30px;
