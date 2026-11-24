@@ -1,6 +1,6 @@
 {
     "name":  "lunargold-desktop",
-    "version":  "0.1.3",
+    "version":  "0.1.4",
     "private":  true,
     "description":  "Lunar Gold（金月）桌面壳（Electron）",
     "author":  "Lunar Gold Project",
