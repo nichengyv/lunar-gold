@@ -113,6 +113,8 @@ export interface ApprovalRequest {
 export interface UserQuestionOption {
   label: string;
   description?: string;
+  /** 模型推荐项：未选择时点提交默认采用它 */
+  recommended?: boolean;
 }
 export interface UserQuestion {
   /** 稳定 id，用户回答时回传用于关联 */

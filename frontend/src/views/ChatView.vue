@@ -287,7 +287,7 @@
                   ref="inputEl"
                   v-model="inputText"
                   rows="1"
-                  placeholder="输入消息，/ 查看命令，@ 引用文件或资料..."
+                  :placeholder="chat.pendingUserQuestion ? '选择上方选项，或直接输入你的回答…' : '输入消息，/ 查看命令，@ 引用文件或资料...'"
                   @keydown="onKeydown"
                   @input="autoResize"
                   @click="onInputClick"
@@ -1538,6 +1538,25 @@ function autoResize(e: Event) {
 
 async function onSend() {
   const raw = inputText.value;
+  // agent 正在等回答：输入框内容作为本次决策询问的回答，而不是新消息
+  const pendingQuestion = chat.pendingUserQuestion;
+  if (pendingQuestion) {
+    const answer = raw.trim();
+    if (!answer) return; // 空输入不下发，选完选项可直接点卡片里的提交
+    const key = draftKey.value;
+    inputText.value = '';
+    closeMention();
+    if (inputEl.value) inputEl.value.style.height = 'auto';
+    try {
+      await chat.answerUserQuestion(pendingQuestion.runId, pendingQuestion.questionId, [], answer);
+      chat.clearDraftChips(key);
+    } catch (e) {
+      inputText.value = answer; // 失败恢复草稿，避免用户白打
+      ElMessage.error('回答提交失败，请重试');
+    }
+    inputEl.value?.focus();
+    return;
+  }
   // 斜杠命令不发给模型，本地执行；生成中也允许切换模型 / 查看帮助
   if (raw.trim().startsWith('/')) {
     runSlashCommand(raw);

@@ -24,6 +24,22 @@ const submitted = ref(false);
 
 const hasOptions = computed(() => (props.question.options?.length ?? 0) > 0);
 
+function isRecommended(opt: { label: string; description?: string; recommended?: boolean }) {
+  return opt.recommended ?? /recommended|推荐/i.test(`${opt.label} ${opt.description ?? ''}`);
+}
+
+/** 未选择时提交采用的默认项：推荐项优先，没有标记则第一项（与后端 markRecommended 保持一致） */
+const defaultOption = computed(() => {
+  const opts = props.question.options ?? [];
+  return opts.find(isRecommended)?.label ?? opts[0]?.label;
+});
+
+const canSubmit = computed(() => {
+  if (submitted.value) return false;
+  if (selected.value.length || custom.value.trim()) return true;
+  return hasOptions.value; // 有选项时不选也能提交，默认采用推荐项
+});
+
 function toggleOption(label: string) {
   if (submitted.value) return;
   if (props.question.multiSelect) {
@@ -41,16 +57,22 @@ function isSelected(label: string) {
 
 async function submit() {
   if (submitted.value) return;
-  if (!props.question.multiSelect && selected.value.length === 0 && !custom.value.trim()) {
-    return; // 必须选或填
+  const customText = custom.value.trim();
+  let picked = selected.value;
+  if (!picked.length && !customText && defaultOption.value) {
+    // 没选也没填：直接采用推荐项，不阻塞流程
+    picked = [defaultOption.value];
+  }
+  if (!picked.length && !customText) {
+    return; // 既无选项也无输入，无法提交
   }
   submitted.value = true;
   try {
     await chat.answerUserQuestion(
       props.question.runId,
       props.question.questionId,
-      selected.value,
-      custom.value.trim() || undefined
+      picked,
+      customText || undefined
     );
   } catch (e) {
     submitted.value = false;
@@ -88,12 +110,12 @@ function onKeydown(e: KeyboardEvent) {
           v-for="opt in question.options"
           :key="opt.label"
           class="userq-option"
-          :class="{ selected: isSelected(opt.label), recommended: opt.label.includes('Recommended') }"
+          :class="{ selected: isSelected(opt.label), recommended: isRecommended(opt) }"
           :disabled="submitted"
           type="button"
           @click="toggleOption(opt.label)"
         >
-          <span class="opt-label">{{ opt.label }}</span>
+          <span class="opt-label">{{ opt.label }}<span v-if="isRecommended(opt)" class="opt-badge">推荐</span></span>
           <span v-if="opt.description" class="opt-desc">{{ opt.description }}</span>
         </button>
       </div>
@@ -112,12 +134,8 @@ function onKeydown(e: KeyboardEvent) {
     </div>
 
     <div class="userq-actions">
-      <span v-if="question.multiSelect" class="userq-hint">可多选</span>
-      <button
-        class="userq-submit"
-        :disabled="submitted || (!selected.length && !custom.trim())"
-        @click="submit"
-      >
+      <span class="userq-hint">{{ question.multiSelect ? '可多选 · ' : '' }}不选则默认推荐项 · 也可直接在输入框输入回答</span>
+      <button class="userq-submit" :disabled="!canSubmit" @click="submit">
         {{ submitted ? '已回答' : '提交回答' }}
       </button>
     </div>
@@ -177,11 +195,19 @@ function onKeydown(e: KeyboardEvent) {
   border-color: var(--primary);
   background: color-mix(in srgb, var(--primary) 8%, var(--surface));
 }
-.userq-option.recommended .opt-label::before {
-  content: '★ ';
-  color: var(--primary);
+.userq-option.recommended {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
 }
 .opt-label { font-weight: 500; }
+.opt-badge {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
 .opt-desc { color: var(--text-tertiary); font-size: 11px; }
 
 .userq-textarea {

@@ -43,7 +43,7 @@
                   <span class="step-detail-text">{{ stepOutput(item.tool) }}</span>
                 </div>
               </div>
-              <!-- 失败时直接给出原因：否则用户只看到「没成功」，排查要翻后端日志 -->
+              <!-- 失败时直接给出原因：否则用户只看到「失败」，排查要翻后端日志 -->
               <div v-if="item.tool.status === 'error'" class="step-error">
                 {{ truncate(stepError(item.tool), 200) }}
               </div>
@@ -502,7 +502,7 @@ function stepState(tool: ToolInvocation): string {
     const elapsed = toolElapsed(tool);
     return elapsed ? `进行中 · ${elapsed}` : '进行中';
   }
-  return tool.status === 'success' ? '已完成' : '没成功';
+  return tool.status === 'success' ? '已完成' : '失败';
 }
 
 /** 参数摘要：按工具把关键字段翻成人话，未知结构退回压缩后的 JSON；不展开长内容 */

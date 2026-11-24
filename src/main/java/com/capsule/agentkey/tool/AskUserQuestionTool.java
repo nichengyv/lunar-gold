@@ -3,7 +3,10 @@ package com.capsule.agentkey.tool;
 import com.capsule.agentkey.service.ReActAgentService.StreamCallback;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,6 +59,29 @@ public final class AskUserQuestionTool {
     private final Map<Long, Pending> pendingByRunId = new ConcurrentHashMap<>();
 
     /**
+     * 给选项补 {@code recommended} 标记：模型在 label/description 里写 Recommended / 推荐 的即为推荐项；
+     * 一个都没标时默认第一项，保证前端「不选直接提交」时总有一个默认答案。
+     */
+    static List<Map<String, Object>> markRecommended(List<Map<String, Object>> options) {
+        if (options == null || options.isEmpty()) {
+            return List.of();
+        }
+        boolean anyMarked = options.stream().anyMatch(AskUserQuestionTool::isRecommended);
+        List<Map<String, Object>> result = new ArrayList<>(options.size());
+        for (int i = 0; i < options.size(); i++) {
+            Map<String, Object> copy = new LinkedHashMap<>(options.get(i));
+            copy.put("recommended", anyMarked ? isRecommended(options.get(i)) : i == 0);
+            result.add(copy);
+        }
+        return result;
+    }
+
+    private static boolean isRecommended(Map<String, Object> option) {
+        String text = option.get("label") + " " + option.get("description");
+        return text.toLowerCase(Locale.ROOT).contains("recommended") || text.contains("推荐");
+    }
+
+    /**
      * 执行 ask_user_question tool。
      *
      * @param runId           当前 Run id（用于 Controller 回传回答）
@@ -76,8 +102,8 @@ public final class AskUserQuestionTool {
         pendingByRunId.put(runId, new Pending(questionId, future));
 
         // 2. 推 SSE 事件（触发 WAITING_USER_INPUT 状态迁移 + event:user_question）
-        callback.onUserQuestion(questionId, question, header,
-                options == null ? List.of() : List.copyOf(options), multiSelect);
+        List<Map<String, Object>> effectiveOptions = markRecommended(options);
+        callback.onUserQuestion(questionId, question, header, effectiveOptions, multiSelect);
 
         try {
             // 3. 等待用户回答：分片等待，保证 /chat/stop 置位取消标记后 500ms 内就能退出，
