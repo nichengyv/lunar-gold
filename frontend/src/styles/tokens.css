@@ -60,9 +60,9 @@
     --border-strong: #c9ccd1;
 
     /* ---- 品牌与语义色（亮色） ---- */
-    --primary: #1a73e8;
-    --primary-hover: #1557b0;
-    --primary-light: #e8f0fe;
+    --primary: #ea580c;
+    --primary-hover: #c2410c;
+    --primary-light: #fff1e6;
     --on-primary: #ffffff;
     --text: #202124;
     --text-secondary: #5f6368;
@@ -107,9 +107,9 @@
     --border-strong: #4a4a50;
 
     /* ---- 品牌与语义色（暗色，逐项对应亮色） ---- */
-    --primary: #58a6ff;
-    --primary-hover: #79b8ff;
-    --primary-light: #1f6feb33;
+    --primary: #fb923c;
+    --primary-hover: #fdba74;
+    --primary-light: #ea580c33;
     --on-primary: #ffffff;
     --text: #e6e6e8;
     --text-secondary: #9a9aa0;
@@ -140,4 +140,28 @@
     --density-row: 24px;
     --density-gap: 4px;
     --density-pad-y: 4px;
+}
+
+/* ---- Element Plus 主题跟随品牌色（默认蓝 → 主色） ----
+ * EP 的亮色变量声明在 :root，本文件后加载即可覆盖；
+ * 暗色变量由 EP 的 html.dark 提供（权重 0,1,1），
+ * 因此这里用同为 0,1,1 的 html[data-theme="dark"]，靠加载顺序取胜。 */
+:root {
+    --el-color-primary: var(--primary);
+    --el-color-primary-dark-2: var(--primary-hover);
+    --el-color-primary-light-3: color-mix(in srgb, var(--primary) 70%, #fff);
+    --el-color-primary-light-5: color-mix(in srgb, var(--primary) 50%, #fff);
+    --el-color-primary-light-7: color-mix(in srgb, var(--primary) 30%, #fff);
+    --el-color-primary-light-8: color-mix(in srgb, var(--primary) 20%, #fff);
+    --el-color-primary-light-9: color-mix(in srgb, var(--primary) 10%, #fff);
+}
+
+html[data-theme="dark"] {
+    --el-color-primary: var(--primary);
+    --el-color-primary-dark-2: var(--primary-hover);
+    --el-color-primary-light-3: color-mix(in srgb, var(--primary) 70%, #101012);
+    --el-color-primary-light-5: color-mix(in srgb, var(--primary) 50%, #101012);
+    --el-color-primary-light-7: color-mix(in srgb, var(--primary) 30%, #101012);
+    --el-color-primary-light-8: color-mix(in srgb, var(--primary) 20%, #101012);
+    --el-color-primary-light-9: color-mix(in srgb, var(--primary) 10%, #101012);
 }
