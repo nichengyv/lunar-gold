@@ -51,6 +51,7 @@
 
     /* ---- 基础色（亮色） ---- */
     --bg: #f0f2f5;
+    --workbench-bg: #f0f2f5;
     --surface: #ffffff;
     --surface-hover: #f5f6f8;
     --surface-2: #f8f9fa;
@@ -97,6 +98,7 @@
 [data-theme="dark"] {
     /* ---- 基础色（暗色，纯黑灰系，VS Code / Cursor 风格） ---- */
     --bg: #101012;
+    --workbench-bg: #0d0d0f;
     --surface: #1a1a1d;
     --surface-hover: #222226;
     --surface-2: #151517;
